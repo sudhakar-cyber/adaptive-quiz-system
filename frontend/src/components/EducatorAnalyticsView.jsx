@@ -3,7 +3,6 @@ import { EDUCATOR_ANALYTICS_DATA } from '../data/educatorData';
 import {
   ChartIcon,
   TargetIcon,
-  StarIcon,
   ClockIcon,
   CheckCircleIcon
 } from './Icons';

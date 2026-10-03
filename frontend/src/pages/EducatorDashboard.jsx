@@ -15,7 +15,6 @@ import { EducatorNotificationsView } from '../components/EducatorNotificationsVi
 import { EducatorProfileView } from '../components/EducatorProfileView';
 import {
   INITIAL_EDUCATOR_QUIZZES,
-  INITIAL_EDUCATOR_STUDENTS,
   INITIAL_EDUCATOR_NOTIFICATIONS,
   INITIAL_EDUCATOR_PROFILE
 } from '../data/educatorData';
@@ -106,6 +105,11 @@ export const EducatorDashboard = ({ onLogout }) => {
   const handleRemoveStudent = (studentId) => {
     sharedDatabase.removeStudent(studentId);
     showToast('Student removed from active cohort.');
+  };
+
+  const handleResetStudent = (studentId) => {
+    sharedDatabase.resetStudent(studentId);
+    showToast('Student performance data reset successfully.');
   };
 
   const handleUpdateQuizzes = (updated) => {
@@ -291,6 +295,7 @@ export const EducatorDashboard = ({ onLogout }) => {
               externalSearch={searchQuery}
               onAddStudent={handleAddStudent}
               onRemoveStudent={handleRemoveStudent}
+              onResetStudent={handleResetStudent}
             />
           )}
 

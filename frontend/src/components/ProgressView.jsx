@@ -1,12 +1,10 @@
 import React from 'react';
 import {
-  ChartIcon,
   StarIcon,
   FlameIcon,
   TargetIcon,
   CheckCircleIcon,
   TrendingUpIcon,
-  ClockIcon,
   AwardIcon,
   RotateCcwIcon
 } from './Icons';
@@ -18,45 +16,47 @@ export const ProgressView = ({
   quizHistory = [],
   onRetakeQuiz
 }) => {
+  const isReset = quizzesTaken === 0;
+
   const subjectBreakdown = [
     {
       name: 'Mathematics',
-      score: 90,
+      score: isReset ? 0 : 90,
       color: '#00C48C',
-      mastery: 'Mastered',
-      topicsCompleted: '14 / 15 Topics',
+      mastery: isReset ? 'Not Started' : 'Mastered',
+      topicsCompleted: isReset ? '0 / 15 Topics' : '14 / 15 Topics',
       bgLight: '#E6FAF0'
     },
     {
       name: 'Data Structures & Algorithms',
-      score: 82,
+      score: isReset ? 0 : 82,
       color: '#00D2D3',
-      mastery: 'Proficient',
-      topicsCompleted: '12 / 15 Topics',
+      mastery: isReset ? 'Not Started' : 'Proficient',
+      topicsCompleted: isReset ? '0 / 15 Topics' : '12 / 15 Topics',
       bgLight: '#E0FAFA'
     },
     {
       name: 'Python Programming',
-      score: 76,
+      score: isReset ? 0 : 76,
       color: '#FFB900',
-      mastery: 'Intermediate',
-      topicsCompleted: '9 / 12 Topics',
+      mastery: isReset ? 'Not Started' : 'Intermediate',
+      topicsCompleted: isReset ? '0 / 12 Topics' : '9 / 12 Topics',
       bgLight: '#FFF8E6'
     },
     {
       name: 'Web Security',
-      score: 68,
+      score: isReset ? 0 : 68,
       color: '#FF7675',
-      mastery: 'Developing',
-      topicsCompleted: '6 / 10 Topics',
+      mastery: isReset ? 'Not Started' : 'Developing',
+      topicsCompleted: isReset ? '0 / 10 Topics' : '6 / 10 Topics',
       bgLight: '#FFF0F0'
     },
     {
       name: 'Others (Cloud & OS)',
-      score: 60,
+      score: isReset ? 0 : 60,
       color: '#6C5CE7',
-      mastery: 'Foundational',
-      topicsCompleted: '5 / 8 Topics',
+      mastery: isReset ? 'Not Started' : 'Foundational',
+      topicsCompleted: isReset ? '0 / 8 Topics' : '5 / 8 Topics',
       bgLight: '#F3E8FF'
     }
   ];
@@ -207,10 +207,10 @@ export const ProgressView = ({
             <div className="weekly-goal-box">
               <div className="goal-text-row">
                 <span className="goal-title">Weekly Goal: 4 Quizzes</span>
-                <span className="goal-stat">3 of 4 Done</span>
+                <span className="goal-stat">{isReset ? '0 of 4 Done' : '3 of 4 Done'}</span>
               </div>
               <div className="goal-progress-track">
-                <div className="goal-progress-fill" style={{ width: '75%' }} />
+                <div className="goal-progress-fill" style={{ width: isReset ? '0%' : '75%' }} />
               </div>
             </div>
           </div>

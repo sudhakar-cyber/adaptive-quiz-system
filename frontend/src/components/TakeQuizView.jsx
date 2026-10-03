@@ -16,8 +16,7 @@ export const TakeQuizView = ({
   onStartQuiz,
   externalSearch = '',
   completedQuizIds = [],
-  isRecommendedView = false,
-  onSwitchToAll
+  isRecommendedView = false
 }) => {
   const [selectedCategory, setSelectedCategory] = useState(() =>
     isRecommendedView ? 'Recommended' : 'All'

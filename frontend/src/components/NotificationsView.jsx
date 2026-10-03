@@ -5,8 +5,6 @@ import {
   FlameIcon,
   StarIcon,
   TrophyIcon,
-  BookOpenIcon,
-  ClockIcon,
   XIcon
 } from './Icons';
 

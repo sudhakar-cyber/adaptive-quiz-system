@@ -677,5 +677,32 @@ export const TrashIcon = ({ className = '', size = 16, color = 'currentColor' })
   </svg>
 );
 
+export const BotIcon = ({ className = '', size = 20, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <path d="M12 2V5M9 2H15" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+    <rect x="4" y="6" width="16" height="13" rx="4" stroke={color} strokeWidth="2"/>
+    <circle cx="9" cy="11.5" r="1.5" fill={color}/>
+    <circle cx="15" cy="11.5" r="1.5" fill={color}/>
+    <path d="M9 15C9.5 16 10.5 16.5 12 16.5C13.5 16.5 14.5 16 15 15" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+    <path d="M2 13H4M20 13H22" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+  </svg>
+);
+
+export const SendIcon = ({ className = '', size = 18, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <path d="M22 2L11 13" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+export const SparklesIcon = ({ className = '', size = 20, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <path d="M12 3L14.3 8.3L20 10.5L14.3 12.7L12 18L9.7 12.7L4 10.5L9.7 8.3L12 3Z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M19 16L20.2 18.8L23 20L20.2 21.2L19 24L17.8 21.2L15 20L17.8 18.8L19 16Z" fill={color}/>
+  </svg>
+);
+
+
+
 
 

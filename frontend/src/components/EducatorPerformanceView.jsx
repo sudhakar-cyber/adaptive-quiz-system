@@ -8,13 +8,15 @@ import {
   UserPlusIcon,
   TrashIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const EducatorPerformanceView = ({
   students = [],
   showToast,
   externalSearch = '',
   onAddStudent,
-  onRemoveStudent
+  onRemoveStudent,
+  onResetStudent
 }) => {
   const [searchQuery, setSearchQuery] = useState(externalSearch);
   const [statusFilter, setStatusFilter] = useState('All');
@@ -23,6 +25,7 @@ export const EducatorPerformanceView = ({
   const [feedbackInput, setFeedbackInput] = useState('');
   const [openAddModal, setOpenAddModal] = useState(false);
   const [studentToRemove, setStudentToRemove] = useState(null);
+  const [studentToReset, setStudentToReset] = useState(null);
   const [newStudentForm, setNewStudentForm] = useState({
     name: '',
     email: '',
@@ -487,6 +490,33 @@ export const EducatorPerformanceView = ({
     setStudentToRemove(null);
   };
 
+  const handleConfirmReset = () => {
+    if (studentToReset) {
+      if (onResetStudent) {
+        onResetStudent(studentToReset.id);
+      } else {
+        sharedDatabase.resetStudent(studentToReset.id);
+      }
+      if (selectedStudent && selectedStudent.id === studentToReset.id) {
+        setSelectedStudent((prev) => ({
+          ...prev,
+          quizzesCompleted: 0,
+          avgScore: 0,
+          highestScore: 0,
+          status: 'On Track',
+          statusVariant: 'info',
+          lastActive: 'Reset just now',
+          recentSubmissions: [],
+          subjectMastery: (prev.subjectMastery || []).map((m) => ({ ...m, score: 0 }))
+        }));
+      }
+      if (showToast) {
+        showToast(`Performance progress for ${studentToReset.name} has been reset.`);
+      }
+    }
+    setStudentToReset(null);
+  };
+
   const renderStatusBadge = (status) => {
     let bg = '#ECFDF5';
     let color = '#065F46';
@@ -809,6 +839,18 @@ export const EducatorPerformanceView = ({
                           </svg>
                           <span>PDF</span>
                         </button>
+                        <button
+                          type="button"
+                          className="educator-reset-btn sm"
+                          onClick={() => setStudentToReset(student)}
+                          title={`Reset ${student.name}'s performance records`}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                            <path d="M3 3v5h5" />
+                          </svg>
+                          <span>Reset</span>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -877,6 +919,18 @@ export const EducatorPerformanceView = ({
                     <path d="M9 15l3 3 3-3"></path>
                   </svg>
                   <span>Download PDF</span>
+                </button>
+                <button
+                  type="button"
+                  className="educator-reset-btn sm"
+                  onClick={() => setStudentToReset(selectedStudent)}
+                  title="Reset Student Performance"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                  <span>Reset</span>
                 </button>
                 <button
                   type="button"
@@ -1181,6 +1235,50 @@ export const EducatorPerformanceView = ({
                 onClick={handleConfirmRemove}
               >
                 Confirm Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Confirm Reset Performance Modal */}
+      {studentToReset && (
+        <div className="educator-modal-overlay" onClick={() => setStudentToReset(null)}>
+          <div
+            className="educator-modal-box"
+            style={{ maxWidth: '440px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="educator-modal-header">
+              <h3 className="educator-card-title" style={{ margin: 0, color: '#EA580C' }}>
+                Reset Student Performance?
+              </h3>
+              <button
+                type="button"
+                className="educator-modal-close-btn"
+                onClick={() => setStudentToReset(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <p style={{ fontSize: '0.86rem', color: '#475569', lineHeight: 1.5, margin: '14px 0' }}>
+              Are you sure you want to reset all quiz progress and performance records for <strong>{studentToReset.name}</strong> ({studentToReset.email})?
+              Their average score, completed quizzes, and recent submissions will be reset to initial state.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+              <button
+                type="button"
+                className="educator-secondary-btn"
+                onClick={() => setStudentToReset(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="educator-reset-confirm-btn"
+                onClick={handleConfirmReset}
+              >
+                Confirm Reset
               </button>
             </div>
           </div>

@@ -4,7 +4,6 @@ import {
   MailIcon,
   PhoneIcon,
   EditIcon,
-  CheckCircleIcon,
   LogoutIcon,
   CameraIcon,
   XIcon

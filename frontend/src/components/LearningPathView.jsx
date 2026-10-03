@@ -2,12 +2,9 @@ import React from 'react';
 import {
   BookOpenIcon,
   CheckCircleIcon,
-  ClockIcon,
   LockIcon,
-  StarIcon,
   PlayIcon,
-  AwardIcon,
-  TrophyIcon
+  AwardIcon
 } from './Icons';
 
 export const LearningPathView = ({ onStartQuizByTopic }) => {

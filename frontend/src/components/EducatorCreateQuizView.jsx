@@ -2,10 +2,8 @@ import React, { useState } from 'react';
 import {
   ListIcon,
   CheckCircleIcon,
-  ClockIcon,
   TrashIcon,
-  ArrowLeftIcon,
-  CheckIcon
+  ArrowLeftIcon
 } from './Icons';
 
 export const EducatorCreateQuizView = ({

@@ -20,11 +20,12 @@ import {
   ChevronDownIcon,
   CheckCircleIcon,
   FlameIcon,
-  AwardIcon
+  BotIcon
 } from './Icons';
 import { QUIZ_CATALOG, INITIAL_NOTIFICATIONS, INITIAL_HISTORY } from '../data/quizData';
 import { QuizModal } from './QuizModal';
 import { TakeQuizView } from './TakeQuizView';
+import { AIChatBotView } from './AIChatBotView';
 import { ProgressView } from './ProgressView';
 import { LearningPathView } from './LearningPathView';
 import { NotificationsView, NotificationsDropdown } from './NotificationsView';
@@ -60,6 +61,10 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
 
   const [completedQuizzes, setCompletedQuizzes] = useState(() => {
     try {
+      const student = sharedDatabase.getStudentByUsername(username);
+      if (student && student.quizzesCompleted === 0) {
+        return [];
+      }
       const saved = localStorage.getItem('learnsmart_completed_quizzes');
       return saved ? JSON.parse(saved) : [];
     } catch {
@@ -81,26 +86,114 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     return currentStudent?.quizzesCompleted !== undefined ? currentStudent.quizzesCompleted : 18;
   });
   const [averageScore, setAverageScore] = useState(() => {
-    return currentStudent?.avgScore !== undefined && currentStudent.avgScore > 0 ? currentStudent.avgScore : 85.4;
+    return currentStudent?.avgScore !== undefined ? currentStudent.avgScore : 85.4;
   });
-  const [streakDays, setStreakDays] = useState(7);
+  const [streakDays, setStreakDays] = useState(() => {
+    return currentStudent?.quizzesCompleted === 0 ? 0 : 7;
+  });
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
-  const [quizHistory, setQuizHistory] = useState(INITIAL_HISTORY);
+  const [quizHistory, setQuizHistory] = useState(() => {
+    if (currentStudent?.quizzesCompleted === 0) {
+      return [];
+    }
+    return INITIAL_HISTORY;
+  });
 
   useEffect(() => {
     if (username) {
       setCurrentUsername(username);
-      const profile = sharedDatabase.getStudentByUsername(username);
-      if (profile) {
-        if (profile.quizzesCompleted !== undefined) {
-          setTotalQuizzesTaken(profile.quizzesCompleted);
-        }
-        if (profile.avgScore !== undefined && profile.avgScore > 0) {
-          setAverageScore(profile.avgScore);
-        }
-      }
     }
   }, [username]);
+
+  // Synchronize student data in real-time when educator resets or modifies student
+  useEffect(() => {
+    const handleStudentSync = () => {
+      const profile = sharedDatabase.getStudentByUsername(currentUsername || username);
+      if (profile) {
+        setTotalQuizzesTaken(profile.quizzesCompleted ?? 0);
+        setAverageScore(profile.avgScore ?? 0);
+
+        if (profile.quizzesCompleted === 0) {
+          setCompletedQuizzes([]);
+          setQuizHistory([]);
+          setStreakDays(0);
+          setActiveQuizModal(null);
+          try {
+            localStorage.removeItem('learnsmart_completed_quizzes');
+            localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
+            localStorage.removeItem('learnsmart_active_quiz_attempt');
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      }
+    };
+
+    const handleResetEvent = (e) => {
+      const resetInfo = e?.detail;
+      const currentProfile = sharedDatabase.getStudentByUsername(currentUsername || username);
+
+      const isMatch =
+        !resetInfo ||
+        !resetInfo.studentId ||
+        (currentProfile && currentProfile.id === resetInfo.studentId) ||
+        (resetInfo.email && currentProfile?.email && resetInfo.email.toLowerCase() === currentProfile.email.toLowerCase()) ||
+        (resetInfo.name && (currentUsername || '').toLowerCase().includes(resetInfo.name.toLowerCase()));
+
+      if (isMatch) {
+        setTotalQuizzesTaken(0);
+        setAverageScore(0);
+        setCompletedQuizzes([]);
+        setQuizHistory([]);
+        setStreakDays(0);
+        setActiveQuizModal(null);
+
+        try {
+          localStorage.removeItem('learnsmart_completed_quizzes');
+          localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
+          localStorage.removeItem('learnsmart_active_quiz_attempt');
+        } catch (err) {
+          console.warn(err);
+        }
+
+        const resetNotif = {
+          id: Date.now(),
+          title: 'Quiz Progress Reset by Educator',
+          message: 'Your educator has reset your quiz attempts and scores. All quizzes are now unlocked for retaking!',
+          category: 'system',
+          timestamp: 'Just now',
+          unread: true
+        };
+        setNotifications((prev) => [resetNotif, ...prev]);
+        showToast('🔄 Your educator has reset your quiz progress. All quizzes are unlocked!');
+      }
+    };
+
+    const handleStorageChange = (e) => {
+      if (
+        !e.key ||
+        e.key === 'learnsmart_shared_students' ||
+        e.key === 'learnsmart_educator_students' ||
+        e.key === 'learnsmart_last_reset_student' ||
+        e.key === 'learnsmart_completed_quizzes'
+      ) {
+        handleStudentSync();
+      }
+    };
+
+    const unsubscribe = sharedDatabase.subscribe(handleStudentSync);
+    window.addEventListener('learnsmart_student_reset', handleResetEvent);
+    window.addEventListener('storage', handleStorageChange);
+
+    // Run initial sync check
+    handleStudentSync();
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('learnsmart_student_reset', handleResetEvent);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [currentUsername, username]);
 
   const notifDropdownRef = useRef(null);
   const profileDropdownRef = useRef(null);
@@ -142,33 +235,60 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
 
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
 
-  const weekPerformanceData = [
-    { day: 'Mon', score: 32, avg: 22 },
-    { day: 'Tue', score: 45, avg: 28 },
-    { day: 'Wed', score: 54, avg: 35 },
-    { day: 'Thu', score: 58, avg: 42 },
-    { day: 'Fri', score: 68, avg: 50 },
-    { day: 'Sat', score: 76, avg: 58 },
-    { day: 'Sun', score: 86, avg: 64 }
-  ];
+  const isZeroQuizzes = totalQuizzesTaken === 0;
 
-  const monthPerformanceData = [
-    { day: 'W1', score: 62, avg: 48 },
-    { day: 'W2', score: 71, avg: 55 },
-    { day: 'W3', score: 80, avg: 61 },
-    { day: 'W4', score: 88, avg: 68 }
-  ];
+  const weekPerformanceData = isZeroQuizzes
+    ? [
+        { day: 'Mon', score: 0, avg: 0 },
+        { day: 'Tue', score: 0, avg: 0 },
+        { day: 'Wed', score: 0, avg: 0 },
+        { day: 'Thu', score: 0, avg: 0 },
+        { day: 'Fri', score: 0, avg: 0 },
+        { day: 'Sat', score: 0, avg: 0 },
+        { day: 'Sun', score: 0, avg: 0 }
+      ]
+    : [
+        { day: 'Mon', score: 32, avg: 22 },
+        { day: 'Tue', score: 45, avg: 28 },
+        { day: 'Wed', score: 54, avg: 35 },
+        { day: 'Thu', score: 58, avg: 42 },
+        { day: 'Fri', score: 68, avg: 50 },
+        { day: 'Sat', score: 76, avg: 58 },
+        { day: 'Sun', score: 86, avg: 64 }
+      ];
+
+  const monthPerformanceData = isZeroQuizzes
+    ? [
+        { day: 'W1', score: 0, avg: 0 },
+        { day: 'W2', score: 0, avg: 0 },
+        { day: 'W3', score: 0, avg: 0 },
+        { day: 'W4', score: 0, avg: 0 }
+      ]
+    : [
+        { day: 'W1', score: 62, avg: 48 },
+        { day: 'W2', score: 71, avg: 55 },
+        { day: 'W3', score: 80, avg: 61 },
+        { day: 'W4', score: 88, avg: 68 }
+      ];
 
   const activePerformanceData =
     performanceTimeframe === 'week' ? weekPerformanceData : monthPerformanceData;
 
-  const subjectProgress = [
-    { name: 'Mathematics', score: 90, color: '#00C48C', pct: 0.28 },
-    { name: 'Data Structures', score: 82, color: '#00D2D3', pct: 0.24 },
-    { name: 'Python', score: 76, color: '#FFB900', pct: 0.20 },
-    { name: 'Web Security', score: 68, color: '#FF7675', pct: 0.16 },
-    { name: 'Others', score: 60, color: '#6C5CE7', pct: 0.12 }
-  ];
+  const subjectProgress = isZeroQuizzes
+    ? [
+        { name: 'Mathematics', score: 0, color: '#00C48C', pct: 0.2 },
+        { name: 'Data Structures', score: 0, color: '#00D2D3', pct: 0.2 },
+        { name: 'Python', score: 0, color: '#FFB900', pct: 0.2 },
+        { name: 'Web Security', score: 0, color: '#FF7675', pct: 0.2 },
+        { name: 'Others', score: 0, color: '#6C5CE7', pct: 0.2 }
+      ]
+    : [
+        { name: 'Mathematics', score: 90, color: '#00C48C', pct: 0.28 },
+        { name: 'Data Structures', score: 82, color: '#00D2D3', pct: 0.24 },
+        { name: 'Python', score: 76, color: '#FFB900', pct: 0.20 },
+        { name: 'Web Security', score: 68, color: '#FF7675', pct: 0.16 },
+        { name: 'Others', score: 60, color: '#6C5CE7', pct: 0.12 }
+      ];
 
   const chartW = 350;
   const chartH = 150;
@@ -461,9 +581,9 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
                 setActiveTab('recommended');
               }}
             >
-              <PlayIcon size={18} />
+              <BotIcon size={19} />
               <span>Recommended Quizzes</span>
-              <span className="sidebar-badge-ai">AI</span>
+              <span className="sidebar-badge-ai">AI Chat</span>
             </button>
 
             <button
@@ -526,7 +646,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
           </div>
         </aside>
 
-        <main className="dashboard-content">
+        <main className={`dashboard-content ${activeTab === 'recommended' ? 'dashboard-content-chat' : ''}`}>
           {activeTab === 'dashboard' && (
             <>
               <section className="dashboard-greeting-banner">
@@ -645,7 +765,9 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
                     </div>
 
                     <div className="performance-header-meta-row">
-                      <span className="panel-subtitle-stat">Peak: 86% • Avg: 64%</span>
+                      <span className="panel-subtitle-stat">
+                        Peak: {isZeroQuizzes ? '0%' : '86%'} • Avg: {isZeroQuizzes ? '0%' : '64%'}
+                      </span>
                       <div className="chart-legend">
                         <span className="legend-item">
                           <span className="legend-line line-solid" />
@@ -997,14 +1119,25 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
             </>
           )}
 
-          {(activeTab === 'take-quiz' || activeTab === 'recommended') && (
+          {activeTab === 'take-quiz' && (
             <TakeQuizView
               quizzes={QUIZ_CATALOG}
               onStartQuiz={handleStartQuiz}
               externalSearch={searchQuery}
               completedQuizIds={completedQuizzes}
-              isRecommendedView={activeTab === 'recommended'}
+              isRecommendedView={false}
               onSwitchToAll={() => setActiveTab('take-quiz')}
+            />
+          )}
+
+          {activeTab === 'recommended' && (
+            <AIChatBotView
+              username={displayName}
+              quizzes={QUIZ_CATALOG}
+              onStartQuiz={handleStartQuiz}
+              onBackToDashboard={() => setActiveTab('dashboard')}
+              onSwitchToAllQuizzes={() => setActiveTab('take-quiz')}
+              completedQuizIds={completedQuizzes}
             />
           )}
 

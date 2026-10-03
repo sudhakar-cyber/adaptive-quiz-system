@@ -4,7 +4,7 @@ import { NavbarLogo } from '../components/NavbarLogo';
 import { FeatureList } from '../components/FeatureItem';
 import { LoginForm } from '../components/LoginForm';
 import { RegisterForm } from '../components/RegisterForm';
-import { OtpVerification } from '../components/OtpVerification';
+import { OAuthVerification } from '../components/OAuthVerification';
 import { authService } from '../services/authService';
 import deskIllustration from '../assets/desk_illustration_feathered.png';
 
@@ -35,12 +35,12 @@ export const Login = ({ onLoginSuccess }) => {
   const handleRegisterSuccess = (userData) => {
     setRegisteredUser(userData);
     setLoginNotice('');
-    setCurrentView('otp');
+    setCurrentView('oauth');
   };
 
-  const handleOtpSuccess = () => {
-    setLoginNotice('OTP verified successfully! Please sign in with your password to continue.');
-    setCurrentView('login');
+  const handleOAuthSuccess = (verifiedUser) => {
+    const student = verifiedUser || registeredUser;
+    handleLoginSuccess(student?.name || 'Student', 'student', student);
   };
 
   return (
@@ -103,11 +103,12 @@ export const Login = ({ onLoginSuccess }) => {
                 onRegisterSuccess={handleRegisterSuccess}
               />
             )}
-            {currentView === 'otp' && (
-              <OtpVerification
-                email={registeredUser?.email || 'student@learnsmart.edu'}
-                onConfirmSuccess={handleOtpSuccess}
+            {currentView === 'oauth' && (
+              <OAuthVerification
+                registeredUser={registeredUser}
+                onOAuthSuccess={handleOAuthSuccess}
                 onBackToRegister={() => setCurrentView('register')}
+                onSwitchToLogin={() => setCurrentView('login')}
               />
             )}
           </div>

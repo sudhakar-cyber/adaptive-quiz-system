@@ -298,6 +298,69 @@ export const sharedDatabase = {
     return updated.filter((s) => s.isActive !== false);
   },
 
+  // Educator resets a student's performance metrics & unlocks quizzes
+  resetStudent: (studentIdOrIdentifier) => {
+    const all = loadStoredStudents();
+    let idx = all.findIndex((s) => s.id === studentIdOrIdentifier);
+    if (idx === -1 && typeof studentIdOrIdentifier === 'string') {
+      const lower = studentIdOrIdentifier.trim().toLowerCase();
+      idx = all.findIndex(
+        (s) =>
+          (s.email && s.email.toLowerCase() === lower) ||
+          (s.name && s.name.toLowerCase() === lower)
+      );
+    }
+
+    if (idx !== -1) {
+      const targetStudent = all[idx];
+      all[idx] = {
+        ...targetStudent,
+        quizzesCompleted: 0,
+        avgScore: 0,
+        highestScore: 0,
+        status: 'On Track',
+        statusVariant: 'info',
+        lastActive: 'Reset just now',
+        recentSubmissions: [],
+        subjectMastery: (targetStudent.subjectMastery || []).map((m) => ({ ...m, score: 0 }))
+      };
+      persistStudents(all);
+
+      // Clear student's completed quiz locks so all quizzes unlock in student dashboard
+      try {
+        localStorage.removeItem('learnsmart_completed_quizzes');
+        localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
+        localStorage.removeItem('learnsmart_active_quiz_attempt');
+        localStorage.setItem(
+          'learnsmart_last_reset_student',
+          JSON.stringify({
+            studentId: targetStudent.id,
+            name: targetStudent.name,
+            email: targetStudent.email,
+            timestamp: Date.now()
+          })
+        );
+      } catch (err) {
+        console.warn('Failed to clear quiz storage on reset:', err);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('learnsmart_student_reset', {
+            detail: {
+              studentId: targetStudent.id,
+              name: targetStudent.name,
+              email: targetStudent.email
+            }
+          })
+        );
+      }
+
+      return all[idx];
+    }
+    return null;
+  },
+
   // Update existing student metrics (e.g. after quiz completion)
   updateStudent: (studentId, updates) => {
     const all = loadStoredStudents();
