@@ -11,6 +11,8 @@ export const QUIZ_CATALOG = [
     questionsCount: 5,
     questionsLabel: '5 Questions',
     duration: '5 mins',
+    isRecommended: true,
+    recommendationReason: 'Daily Adaptive Challenge • Maintain learning streak',
     description: 'Test your understanding of core Python syntax, variables, lists, and functions.',
     questions: [
       {
@@ -62,6 +64,8 @@ export const QUIZ_CATALOG = [
     questionsCount: 5,
     questionsLabel: '5 Questions',
     duration: '8 mins',
+    isRecommended: true,
+    recommendationReason: 'Priority Focus • Strengthen lowest scoring area (68%)',
     description: 'Learn and test key security principles, OWASP Top 10 defenses, and authentication.',
     questions: [
       {
@@ -128,6 +132,8 @@ export const QUIZ_CATALOG = [
     questionsCount: 5,
     questionsLabel: '5 Questions',
     duration: '10 mins',
+    isRecommended: true,
+    recommendationReason: 'High Impact • Essential for technical interview prep',
     description: 'Master time complexities, tree traversals, graphs, and optimal searching algorithms.',
     questions: [
       {
@@ -223,6 +229,8 @@ export const QUIZ_CATALOG = [
     questionsCount: 4,
     questionsLabel: '4 Questions',
     duration: '7 mins',
+    isRecommended: true,
+    recommendationReason: 'Skill Expansion • Modern frontend web development',
     description: 'Evaluate your knowledge of Promises, async/await, closures, and modern ES features.',
     questions: [
       {

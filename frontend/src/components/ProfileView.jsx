@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   UserIcon,
   MailIcon,
@@ -17,11 +18,14 @@ import {
   UploadIcon,
   TrashIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const ProfileView = ({
   displayName = 'Shaik Aathif',
   userInitials = 'SA',
   profileImage = null,
+  startInEditMode = false,
+  onEditClosed,
   onUpdateProfile,
   onLogout
 }) => {
@@ -36,17 +40,76 @@ export const ProfileView = ({
     setTempAvatar(profileImage);
   }, [profileImage]);
 
-  const [formData, setFormData] = useState({
-    fullName: displayName,
-    email: 'shaik.aathif@learnsmart.edu',
-    phone: '+91 98765 43210',
-    major: 'Computer Science & Engineering',
-    studentId: 'LS-2024-8841',
-    semester: 'Year 3 (Semester 6)',
-    bio: 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
-    targetGoal: 'Aiming for Software Engineering Internships at top technology companies in 2027.'
+  const [formData, setFormData] = useState(() => {
+    try {
+      const saved = localStorage.getItem('learnsmart_student_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            fullName: displayName || parsed.fullName || 'Shaik Aathif',
+            email: parsed.email || 'shaik.aathif@learnsmart.edu',
+            phone: parsed.phone || '+91 98765 43210',
+            major: parsed.major || 'Computer Science & Engineering',
+            studentId: parsed.studentId || 'LS-2024-8841',
+            semester: parsed.semester || 'Year 3 (Semester 6)',
+            bio: parsed.bio || 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
+            targetGoal: parsed.targetGoal || 'Aiming for Software Engineering Internships at top technology companies in 2027.'
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse saved student profile', e);
+    }
+    return {
+      fullName: displayName || 'Shaik Aathif',
+      email: 'shaik.aathif@learnsmart.edu',
+      phone: '+91 98765 43210',
+      major: 'Computer Science & Engineering',
+      studentId: 'LS-2024-8841',
+      semester: 'Year 3 (Semester 6)',
+      bio: 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
+      targetGoal: 'Aiming for Software Engineering Internships at top technology companies in 2027.'
+    };
   });
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+
+  // Sync with prop if display name changes
+  useEffect(() => {
+    if (displayName && !formData.fullName) {
+      setFormData((prev) => ({ ...prev, fullName: displayName }));
+    }
+  }, [displayName]);
+
+  // Handle external trigger to open edit modal (e.g. from dropdown)
+  useEffect(() => {
+    if (startInEditMode) {
+      setTempAvatar(currentAvatar);
+      setFileError('');
+      setIsEditing(true);
+      if (onEditClosed) {
+        onEditClosed();
+      }
+    }
+  }, [startInEditMode, currentAvatar, onEditClosed]);
+
+  // Handle escape key and body scroll lock
+  useEffect(() => {
+    if (!isEditing) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsEditing(false);
+      }
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isEditing]);
 
   const avatarInitials = (() => {
     const name = formData.fullName || displayName;
@@ -98,10 +161,29 @@ export const ProfileView = ({
     e.preventDefault();
     setCurrentAvatar(tempAvatar);
 
+    try {
+      localStorage.setItem('learnsmart_student_profile', JSON.stringify(formData));
+      const student =
+        sharedDatabase.getStudentByUsername(formData.fullName) ||
+        sharedDatabase.getStudentByEmail(formData.email);
+      if (student) {
+        sharedDatabase.updateStudent(student.id, {
+          name: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          studentId: formData.studentId,
+          topSubject: formData.major
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to save student profile', err);
+    }
+
     if (onUpdateProfile) {
       onUpdateProfile({
         fullName: formData.fullName,
-        profileImage: tempAvatar
+        profileImage: tempAvatar,
+        profileData: formData
       });
     }
 
@@ -199,6 +281,7 @@ export const ProfileView = ({
             type="button"
             className="profile-edit-button"
             onClick={handleOpenEdit}
+            title="Edit Student Profile"
           >
             <EditIcon size={15} />
             <span>Edit Profile</span>
@@ -210,6 +293,15 @@ export const ProfileView = ({
         <div className="profile-info-card">
           <div className="section-card-header">
             <h3 className="section-card-title">Academic & Contact Information</h3>
+            <button
+              type="button"
+              className="section-card-action-btn"
+              onClick={handleOpenEdit}
+              title="Edit Academic & Contact Information"
+            >
+              <EditIcon size={13} />
+              <span>Edit Details</span>
+            </button>
           </div>
 
           <div className="profile-details-list">
@@ -279,183 +371,203 @@ export const ProfileView = ({
               <ShieldIcon size={16} color="#10B981" />
               <span>Two-Factor Authentication Active</span>
             </div>
-            <button
-              type="button"
-              className="profile-logout-action-btn"
-              onClick={onLogout}
-            >
-              <LogoutIcon size={16} />
-              <span>Sign Out of LearnSmart</span>
-            </button>
           </div>
         </div>
       </div>
 
-      {isEditing && (
-        <div className="profile-modal-backdrop" role="dialog" aria-modal="true">
-          <div className="profile-modal-card">
-            <div className="profile-modal-header">
-              <h3 className="profile-modal-title">Edit Student Profile</h3>
-              <button
-                type="button"
-                className="profile-modal-close"
-                onClick={() => setIsEditing(false)}
-                aria-label="Close"
+      {typeof document !== 'undefined' && isEditing
+        ? createPortal(
+            <div
+              className="profile-modal-backdrop"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="profile-modal-title"
+              onClick={() => setIsEditing(false)}
+            >
+              <div
+                className="profile-modal-card"
+                onClick={(e) => e.stopPropagation()}
               >
-                <XIcon size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveProfile} className="profile-modal-form">
-              <div className="avatar-upload-section">
-                <div className="avatar-preview-box">
-                  {tempAvatar ? (
-                    <img
-                      src={tempAvatar}
-                      alt="Avatar Preview"
-                      className="avatar-preview-img"
-                    />
-                  ) : (
-                    <span>{avatarInitials}</span>
-                  )}
+                <div className="profile-modal-header">
+                  <div className="profile-modal-title-wrap">
+                    <h3 id="profile-modal-title" className="profile-modal-title">
+                      Edit Student Profile
+                    </h3>
+                    <p className="profile-modal-subtitle">
+                      Update your personal details, academic status, and profile photo
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="profile-modal-close"
+                    onClick={() => setIsEditing(false)}
+                    aria-label="Close edit profile dialog"
+                    title="Close"
+                  >
+                    <XIcon size={18} />
+                  </button>
                 </div>
 
-                <div className="avatar-upload-controls">
-                  <div className="avatar-control-header">
-                    <span className="field-label">Profile Picture</span>
-                    <span className={`avatar-status-pill ${tempAvatar ? 'has-photo' : ''}`}>
-                      {tempAvatar ? 'Custom Photo' : 'Initials Avatar'}
-                    </span>
+                <form onSubmit={handleSaveProfile} className="profile-modal-form">
+                  <div className="avatar-upload-section">
+                    <div className="avatar-preview-box">
+                      {tempAvatar ? (
+                        <img
+                          src={tempAvatar}
+                          alt="Avatar Preview"
+                          className="avatar-preview-img"
+                        />
+                      ) : (
+                        <span>{avatarInitials}</span>
+                      )}
+                    </div>
+
+                    <div className="avatar-upload-controls">
+                      <div className="avatar-control-header">
+                        <span className="field-label">Profile Picture</span>
+                        <span className={`avatar-status-pill ${tempAvatar ? 'has-photo' : ''}`}>
+                          {tempAvatar ? 'Custom Photo' : 'Initials Avatar'}
+                        </span>
+                      </div>
+
+                      <div className="avatar-btn-row">
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          accept="image/*"
+                          onChange={handleFileChange}
+                          style={{ display: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-upload-photo"
+                          onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        >
+                          <UploadIcon size={15} />
+                          <span>{tempAvatar ? 'Change Photo' : 'Upload Photo'}</span>
+                        </button>
+
+                        {tempAvatar && (
+                          <button
+                            type="button"
+                            className="btn-remove-photo"
+                            onClick={handleRemovePhoto}
+                            title="Delete profile picture"
+                          >
+                            <TrashIcon size={14} />
+                            <span>Delete Picture</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <span className="avatar-hint-text">
+                        PNG, JPG, WebP or GIF up to 5MB.
+                      </span>
+
+                      {fileError && <p className="avatar-error-msg">{fileError}</p>}
+                    </div>
                   </div>
 
-                  <div className="avatar-btn-row">
+                  <div className="form-group-field">
+                    <label className="field-label">Full Name *</label>
                     <input
-                      type="file"
-                      ref={fileInputRef}
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      style={{ display: 'none' }}
+                      type="text"
+                      className="field-text-input"
+                      value={formData.fullName}
+                      onChange={(e) => handleInputChange('fullName', e.target.value)}
+                      placeholder="e.g. Shaik Aathif"
+                      required
                     />
+                  </div>
+
+                  <div className="form-row-2col">
+                    <div className="form-group-field">
+                      <label className="field-label">Email Address *</label>
+                      <input
+                        type="email"
+                        className="field-text-input"
+                        value={formData.email}
+                        onChange={(e) => handleInputChange('email', e.target.value)}
+                        placeholder="student@learnsmart.edu"
+                        required
+                      />
+                    </div>
+                    <div className="form-group-field">
+                      <label className="field-label">Phone Number</label>
+                      <input
+                        type="tel"
+                        className="field-text-input"
+                        value={formData.phone}
+                        onChange={(e) => handleInputChange('phone', e.target.value)}
+                        placeholder="+91 98765 43210"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row-2col">
+                    <div className="form-group-field">
+                      <label className="field-label">Department / Major</label>
+                      <input
+                        type="text"
+                        className="field-text-input"
+                        value={formData.major}
+                        onChange={(e) => handleInputChange('major', e.target.value)}
+                        placeholder="Computer Science & Engineering"
+                      />
+                    </div>
+                    <div className="form-group-field">
+                      <label className="field-label">Academic Semester</label>
+                      <input
+                        type="text"
+                        className="field-text-input"
+                        value={formData.semester}
+                        onChange={(e) => handleInputChange('semester', e.target.value)}
+                        placeholder="Year 3 (Semester 6)"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group-field">
+                    <label className="field-label">Short Bio</label>
+                    <textarea
+                      className="field-textarea"
+                      rows={2}
+                      value={formData.bio}
+                      onChange={(e) => handleInputChange('bio', e.target.value)}
+                      placeholder="Tell us about yourself and your academic focus..."
+                    />
+                  </div>
+
+                  <div className="form-group-field">
+                    <label className="field-label">Target Learning Goal</label>
+                    <textarea
+                      className="field-textarea"
+                      rows={2}
+                      value={formData.targetGoal}
+                      onChange={(e) => handleInputChange('targetGoal', e.target.value)}
+                      placeholder="What are your goals this semester?"
+                    />
+                  </div>
+
+                  <div className="profile-modal-actions">
                     <button
                       type="button"
-                      className="btn-upload-photo"
-                      onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                      className="profile-modal-cancel"
+                      onClick={() => setIsEditing(false)}
                     >
-                      <UploadIcon size={15} />
-                      <span>{tempAvatar ? 'Change Photo' : 'Upload Photo'}</span>
+                      Cancel
                     </button>
-
-                    {tempAvatar && (
-                      <button
-                        type="button"
-                        className="btn-remove-photo"
-                        onClick={handleRemovePhoto}
-                        title="Delete profile picture"
-                      >
-                        <TrashIcon size={14} />
-                        <span>Delete Picture</span>
-                      </button>
-                    )}
+                    <button type="submit" className="profile-modal-save">
+                      <CheckCircleIcon size={15} color="#FFFFFF" />
+                      <span>Save Changes</span>
+                    </button>
                   </div>
-
-                  <span className="avatar-hint-text">
-                    PNG, JPG, WebP or GIF up to 5MB.
-                  </span>
-
-                  {fileError && <p className="avatar-error-msg">{fileError}</p>}
-                </div>
+                </form>
               </div>
-
-              <div className="form-group-field">
-                <label className="field-label">Full Name</label>
-                <input
-                  type="text"
-                  className="field-text-input"
-                  value={formData.fullName}
-                  onChange={(e) => handleInputChange('fullName', e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-row-2col">
-                <div className="form-group-field">
-                  <label className="field-label">Email</label>
-                  <input
-                    type="email"
-                    className="field-text-input"
-                    value={formData.email}
-                    onChange={(e) => handleInputChange('email', e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group-field">
-                  <label className="field-label">Phone</label>
-                  <input
-                    type="text"
-                    className="field-text-input"
-                    value={formData.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row-2col">
-                <div className="form-group-field">
-                  <label className="field-label">Department / Major</label>
-                  <input
-                    type="text"
-                    className="field-text-input"
-                    value={formData.major}
-                    onChange={(e) => handleInputChange('major', e.target.value)}
-                  />
-                </div>
-                <div className="form-group-field">
-                  <label className="field-label">Academic Semester</label>
-                  <input
-                    type="text"
-                    className="field-text-input"
-                    value={formData.semester}
-                    onChange={(e) => handleInputChange('semester', e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group-field">
-                <label className="field-label">Short Bio</label>
-                <textarea
-                  className="field-textarea"
-                  rows={2}
-                  value={formData.bio}
-                  onChange={(e) => handleInputChange('bio', e.target.value)}
-                />
-              </div>
-
-              <div className="form-group-field">
-                <label className="field-label">Target Learning Goal</label>
-                <textarea
-                  className="field-textarea"
-                  rows={2}
-                  value={formData.targetGoal}
-                  onChange={(e) => handleInputChange('targetGoal', e.target.value)}
-                />
-              </div>
-
-              <div className="profile-modal-actions">
-                <button
-                  type="button"
-                  className="profile-modal-cancel"
-                  onClick={() => setIsEditing(false)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="profile-modal-save">
-                  <span>Save Profile</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 };
@@ -497,6 +609,18 @@ export const ProfileDropdownMenu = ({
         >
           <UserIcon size={16} />
           <span>My Profile & Settings</span>
+        </button>
+
+        <button
+          type="button"
+          className="dropdown-menu-link"
+          onClick={() => {
+            onNavigate('edit-profile');
+            onClose();
+          }}
+        >
+          <EditIcon size={16} />
+          <span>Edit Student Profile</span>
         </button>
 
         <button

@@ -1,134 +1,108 @@
-import React, { useState } from 'react';
-import { NavbarLogo } from './components/NavbarLogo';
-import { FeatureList } from './components/FeatureItem';
-import { LoginForm } from './components/LoginForm';
-import { RegisterForm } from './components/RegisterForm';
-import { OtpVerification } from './components/OtpVerification';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Login } from './pages/Login';
+import { EducatorDashboard } from './pages/EducatorDashboard';
 import { Dashboard } from './components/Dashboard';
-import deskIllustration from './assets/desk_illustration_feathered.png';
+import { EducatorRoute, StudentRoute, PublicAuthRoute } from './routes/ProtectedRoute';
+import { authService } from './services/authService';
 
-const getStoredUser = () => {
-  try {
-    return localStorage.getItem('learnsmart_user');
-  } catch {
-    return null;
-  }
-};
-
-export function App() {
-  const [currentView, setCurrentView] = useState(() => {
-    return getStoredUser() ? 'dashboard' : 'login';
-  });
-  const [loggedInUser, setLoggedInUser] = useState(() => {
-    return getStoredUser() || '';
-  });
-  const [registeredUser, setRegisteredUser] = useState({
-    email: '',
-    firstName: ''
-  });
-
-  const handleLoginSuccess = (user) => {
-    const username = user || 'Shaik Aathif';
-    setLoggedInUser(username);
+function AppRoutes() {
+  const navigate = useNavigate();
+  const [studentUser, setStudentUser] = useState(() => {
     try {
-      localStorage.setItem('learnsmart_user', username);
-    } catch (err) {
-      console.error('Failed to save session:', err);
+      return localStorage.getItem('learnsmart_user') || 'Shaik Aathif';
+    } catch {
+      return 'Shaik Aathif';
     }
-    setCurrentView('dashboard');
-  };
+  });
 
-  const handleRegisterSuccess = (userData) => {
-    setRegisteredUser(userData);
-    setCurrentView('otp');
-  };
+  // Keep student user synchronized with storage events
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const activeUser = localStorage.getItem('learnsmart_user');
+      if (activeUser) {
+        setStudentUser(activeUser);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
-  const handleOtpSuccess = () => {
-    setLoggedInUser(registeredUser.firstName || 'Shaik Aathif');
-    setCurrentView('login');
-  };
-
-  const handleLogout = () => {
-    try {
-      localStorage.removeItem('learnsmart_user');
-      localStorage.removeItem('learnsmart_avatar');
-    } catch (err) {
-      console.error('Failed to clear session:', err);
+  const handleLoginSuccess = (user, role) => {
+    if (role === 'educator') {
+      authService.loginEducator();
+      navigate('/educator-dashboard');
+    } else {
+      authService.loginStudent(user);
+      setStudentUser(typeof user === 'string' ? user : user?.name || 'Shaik Aathif');
+      navigate('/dashboard');
     }
-    setLoggedInUser('');
-    setCurrentView('login');
   };
 
-  if (currentView === 'dashboard') {
-    return <Dashboard username={loggedInUser} onLogout={handleLogout} />;
-  }
+  const handleEducatorLogout = () => {
+    authService.logout();
+    navigate('/login');
+  };
+
+  const handleStudentLogout = () => {
+    authService.logout();
+    navigate('/login');
+  };
 
   return (
-    <main className="page-wrapper">
-      <div className="bg-ambient-layer" aria-hidden="true">
-        <div className="ambient-blob blob-top-left" />
-        <div className="ambient-blob blob-center" />
-        <div className="ambient-blob blob-bottom-left" />
-      </div>
+    <Routes>
+      {/* Public Auth Routes */}
+      <Route
+        path="/login"
+        element={
+          <PublicAuthRoute>
+            <Login onLoginSuccess={handleLoginSuccess} />
+          </PublicAuthRoute>
+        }
+      />
+      <Route
+        path="/"
+        element={
+          <PublicAuthRoute>
+            <Login onLoginSuccess={handleLoginSuccess} />
+          </PublicAuthRoute>
+        }
+      />
 
-      <div className="page-container">
-        <section className="left-hero-section">
-          <header className="left-header">
-            <NavbarLogo />
-          </header>
+      {/* Role-Protected Educator Dashboard */}
+      <Route
+        path="/educator-dashboard"
+        element={
+          <EducatorRoute>
+            <EducatorDashboard onLogout={handleEducatorLogout} />
+          </EducatorRoute>
+        }
+      />
 
-          <div className="hero-content">
-            <h1 className="hero-title">
-              Better Learning,
-              <br />
-              Smarter Path!
-            </h1>
-            <p className="hero-description">
-              Personalized quizzes, real-time feedback,
-              <br />
-              and smart recommendations for
-              <br />
-              a brighter future.
-            </p>
-
-            <FeatureList />
-          </div>
-
-          <div className="illustration-container">
-            <img
-              src={deskIllustration}
-              alt="Interactive Quiz Dashboard illustration with laptop, analytics and books"
-              className="desk-illustration-image"
-              loading="eager"
+      {/* Role-Protected Student Dashboard */}
+      <Route
+        path="/dashboard"
+        element={
+          <StudentRoute>
+            <Dashboard
+              username={studentUser}
+              onLogout={handleStudentLogout}
             />
-          </div>
-        </section>
+          </StudentRoute>
+        }
+      />
 
-        <section className="right-auth-section">
-          <div className="auth-transition-container" key={currentView}>
-            {currentView === 'login' && (
-              <LoginForm
-                onSwitchToRegister={() => setCurrentView('register')}
-                onLoginSuccess={handleLoginSuccess}
-              />
-            )}
-            {currentView === 'register' && (
-              <RegisterForm
-                onSwitchToLogin={() => setCurrentView('login')}
-                onRegisterSuccess={handleRegisterSuccess}
-              />
-            )}
-            {currentView === 'otp' && (
-              <OtpVerification
-                email={registeredUser.email}
-                onConfirmSuccess={handleOtpSuccess}
-                onBackToRegister={() => setCurrentView('register')}
-              />
-            )}
-          </div>
-        </section>
-      </div>
-    </main>
+      {/* Catch-all route */}
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
+  );
+}
+
+export function App() {
+  return (
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
   );
 }
 

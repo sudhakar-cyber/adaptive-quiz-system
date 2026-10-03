@@ -11,19 +11,41 @@ import {
   FilterIcon
 } from './Icons';
 
-export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
-  const [selectedCategory, setSelectedCategory] = useState('All');
+export const TakeQuizView = ({
+  quizzes,
+  onStartQuiz,
+  externalSearch = '',
+  completedQuizIds = [],
+  isRecommendedView = false,
+  onSwitchToAll
+}) => {
+  const [selectedCategory, setSelectedCategory] = useState(() =>
+    isRecommendedView ? 'Recommended' : 'All'
+  );
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [localSearch, setLocalSearch] = useState('');
 
-  const categories = ['All', 'Programming', 'Cyber Security', 'DSA', 'Mathematics'];
+  React.useEffect(() => {
+    if (isRecommendedView) {
+      setSelectedCategory('Recommended');
+    } else {
+      setSelectedCategory('All');
+    }
+  }, [isRecommendedView]);
+
+  const categories = ['Recommended', 'All', 'Programming', 'Cyber Security', 'DSA', 'Mathematics'];
   const difficulties = ['All', 'Easy', 'Medium', 'Hard'];
 
   const effectiveSearch = (externalSearch || localSearch).trim().toLowerCase();
 
   const filteredQuizzes = quizzes.filter((quiz) => {
-    const matchesCat =
-      selectedCategory === 'All' || quiz.category.toLowerCase() === selectedCategory.toLowerCase();
+    let matchesCat = true;
+    if (selectedCategory === 'Recommended') {
+      matchesCat = quiz.isRecommended === true;
+    } else if (selectedCategory !== 'All') {
+      matchesCat = quiz.category.toLowerCase() === selectedCategory.toLowerCase();
+    }
+
     const matchesDiff =
       selectedDifficulty === 'All' || quiz.difficulty.toLowerCase() === selectedDifficulty.toLowerCase();
     const matchesSearch =
@@ -35,40 +57,72 @@ export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
     return matchesCat && matchesDiff && matchesSearch;
   });
 
-  const getQuizIcon = (category) => {
-    switch (category.toLowerCase()) {
-      case 'programming':
-        return <PythonIcon size={24} />;
-      case 'cyber security':
-        return <ShieldIcon size={24} color="#8B5CF6" />;
-      case 'dsa':
-        return <CodeIcon size={24} color="#1D68F2" />;
-      default:
-        return <TargetIcon size={24} color="#F59E0B" />;
-    }
+  const handleResetFilters = () => {
+    setSelectedCategory(isRecommendedView ? 'Recommended' : 'All');
+    setSelectedDifficulty('All');
+    setLocalSearch('');
   };
+
+  const getQuizIcon = (category) => {
+    const cat = (category || '').toLowerCase();
+    if (cat.includes('program') || cat.includes('python') || cat.includes('javascript')) {
+      return <PythonIcon size={24} />;
+    }
+    if (cat.includes('secur') || cat.includes('cyber')) {
+      return <ShieldIcon size={24} color="#8B5CF6" />;
+    }
+    if (cat.includes('dsa') || cat.includes('algo') || cat.includes('data')) {
+      return <CodeIcon size={24} color="#1D68F2" />;
+    }
+    return <TargetIcon size={24} color="#F59E0B" />;
+  };
+
+  const isShowingRecommendations = selectedCategory === 'Recommended';
 
   return (
     <div className="tab-view-container take-quiz-view">
-      <div className="quiz-hero-banner">
+      <div className={`quiz-hero-banner ${isShowingRecommendations ? 'recommended-hero-banner' : ''}`}>
         <div className="banner-left-info">
           <div className="banner-streak-badge">
-            <FlameIcon size={16} color="#FF6B00" />
-            <span>Daily Adaptive Challenge</span>
+            {isShowingRecommendations ? (
+              <>
+                <StarIcon size={16} color="#F59E0B" />
+                <span>AI Adaptive Recommendations</span>
+              </>
+            ) : (
+              <>
+                <FlameIcon size={16} color="#FF6B00" />
+                <span>Daily Adaptive Challenge</span>
+              </>
+            )}
           </div>
-          <h2 className="banner-title">Ready to challenge your knowledge today?</h2>
+          <h2 className="banner-title">
+            {isShowingRecommendations
+              ? 'Personalized Recommended Quizzes For You'
+              : 'Ready to challenge your knowledge today?'}
+          </h2>
           <p className="banner-subtext">
-            Adaptive quizzes continuously adjust difficulty to your individual performance.
-            Earn double points and advance your learning streak!
+            {isShowingRecommendations
+              ? 'Based on your diagnostic scores, performance history, and curriculum priorities, these adaptive quizzes target your skill gaps and reinforce key concepts.'
+              : 'Adaptive quizzes continuously adjust difficulty to your individual performance. Earn double points and advance your learning streak!'}
           </p>
         </div>
         <div className="banner-right-action">
           <button
             type="button"
             className="banner-cta-button"
-            onClick={() => onStartQuiz(quizzes[0])}
+            onClick={() => {
+              const target =
+                filteredQuizzes.find((q) => !completedQuizIds.includes(q.id)) ||
+                filteredQuizzes[0] ||
+                quizzes[0];
+              onStartQuiz(target);
+            }}
+            title={isShowingRecommendations ? 'Start Top Recommendation' : 'Start Daily Challenge'}
           >
-            <span>Start Daily Challenge</span>
+            <span>
+              {isShowingRecommendations ? 'Start Recommended Quiz' : 'Start Daily Challenge'}
+            </span>
             <span>→</span>
           </button>
         </div>
@@ -80,10 +134,10 @@ export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
             <button
               key={cat}
               type="button"
-              className={`category-pill ${selectedCategory === cat ? 'active' : ''}`}
+              className={`category-pill ${selectedCategory === cat ? 'active' : ''} ${cat === 'Recommended' ? 'recommended-pill' : ''}`}
               onClick={() => setSelectedCategory(cat)}
             >
-              {cat}
+              {cat === 'Recommended' ? '★ Recommended' : cat}
             </button>
           ))}
         </div>
@@ -128,6 +182,11 @@ export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
                 </div>
 
                 <div className="catalog-badges-wrap">
+                  {quiz.isRecommended && (
+                    <span className="quiz-badge badge-rec-tag">
+                      ★ Recommended
+                    </span>
+                  )}
                   <span
                     className="quiz-badge"
                     style={{
@@ -152,6 +211,11 @@ export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
               <div className="catalog-card-body">
                 <h3 className="catalog-quiz-title">{quiz.title}</h3>
                 <p className="catalog-quiz-desc">{quiz.description}</p>
+                {quiz.recommendationReason && (
+                  <div className="quiz-card-rec-reason">
+                    <span>{quiz.recommendationReason}</span>
+                  </div>
+                )}
               </div>
 
               <div className="catalog-meta-row">
@@ -172,11 +236,12 @@ export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
               <div className="catalog-card-footer">
                 <button
                   type="button"
-                  className="start-quiz-full-btn"
+                  className={`start-quiz-full-btn ${completedQuizIds.includes(quiz.id) ? 'completed-btn' : ''}`}
                   onClick={() => onStartQuiz(quiz)}
+                  title={completedQuizIds.includes(quiz.id) ? 'Quiz already completed' : `Start ${quiz.title}`}
                 >
-                  <span>Take Quiz Now</span>
-                  <span>→</span>
+                  <span>{completedQuizIds.includes(quiz.id) ? 'Completed ✓' : 'Take Quiz Now'}</span>
+                  <span>{completedQuizIds.includes(quiz.id) ? '' : '→'}</span>
                 </button>
               </div>
             </div>
@@ -187,11 +252,7 @@ export const TakeQuizView = ({ quizzes, onStartQuiz, externalSearch = '' }) => {
             <button
               type="button"
               className="reset-filters-btn"
-              onClick={() => {
-                setSelectedCategory('All');
-                setSelectedDifficulty('All');
-                setLocalSearch('');
-              }}
+              onClick={handleResetFilters}
             >
               Reset Filters
             </button>

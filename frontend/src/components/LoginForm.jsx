@@ -10,15 +10,32 @@ import {
   ShieldIcon,
   CheckIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
-export const LoginForm = ({ onSwitchToRegister, onLoginSuccess }) => {
-  const [username, setUsername] = useState('');
+export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchToRegister, onLoginSuccess }) => {
+  const [username, setUsername] = useState(initialUsername || '');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [successToast, setSuccessToast] = useState('');
+  const [successToast, setSuccessToast] = useState(successNotice || '');
+
+  React.useEffect(() => {
+    if (initialUsername) {
+      setUsername(initialUsername);
+    }
+  }, [initialUsername]);
+
+  React.useEffect(() => {
+    if (successNotice) {
+      setSuccessToast(successNotice);
+      const timer = setTimeout(() => {
+        setSuccessToast('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [successNotice]);
 
   const showToast = (message) => {
     setSuccessToast(message);
@@ -41,20 +58,100 @@ export const LoginForm = ({ onSwitchToRegister, onLoginSuccess }) => {
       return;
     }
 
-    setIsLoading(true);
+    const trimmedUser = username.trim();
+    const lowerUser = trimmedUser.toLowerCase();
 
+    // Check educator credentials:
+    // Email: Educator@leaensmart.com (also supporting educator@learnsmart.com)
+    // Password: Educator@123
+    const isEducatorTargetEmail =
+      lowerUser === 'educator@leaensmart.com' ||
+      lowerUser === 'educator@learnsmart.com';
+
+    const isEducatorAttempt =
+      isEducatorTargetEmail ||
+      lowerUser === 'educator' ||
+      lowerUser.includes('educator') ||
+      lowerUser.endsWith('@leaensmart.com') ||
+      lowerUser.endsWith('@learnsmart.com') ||
+      password === 'Educator@123';
+
+    if (isEducatorAttempt) {
+      if (isEducatorTargetEmail && password === 'Educator@123') {
+        setIsLoading(true);
+        setTimeout(() => {
+          setIsLoading(false);
+          if (onLoginSuccess) {
+            onLoginSuccess('Dr. Priya S.', 'educator');
+          }
+        }, 500);
+      } else {
+        setErrorMessage('Invalid educator email or password.');
+      }
+      return;
+    }
+
+    // Authenticate student against shared database
+    setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
-      if (onLoginSuccess) {
-        onLoginSuccess(username.trim());
+      const student = sharedDatabase.getStudentByUsername(trimmedUser);
+
+      // Check if student was deactivated by educator
+      if (student && student.isActive === false) {
+        setErrorMessage('This account has been deactivated. Please contact your educator.');
+        return;
+      }
+
+      if (student) {
+        if (student.password && student.password !== password) {
+          setErrorMessage('Incorrect password.');
+          return;
+        }
+        if (onLoginSuccess) {
+          onLoginSuccess(student.name, 'student', student);
+        }
+      } else {
+        // Register newly logging in student to shared database
+        const cleanName = trimmedUser.includes('@')
+          ? trimmedUser.split('@')[0].replace(/[._-]/g, ' ')
+          : trimmedUser;
+        const formattedName = cleanName
+          .split(' ')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+
+        const newStudent = sharedDatabase.registerStudent({
+          name: formattedName || 'Shaik Aathif',
+          email: trimmedUser.includes('@')
+            ? trimmedUser
+            : `${trimmedUser.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
+          password
+        });
+
+        if (onLoginSuccess) {
+          onLoginSuccess(newStudent.name, 'student', newStudent);
+        }
       }
     }, 600);
   };
 
   const handleGoogleLogin = () => {
-    if (onLoginSuccess) {
-      onLoginSuccess('Shaik Aathif');
-    }
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      // Retrieve or register Google student account in shared database
+      const googleStudent = sharedDatabase.registerStudent({
+        name: 'Alex Morgan',
+        firstName: 'Alex',
+        lastName: 'Morgan',
+        email: 'alex.morgan@gmail.com',
+        authProvider: 'google'
+      });
+      if (onLoginSuccess) {
+        onLoginSuccess(googleStudent.name, 'student', googleStudent);
+      }
+    }, 400);
   };
 
   const handleForgotPassword = (e) => {
