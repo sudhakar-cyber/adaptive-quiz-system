@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  XIcon,
   ClockIcon,
   CheckCircleIcon,
   TrophyIcon,
@@ -9,16 +8,161 @@ import {
   ArrowRightIcon,
   AwardIcon
 } from './Icons';
+import { QuizTimer } from './QuizTimer';
+import { SubmitConfirmationModal } from './SubmitConfirmationModal';
 
-export const QuizModal = ({ quiz, onClose, onComplete }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [selectedAnswers, setSelectedAnswers] = useState({});
+export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
+  if (!quiz || !quiz.questions || quiz.questions.length === 0) {
+    return null;
+  }
+
+  const STORAGE_KEY = 'learnsmart_active_quiz_attempt';
+  const COMPLETED_KEY = 'learnsmart_completed_quizzes';
+
+  // Helper to parse duration from quiz data
+  const getInitialDuration = () => {
+    if (typeof quiz.durationInSeconds === 'number') return quiz.durationInSeconds;
+    if (typeof quiz.duration === 'string') {
+      const match = quiz.duration.match(/(\d+)/);
+      if (match) return parseInt(match[1], 10) * 60;
+    }
+    return 300;
+  };
+
+  // Restore saved in-progress attempt if matching this quiz
+  const getSavedAttempt = () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.quizId === quiz.id && parsed.status === 'in-progress') {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to parse saved quiz attempt:', err);
+    }
+    return null;
+  };
+
+  const initialAttempt = getSavedAttempt();
+
+  const [currentIndex, setCurrentIndex] = useState(() => initialAttempt?.currentIndex ?? 0);
+  const [selectedAnswers, setSelectedAnswers] = useState(() => initialAttempt?.selectedAnswers ?? {});
+  const [timeLeft, setTimeLeft] = useState(() => {
+    if (initialAttempt && typeof initialAttempt.timeLeft === 'number') {
+      return initialAttempt.timeLeft;
+    }
+    return getInitialDuration();
+  });
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(300);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showReview, setShowReview] = useState(false);
 
+  // Prevention of duplicate submissions
+  const isSubmittingRef = useRef(false);
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+  const selectedAnswersRef = useRef(selectedAnswers);
+  selectedAnswersRef.current = selectedAnswers;
+  const timeLeftRef = useRef(timeLeft);
+  timeLeftRef.current = timeLeft;
+
+  // Helper to continuously save active quiz attempt to storage
+  const saveActiveAttempt = (idx, answers, time) => {
+    if (isSubmittingRef.current || isSubmitted) return;
+    try {
+      const payload = {
+        quizId: quiz.id,
+        quiz,
+        status: 'in-progress',
+        currentIndex: idx,
+        selectedAnswers: answers,
+        timeLeft: time,
+        lastSavedAt: Date.now()
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (err) {
+      console.warn('Failed to save quiz attempt progress:', err);
+    }
+  };
+
+  // Ensure initial save on mount
+  useEffect(() => {
+    if (!isSubmitted && !isSubmittingRef.current) {
+      saveActiveAttempt(currentIndex, selectedAnswers, timeLeft);
+    }
+  }, []);
+
+  // Save whenever currentIndex or selectedAnswers change
+  useEffect(() => {
+    if (!isSubmitted && !isSubmittingRef.current) {
+      saveActiveAttempt(currentIndex, selectedAnswers, timeLeftRef.current);
+    }
+  }, [currentIndex, selectedAnswers, isSubmitted]);
+
+  // LEAVE PROTECTION: Prompt student when attempting to refresh or close tab
   useEffect(() => {
     if (isSubmitted) return;
+
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = 'You have a test in progress. Are you sure you want to leave?';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isSubmitted]);
+
+  // ONE submission function used by both "Submit Test" confirmation and timer expiration
+  const handleSubmitQuiz = () => {
+    if (isSubmittingRef.current || isSubmitted) return;
+    isSubmittingRef.current = true;
+
+    setShowConfirmModal(false);
+
+    // Calculate result using existing quiz logic
+    const answers = selectedAnswersRef.current;
+    const correctCount = quiz.questions.reduce((acc, q, idx) => {
+      return answers[idx] === q.correctIndex ? acc + 1 : acc;
+    }, 0);
+    const totalQuestions = quiz.questions.length;
+    const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
+
+    // ATTEMPT LOCK: Remove active attempt and record completed quiz ID
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      const existing = JSON.parse(localStorage.getItem(COMPLETED_KEY) || '[]');
+      if (!existing.includes(quiz.id)) {
+        existing.push(quiz.id);
+        localStorage.setItem(COMPLETED_KEY, JSON.stringify(existing));
+      }
+    } catch (err) {
+      console.warn('Failed to lock completed quiz attempt:', err);
+    }
+
+    setIsSubmitted(true);
+
+    // Notify parent component to update stats and history
+    if (onComplete) {
+      onComplete({
+        quizId: quiz.id,
+        quizTitle: quiz.title,
+        category: quiz.category,
+        score: scorePercentage,
+        correctCount,
+        totalQuestions
+      });
+    }
+  };
+
+  // TIMER: Ticks down and triggers handleSubmitQuiz on 00:00
+  useEffect(() => {
+    if (isSubmitted) return;
+
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
@@ -26,18 +170,16 @@ export const QuizModal = ({ quiz, onClose, onComplete }) => {
           handleSubmitQuiz();
           return 0;
         }
-        return prev - 1;
+        const next = prev - 1;
+        saveActiveAttempt(currentIndexRef.current, selectedAnswersRef.current, next);
+        return next;
       });
     }, 1000);
 
     return () => clearInterval(timer);
   }, [isSubmitted]);
 
-  if (!quiz || !quiz.questions || quiz.questions.length === 0) {
-    return null;
-  }
-
-  const currentQ = quiz.questions[currentIndex];
+  const currentQ = quiz.questions[currentIndex] || quiz.questions[0];
   const totalQuestions = quiz.questions.length;
   const answeredCount = Object.keys(selectedAnswers).length;
 
@@ -49,46 +191,38 @@ export const QuizModal = ({ quiz, onClose, onComplete }) => {
     }));
   };
 
-  const handleSubmitQuiz = () => {
-    setIsSubmitted(true);
-  };
-
   const correctCount = quiz.questions.reduce((acc, q, idx) => {
     return selectedAnswers[idx] === q.correctIndex ? acc + 1 : acc;
   }, 0);
   const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
 
-  const formatTime = (secs) => {
-    const mins = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${mins}:${s < 10 ? '0' : ''}${s}`;
-  };
-
   const handleFinishAndSave = () => {
-    if (onComplete) {
-      onComplete({
-        quizId: quiz.id,
-        quizTitle: quiz.title,
-        category: quiz.category,
-        score: scorePercentage,
-        correctCount,
-        totalQuestions
-      });
+    if (onClose) {
+      onClose();
     }
-    onClose();
   };
 
-  const handleRetake = () => {
-    setSelectedAnswers({});
-    setCurrentIndex(0);
-    setIsSubmitted(false);
-    setTimeLeft(300);
-    setShowReview(false);
+  // If student attempts to retake completed quiz, enforce single attempt lock
+  const handleLockedRetake = () => {
+    if (showToast) {
+      showToast('Quiz already completed');
+    } else {
+      alert('Quiz already completed');
+    }
   };
 
   return (
-    <div className="quiz-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="quiz-modal-card">
+    <div
+      className="quiz-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => {
+        // Prevent closing by clicking backdrop while in progress
+        e.stopPropagation();
+      }}
+    >
+      <div className="quiz-modal-card" onClick={(e) => e.stopPropagation()}>
+        {/* Header: Note that Close / Exit button is deliberately omitted during active test */}
         <div className="quiz-modal-header">
           <div className="quiz-header-meta">
             <span
@@ -105,23 +239,9 @@ export const QuizModal = ({ quiz, onClose, onComplete }) => {
 
           <div className="quiz-header-controls">
             {!isSubmitted && (
-              <div
-                className={`quiz-timer-pill ${
-                  timeLeft < 60 ? 'timer-warning' : ''
-                }`}
-              >
-                <ClockIcon size={16} color={timeLeft < 60 ? '#EF4444' : '#1A6BFF'} />
-                <span>{formatTime(timeLeft)}</span>
-              </div>
+              <QuizTimer timeLeft={timeLeft} />
             )}
-            <button
-              type="button"
-              className="quiz-close-button"
-              onClick={onClose}
-              aria-label="Close Quiz"
-            >
-              <XIcon size={18} />
-            </button>
+            {/* Student cannot casually exit during test. Do not show close button while in-progress. */}
           </div>
         </div>
 
@@ -211,10 +331,10 @@ export const QuizModal = ({ quiz, onClose, onComplete }) => {
                 <button
                   type="button"
                   className="quiz-btn-nav quiz-btn-submit"
-                  onClick={handleSubmitQuiz}
+                  onClick={() => setShowConfirmModal(true)}
                 >
                   <CheckCircleIcon size={17} color="#FFFFFF" />
-                  <span>Submit Quiz</span>
+                  <span>Submit Test</span>
                 </button>
               )}
             </div>
@@ -334,10 +454,12 @@ export const QuizModal = ({ quiz, onClose, onComplete }) => {
               <button
                 type="button"
                 className="quiz-action-btn btn-retake"
-                onClick={handleRetake}
+                style={{ opacity: 0.65, cursor: 'not-allowed' }}
+                onClick={handleLockedRetake}
+                title="Quiz already completed"
               >
                 <RotateCcwIcon size={16} />
-                <span>Retake Quiz</span>
+                <span>Quiz already completed</span>
               </button>
 
               <button
@@ -352,6 +474,15 @@ export const QuizModal = ({ quiz, onClose, onComplete }) => {
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal before Final Submission */}
+      <SubmitConfirmationModal
+        isOpen={showConfirmModal}
+        onCancel={() => setShowConfirmModal(false)}
+        onConfirm={handleSubmitQuiz}
+      />
     </div>
   );
 };
+
+export default QuizModal;

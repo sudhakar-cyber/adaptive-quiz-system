@@ -15,6 +15,8 @@ import {
   ChevronDownIcon
 } from './Icons';
 
+import { sharedDatabase } from '../services/sharedDatabase';
+
 const COUNTRIES = [
   'United States',
   'United Kingdom',
@@ -105,17 +107,38 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
 
     setTimeout(() => {
       setIsLoading(false);
+      // Create and persist student profile in the shared database
+      const newStudent = sharedDatabase.registerStudent({
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        password: formData.password,
+        phone: formData.phone,
+        country: formData.country,
+        authProvider: 'local'
+      });
+
       if (onRegisterSuccess) {
-        onRegisterSuccess({
-          email: formData.email,
-          firstName: formData.firstName
-        });
+        onRegisterSuccess(newStudent);
       }
     }, 600);
   };
 
   const handleGoogleSignup = () => {
-    showToast('Connecting with Google sign-up...');
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      const googleStudent = sharedDatabase.registerStudent({
+        name: 'Alex Morgan',
+        firstName: 'Alex',
+        lastName: 'Morgan',
+        email: 'alex.morgan@gmail.com',
+        authProvider: 'google'
+      });
+      if (onRegisterSuccess) {
+        onRegisterSuccess(googleStudent);
+      }
+    }, 400);
   };
 
   return (

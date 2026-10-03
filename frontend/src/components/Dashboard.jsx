@@ -29,6 +29,7 @@ import { ProgressView } from './ProgressView';
 import { LearningPathView } from './LearningPathView';
 import { NotificationsView, NotificationsDropdown } from './NotificationsView';
 import { ProfileView, ProfileDropdownMenu } from './ProfileView';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -40,8 +41,33 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
 
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [startEditProfile, setStartEditProfile] = useState(false);
 
-  const [activeQuizModal, setActiveQuizModal] = useState(null);
+  const [activeQuizModal, setActiveQuizModal] = useState(() => {
+    try {
+      const savedAttempt = localStorage.getItem('learnsmart_active_quiz_attempt');
+      if (savedAttempt) {
+        const parsed = JSON.parse(savedAttempt);
+        if (parsed && parsed.status === 'in-progress' && parsed.quiz) {
+          return parsed.quiz;
+        }
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+    return null;
+  });
+
+  const [completedQuizzes, setCompletedQuizzes] = useState(() => {
+    try {
+      const saved = localStorage.getItem('learnsmart_completed_quizzes');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const currentStudent = sharedDatabase.getStudentByUsername(username);
 
   const [currentUsername, setCurrentUsername] = useState(username || 'Shaik Aathif');
   const [profileImage, setProfileImage] = useState(() => {
@@ -51,11 +77,30 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
       return null;
     }
   });
-  const [totalQuizzesTaken, setTotalQuizzesTaken] = useState(18);
-  const [averageScore, setAverageScore] = useState(85.4);
+  const [totalQuizzesTaken, setTotalQuizzesTaken] = useState(() => {
+    return currentStudent?.quizzesCompleted !== undefined ? currentStudent.quizzesCompleted : 18;
+  });
+  const [averageScore, setAverageScore] = useState(() => {
+    return currentStudent?.avgScore !== undefined && currentStudent.avgScore > 0 ? currentStudent.avgScore : 85.4;
+  });
   const [streakDays, setStreakDays] = useState(7);
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const [quizHistory, setQuizHistory] = useState(INITIAL_HISTORY);
+
+  useEffect(() => {
+    if (username) {
+      setCurrentUsername(username);
+      const profile = sharedDatabase.getStudentByUsername(username);
+      if (profile) {
+        if (profile.quizzesCompleted !== undefined) {
+          setTotalQuizzesTaken(profile.quizzesCompleted);
+        }
+        if (profile.avgScore !== undefined && profile.avgScore > 0) {
+          setAverageScore(profile.avgScore);
+        }
+      }
+    }
+  }, [username]);
 
   const notifDropdownRef = useRef(null);
   const profileDropdownRef = useRef(null);
@@ -164,17 +209,34 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     };
   });
 
-  const recommendedQuizzesList = QUIZ_CATALOG.filter((q) => {
-    if (!searchQuery.trim()) return true;
+  const recommendedQuizzesList = (() => {
+    const list = QUIZ_CATALOG.filter((q) => q.isRecommended);
+    const pool = list.length > 0 ? list : QUIZ_CATALOG;
+    if (!searchQuery.trim()) return pool.slice(0, 3);
     const query = searchQuery.toLowerCase();
-    return (
+    return pool.filter((q) =>
       q.title.toLowerCase().includes(query) ||
       q.category.toLowerCase().includes(query) ||
       q.difficulty.toLowerCase().includes(query)
-    );
-  }).slice(0, 3);
+    ).slice(0, 3);
+  })();
 
-  const handleQuizCompleted = ({ quizTitle, category, score }) => {
+  const handleQuizCompleted = ({ quizId, quizTitle, category, score }) => {
+    if (quizId) {
+      setCompletedQuizzes((prev) => {
+        if (!prev.includes(quizId)) {
+          const next = [...prev, quizId];
+          try {
+            localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify(next));
+          } catch (e) {
+            console.warn(e);
+          }
+          return next;
+        }
+        return prev;
+      });
+    }
+
     setTotalQuizzesTaken((prev) => prev + 1);
 
     setAverageScore((prev) => {
@@ -202,6 +264,15 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     };
     setNotifications((prev) => [newNotif, ...prev]);
 
+    // Record quiz attempt into shared database so Educator Dashboard updates
+    sharedDatabase.recordQuizAttempt({
+      studentName: displayName,
+      studentEmail: currentStudent?.email || `${currentUsername.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
+      quizTitle,
+      score,
+      category
+    });
+
     showToast(`🎉 Quiz Finished! You scored ${score}%`);
   };
 
@@ -215,6 +286,11 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
   };
 
   const handleStartQuiz = (quiz) => {
+    if (!quiz) return;
+    if (completedQuizzes.includes(quiz.id)) {
+      showToast('Quiz already completed');
+      return;
+    }
     setActiveQuizModal(quiz);
   };
 
@@ -222,6 +298,10 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     const found =
       QUIZ_CATALOG.find((q) => q.id === identifier || q.title.toLowerCase() === identifier.toLowerCase()) ||
       QUIZ_CATALOG[0];
+    if (completedQuizzes.includes(found.id)) {
+      showToast('Quiz already completed');
+      return;
+    }
     setActiveQuizModal(found);
   };
 
@@ -336,7 +416,14 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
                 userInitials={userInitials}
                 profileImage={profileImage}
                 onClose={() => setShowProfileDropdown(false)}
-                onNavigate={(tab) => setActiveTab(tab)}
+                onNavigate={(tab) => {
+                  if (tab === 'edit-profile') {
+                    setActiveTab('profile');
+                    setStartEditProfile(true);
+                  } else {
+                    setActiveTab(tab);
+                  }
+                }}
                 onLogout={onLogout}
               />
             )}
@@ -371,12 +458,12 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
               type="button"
               className={`sidebar-nav-item ${activeTab === 'recommended' ? 'active' : ''}`}
               onClick={() => {
-                setActiveTab('take-quiz');
-                showToast('Viewing All Recommended Quizzes');
+                setActiveTab('recommended');
               }}
             >
               <PlayIcon size={18} />
               <span>Recommended Quizzes</span>
+              <span className="sidebar-badge-ai">AI</span>
             </button>
 
             <button
@@ -505,20 +592,29 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
                   </div>
                 </div>
 
-                <div className="dash-stat-card card-purple-tint">
+                <div
+                  className="dash-stat-card card-purple-tint clickable-card"
+                  onClick={() => setActiveTab('recommended')}
+                  role="button"
+                  tabIndex={0}
+                  style={{ cursor: 'pointer' }}
+                >
                   <div className="stat-card-inner">
                     <div className="stat-icon-wrapper stat-icon-purple">
                       <ListIcon size={24} color="#8B5CF6" />
                     </div>
                     <div className="stat-details">
                       <span className="stat-title">Recommended Quizzes</span>
-                      <div className="stat-value">{QUIZ_CATALOG.length}</div>
+                      <div className="stat-value">{QUIZ_CATALOG.filter((q) => q.isRecommended).length}</div>
                       <button
                         type="button"
                         className="stat-action-link"
-                        onClick={() => setActiveTab('take-quiz')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveTab('recommended');
+                        }}
                       >
-                        View All →
+                        View Recommended →
                       </button>
                     </div>
                   </div>
@@ -780,69 +876,122 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
 
                 <div className="dash-panel-card quizzes-panel">
                   <div className="panel-header">
-                    <h2 className="panel-title">Recommended Quizzes</h2>
+                    <div className="panel-header-title-group">
+                      <h2 className="panel-title">Recommended Quizzes</h2>
+                      <span className="panel-badge-purple">AI Adaptive</span>
+                    </div>
                     <button
                       type="button"
                       className="panel-view-all-link"
-                      onClick={() => setActiveTab('take-quiz')}
+                      onClick={() => setActiveTab('recommended')}
+                      title="View all recommended quizzes"
                     >
-                      View All ({QUIZ_CATALOG.length}) →
+                      View All ({QUIZ_CATALOG.filter((q) => q.isRecommended).length}) →
                     </button>
                   </div>
 
-                  <div className="recommended-quizzes-list">
-                    {recommendedQuizzesList.map((quiz) => (
-                      <div key={quiz.id} className="quiz-card-row">
-                        <div className="quiz-icon-box">
-                          {quiz.category === 'Programming' && <PythonIcon size={20} />}
-                          {quiz.category === 'Cyber Security' && (
-                            <ShieldIcon size={20} color="#8B5CF6" />
-                          )}
-                          {quiz.category === 'DSA' && <CodeIcon size={20} color="#1D68F2" />}
-                          {quiz.category === 'Mathematics' && (
-                            <TargetIcon size={20} color="#F59E0B" />
-                          )}
-                        </div>
+                  {recommendedQuizzesList.length === 0 ? (
+                    <div className="recommended-empty-state">
+                      <p className="empty-state-msg">No quizzes match &quot;{searchQuery}&quot;</p>
+                      <button
+                        type="button"
+                        className="empty-state-clear-btn"
+                        onClick={() => setSearchQuery('')}
+                      >
+                        Clear Search
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="recommended-quizzes-list">
+                      {recommendedQuizzesList.map((quiz) => {
+                        const isDone = completedQuizzes.includes(quiz.id);
+                        return (
+                          <div key={quiz.id} className="quiz-card-row">
+                            <div
+                              className="quiz-icon-box"
+                              style={{
+                                backgroundColor: quiz.categoryBg || '#F8FAFC'
+                              }}
+                            >
+                              {quiz.category === 'Programming' && <PythonIcon size={20} />}
+                              {quiz.category === 'Cyber Security' && (
+                                <ShieldIcon size={20} color="#8B5CF6" />
+                              )}
+                              {quiz.category === 'DSA' && <CodeIcon size={20} color="#1D68F2" />}
+                              {quiz.category === 'Mathematics' && (
+                                <TargetIcon size={20} color="#F59E0B" />
+                              )}
+                              {quiz.category !== 'Programming' &&
+                                quiz.category !== 'Cyber Security' &&
+                                quiz.category !== 'DSA' &&
+                                quiz.category !== 'Mathematics' && (
+                                  <TargetIcon size={20} color="#10B981" />
+                                )}
+                            </div>
 
-                        <div className="quiz-info-col">
-                          <h3 className="quiz-item-title">{quiz.title}</h3>
-                          <div className="quiz-meta-badges">
-                            <span
-                              className="quiz-badge"
-                              style={{
-                                backgroundColor: quiz.categoryBg,
-                                color: quiz.categoryColor
-                              }}
-                            >
-                              {quiz.category}
-                            </span>
-                            <span
-                              className="quiz-badge"
-                              style={{
-                                backgroundColor: quiz.diffBg,
-                                color: quiz.diffColor
-                              }}
-                            >
-                              {quiz.difficulty}
-                            </span>
-                            <span className="quiz-questions-count">
-                              {quiz.questionsLabel || `${quiz.questions.length} Questions`}
-                            </span>
+                            <div className="quiz-info-col">
+                              <div className="quiz-row-title-wrap">
+                                <h3 className="quiz-item-title" title={quiz.title}>
+                                  {quiz.title}
+                                </h3>
+                                {quiz.isRecommended && (
+                                  <span className="quiz-mini-rec-badge">★ AI</span>
+                                )}
+                              </div>
+
+                              <div className="quiz-meta-badges">
+                                <span
+                                  className="quiz-badge"
+                                  style={{
+                                    backgroundColor: quiz.categoryBg || '#F1F5F9',
+                                    color: quiz.categoryColor || '#475569'
+                                  }}
+                                >
+                                  {quiz.category}
+                                </span>
+                                <span
+                                  className="quiz-badge"
+                                  style={{
+                                    backgroundColor: quiz.diffBg || '#FEF3C7',
+                                    color: quiz.diffColor || '#B45309'
+                                  }}
+                                >
+                                  {quiz.difficulty}
+                                </span>
+                                <span className="quiz-questions-count">
+                                  {quiz.questionsCount || quiz.questions?.length || 5} Qs • {quiz.duration || '5m'}
+                                </span>
+                              </div>
+
+                              {quiz.recommendationReason && (
+                                <div
+                                  className="quiz-rec-hint-text"
+                                  title={quiz.recommendationReason}
+                                >
+                                  <span className="rec-hint-icon">⚡</span>
+                                  <span className="rec-hint-text-inner">
+                                    {quiz.recommendationReason}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="quiz-action-col">
+                              <button
+                                type="button"
+                                className={`start-quiz-btn ${isDone ? 'completed-btn' : ''}`}
+                                onClick={() => handleStartQuiz(quiz)}
+                                title={isDone ? 'Quiz already completed' : `Start ${quiz.title}`}
+                              >
+                                <span>{isDone ? 'Done ✓' : 'Start'}</span>
+                                {!isDone && <span>→</span>}
+                              </button>
+                            </div>
                           </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="start-quiz-btn"
-                          onClick={() => handleStartQuiz(quiz)}
-                          title={`Start ${quiz.title}`}
-                        >
-                          <span>Start Quiz</span>
-                          <span>→</span>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </section>
             </>
@@ -853,6 +1002,9 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
               quizzes={QUIZ_CATALOG}
               onStartQuiz={handleStartQuiz}
               externalSearch={searchQuery}
+              completedQuizIds={completedQuizzes}
+              isRecommendedView={activeTab === 'recommended'}
+              onSwitchToAll={() => setActiveTab('take-quiz')}
             />
           )}
 
@@ -890,6 +1042,8 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
               displayName={displayName}
               userInitials={userInitials}
               profileImage={profileImage}
+              startInEditMode={startEditProfile}
+              onEditClosed={() => setStartEditProfile(false)}
               onUpdateProfile={(updatedData) => {
                 let updatedName = null;
                 if (typeof updatedData === 'string') {
@@ -931,6 +1085,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
           quiz={activeQuizModal}
           onClose={() => setActiveQuizModal(null)}
           onComplete={handleQuizCompleted}
+          showToast={showToast}
         />
       )}
     </div>

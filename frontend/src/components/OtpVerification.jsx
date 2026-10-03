@@ -115,13 +115,10 @@ export const OtpVerification = ({
 
     setTimeout(() => {
       setIsLoading(false);
-      showToast('OTP verified successfully! Welcome to LearnSmart.');
-      setTimeout(() => {
-        if (onConfirmSuccess) {
-          onConfirmSuccess();
-        }
-      }, 1200);
-    }, 900);
+      if (onConfirmSuccess) {
+        onConfirmSuccess();
+      }
+    }, 400);
   };
 
   const maskedEmail = (() => {
