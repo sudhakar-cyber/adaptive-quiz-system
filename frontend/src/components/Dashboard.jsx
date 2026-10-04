@@ -91,7 +91,14 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
   const [streakDays, setStreakDays] = useState(() => {
     return currentStudent?.quizzesCompleted === 0 ? 0 : 7;
   });
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      const saved = localStorage.getItem('learnsmart_student_notifications');
+      return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+    } catch {
+      return INITIAL_NOTIFICATIONS;
+    }
+  });
   const [quizHistory, setQuizHistory] = useState(() => {
     if (currentStudent?.quizzesCompleted === 0) {
       return [];
@@ -169,6 +176,17 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
       }
     };
 
+    const handleNotificationSync = (e) => {
+      try {
+        const notifs = e?.detail || JSON.parse(localStorage.getItem('learnsmart_student_notifications') || '[]');
+        if (Array.isArray(notifs) && notifs.length > 0) {
+          setNotifications(notifs);
+        }
+      } catch (err) {
+        console.warn('Failed to sync student notifications:', err);
+      }
+    };
+
     const handleStorageChange = (e) => {
       if (
         !e.key ||
@@ -179,10 +197,14 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
       ) {
         handleStudentSync();
       }
+      if (e.key === 'learnsmart_student_notifications') {
+        handleNotificationSync();
+      }
     };
 
     const unsubscribe = sharedDatabase.subscribe(handleStudentSync);
     window.addEventListener('learnsmart_student_reset', handleResetEvent);
+    window.addEventListener('learnsmart_student_notifications_updated', handleNotificationSync);
     window.addEventListener('storage', handleStorageChange);
 
     // Run initial sync check
@@ -191,6 +213,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     return () => {
       unsubscribe();
       window.removeEventListener('learnsmart_student_reset', handleResetEvent);
+      window.removeEventListener('learnsmart_student_notifications_updated', handleNotificationSync);
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [currentUsername, username]);
@@ -382,7 +405,15 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
       timestamp: 'Just now',
       unread: true
     };
-    setNotifications((prev) => [newNotif, ...prev]);
+    setNotifications((prev) => {
+      const updated = [newNotif, ...prev];
+      try {
+        localStorage.setItem('learnsmart_student_notifications', JSON.stringify(updated));
+      } catch (e) {
+        console.warn(e);
+      }
+      return updated;
+    });
 
     // Record quiz attempt into shared database so Educator Dashboard updates
     sharedDatabase.recordQuizAttempt({
@@ -397,12 +428,28 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
   };
 
   const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, unread: false }));
+      try {
+        localStorage.setItem('learnsmart_student_notifications', JSON.stringify(updated));
+      } catch (e) {
+        console.warn(e);
+      }
+      return updated;
+    });
     showToast('All notifications marked as read');
   };
 
   const handleDismissNotification = (id) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setNotifications((prev) => {
+      const updated = prev.filter((n) => n.id !== id);
+      try {
+        localStorage.setItem('learnsmart_student_notifications', JSON.stringify(updated));
+      } catch (e) {
+        console.warn(e);
+      }
+      return updated;
+    });
   };
 
   const handleStartQuiz = (quiz) => {

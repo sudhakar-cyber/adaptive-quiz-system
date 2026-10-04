@@ -1608,3 +1608,202 @@
   font-weight: 700;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
+
+/* ==========================================================================
+   Send Notification Modal & Student Picker
+   ========================================================================== */
+.educator-send-modal-box {
+  background-color: #FFFFFF;
+  border-radius: 20px;
+  max-width: 680px;
+  width: 95%;
+  max-height: 90vh;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalScaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.educator-send-modal-header {
+  padding: 20px 24px 16px 24px;
+  border-bottom: 1px solid #E2E8F0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  background: #FFFFFF;
+}
+
+.educator-send-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: calc(90vh - 150px);
+}
+
+.educator-send-modal-footer {
+  padding: 14px 24px;
+  border-top: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #F8FAFC;
+}
+
+/* Student Picker Card */
+.educator-student-picker-card {
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  background-color: #FFFFFF;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.educator-student-picker-header {
+  padding: 10px 14px;
+  background-color: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.educator-student-picker-search {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+
+.educator-student-picker-search-input {
+  width: 100%;
+  padding: 7px 12px 7px 32px;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  outline: none;
+  background: #FFFFFF;
+  color: #0F172A;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.educator-student-picker-search-input:focus {
+  border-color: #10B981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.12);
+}
+
+.educator-student-picker-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.educator-student-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  border-bottom: 1px solid #F1F5F9;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  gap: 12px;
+}
+
+.educator-student-row:last-child {
+  border-bottom: none;
+}
+
+.educator-student-row:hover {
+  background-color: #F8FAFC;
+}
+
+.educator-student-row.selected {
+  background-color: #F0FDF4;
+}
+
+.educator-student-avatar-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 0.76rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #065F46;
+  background-color: #D1FAE5;
+  border: 1px solid #A7F3D0;
+}
+
+.educator-status-pill {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.educator-status-pill.success {
+  background-color: #ECFDF5;
+  color: #059669;
+}
+
+.educator-status-pill.warning {
+  background-color: #FFFBEB;
+  color: #D97706;
+}
+
+.educator-status-pill.info {
+  background-color: #EFF6FF;
+  color: #2563EB;
+}
+
+/* Preset template chips */
+.educator-preset-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.educator-preset-btn {
+  border: 1px dashed #CBD5E1;
+  background: #F8FAFC;
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: inherit;
+}
+
+.educator-preset-btn:hover {
+  background: #ECFDF5;
+  border-color: #10B981;
+  color: #065F46;
+  transform: translateY(-1px);
+}
+
+.educator-custom-checkbox {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  cursor: pointer;
+  accent-color: #10B981;
+}
+

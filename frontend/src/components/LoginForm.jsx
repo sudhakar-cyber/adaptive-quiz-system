@@ -61,6 +61,35 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
     const trimmedUser = username.trim();
     const lowerUser = trimmedUser.toLowerCase();
 
+    // Check admin credentials:
+    // Email: admin@learnsmart.edu, admin@learnsmart.com, or admin
+    // Password: Admin@123 or admin123
+    const isAdminTargetEmail =
+      lowerUser === 'admin@learnsmart.edu' ||
+      lowerUser === 'admin@learnsmart.com' ||
+      lowerUser === 'admin';
+
+    const isAdminAttempt =
+      isAdminTargetEmail ||
+      lowerUser.includes('admin') ||
+      password === 'Admin@123' ||
+      password === 'admin123';
+
+    if (isAdminAttempt) {
+      if (isAdminTargetEmail && (password === 'Admin@123' || password === 'admin123')) {
+        setIsLoading(true);
+        setTimeout(() => {
+          setIsLoading(false);
+          if (onLoginSuccess) {
+            onLoginSuccess('Admin', 'admin');
+          }
+        }, 500);
+      } else {
+        setErrorMessage('Invalid administrator email or password.');
+      }
+      return;
+    }
+
     // Check educator credentials:
     // Email: Educator@leaensmart.com (also supporting educator@learnsmart.com)
     // Password: Educator@123
@@ -337,6 +366,75 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
             >
               Create an account
             </a>
+          </div>
+
+          {/* Quick Demo Access Bar */}
+          <div style={{ marginTop: '16px', padding: '12px', background: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#64748B', display: 'block', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              ⚡ Quick Demo One-Click Access
+            </span>
+            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setUsername('admin@learnsmart.edu');
+                  setPassword('Admin@123');
+                }}
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #C7D2FE',
+                  background: '#EEF2FF',
+                  color: '#4338CA',
+                  cursor: 'pointer'
+                }}
+                title="Fill Admin Credentials"
+              >
+                🛡️ Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUsername('educator@learnsmart.com');
+                  setPassword('Educator@123');
+                }}
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #A7F3D0',
+                  background: '#ECFDF5',
+                  color: '#065F46',
+                  cursor: 'pointer'
+                }}
+                title="Fill Educator Credentials"
+              >
+                🎓 Educator
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUsername('shaik.aathif@learnsmart.edu');
+                  setPassword('Password@123');
+                }}
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #BAE6FD',
+                  background: '#F0F9FF',
+                  color: '#0369A1',
+                  cursor: 'pointer'
+                }}
+                title="Fill Student Credentials"
+              >
+                📚 Student
+              </button>
+            </div>
           </div>
 
           <div className="security-badge-row">

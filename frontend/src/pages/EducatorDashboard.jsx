@@ -314,6 +314,8 @@ export const EducatorDashboard = ({ onLogout }) => {
             <EducatorNotificationsView
               notifications={notifications}
               onUpdateNotifications={handleUpdateNotifications}
+              students={students}
+              educatorName={profileData.fullName || 'Dr. Priya S.'}
               showToast={showToast}
               onNavigateToTab={setActiveTab}
             />
