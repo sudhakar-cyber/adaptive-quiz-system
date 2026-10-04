@@ -3,7 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-route
 import { Login } from './pages/Login';
 import { EducatorDashboard } from './pages/EducatorDashboard';
 import { Dashboard } from './components/Dashboard';
-import { EducatorRoute, StudentRoute, PublicAuthRoute } from './routes/ProtectedRoute';
+import { AdminDashboard } from './pages/AdminDashboard';
+import { AdminRoute, EducatorRoute, StudentRoute, PublicAuthRoute } from './routes/ProtectedRoute';
 import { authService } from './services/authService';
 
 function AppRoutes() {
@@ -29,7 +30,10 @@ function AppRoutes() {
   }, []);
 
   const handleLoginSuccess = (user, role) => {
-    if (role === 'educator') {
+    if (role === 'admin') {
+      authService.loginAdmin();
+      navigate('/admin-dashboard');
+    } else if (role === 'educator') {
       authService.loginEducator();
       navigate('/educator-dashboard');
     } else {
@@ -37,6 +41,11 @@ function AppRoutes() {
       setStudentUser(typeof user === 'string' ? user : user?.name || 'Shaik Aathif');
       navigate('/dashboard');
     }
+  };
+
+  const handleAdminLogout = () => {
+    authService.logout();
+    navigate('/login');
   };
 
   const handleEducatorLogout = () => {
@@ -51,14 +60,10 @@ function AppRoutes() {
 
   return (
     <Routes>
-      {/* Public Auth Routes */}
+      {/* Login & Landing Routes */}
       <Route
         path="/login"
-        element={
-          <PublicAuthRoute>
-            <Login onLoginSuccess={handleLoginSuccess} />
-          </PublicAuthRoute>
-        }
+        element={<Login onLoginSuccess={handleLoginSuccess} />}
       />
       <Route
         path="/"
@@ -66,6 +71,16 @@ function AppRoutes() {
           <PublicAuthRoute>
             <Login onLoginSuccess={handleLoginSuccess} />
           </PublicAuthRoute>
+        }
+      />
+
+      {/* Role-Protected Admin Dashboard */}
+      <Route
+        path="/admin-dashboard"
+        element={
+          <AdminRoute>
+            <AdminDashboard onLogout={handleAdminLogout} />
+          </AdminRoute>
         }
       />
 

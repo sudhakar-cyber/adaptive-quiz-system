@@ -14,7 +14,13 @@ export const Login = ({ onLoginSuccess }) => {
   const navigate = useNavigate();
 
   const handleLoginSuccess = (user, role = 'student', studentObj = null) => {
-    if (role === 'educator') {
+    if (role === 'admin') {
+      authService.loginAdmin();
+      if (onLoginSuccess) {
+        onLoginSuccess('Admin', 'admin');
+      }
+      navigate('/admin-dashboard');
+    } else if (role === 'educator') {
       authService.loginEducator();
       if (onLoginSuccess) {
         onLoginSuccess('Dr. Priya S.', 'educator');
