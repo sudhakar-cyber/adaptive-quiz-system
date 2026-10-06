@@ -17,6 +17,8 @@ import {
 
 import { sharedDatabase } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
+import { otpService } from '../services/otpService';
+import { OTPVerificationModal } from './OTPVerificationModal';
 
 const COUNTRIES = [
   'United States',
@@ -32,6 +34,45 @@ const COUNTRIES = [
   'Brazil',
   'Other'
 ];
+
+const getFriendlyAuthErrorMessage = (err) => {
+  if (!err) return 'An unexpected error occurred. Please try again.';
+  const code = err.code || (typeof err === 'string' ? err : '');
+  const message = err.message || (typeof err === 'string' ? err : '');
+
+  if (code === 'auth/email-already-in-use' || message.includes('email-already-in-use')) {
+    return 'This email is already registered. Please log in instead or use another email.';
+  }
+  if (code === 'auth/invalid-email' || message.includes('invalid-email')) {
+    return 'Invalid email address format. Please enter a valid email.';
+  }
+  if (code === 'auth/weak-password' || message.includes('weak-password')) {
+    return 'Password is too weak. Please use at least 6 characters.';
+  }
+  if (code === 'auth/operation-not-allowed' || message.includes('operation-not-allowed')) {
+    return 'Email/Password sign-up is not enabled in Firebase Console.';
+  }
+  if (code === 'auth/network-request-failed' || message.includes('network-request-failed')) {
+    return 'Network error. Please check your internet connection.';
+  }
+  if (code === 'auth/too-many-requests' || message.includes('too-many-requests')) {
+    return 'Too many attempts. Please try again later.';
+  }
+  if (code === 'auth/popup-closed-by-user' || message.includes('popup-closed-by-user')) {
+    return 'Google Sign-In was cancelled.';
+  }
+  if (code === 'auth/cancelled-popup-request' || message.includes('cancelled-popup-request')) {
+    return 'Google Sign-In was cancelled.';
+  }
+
+  // Clean up any other Firebase error message without stripping it down to "Error"
+  let clean = message.replace(/^Firebase:\s*/i, '').trim();
+  clean = clean.replace(/^Error\s*\((auth\/[^)]+)\):?/i, '$1:').trim();
+  if (!clean || clean.toLowerCase() === 'error') {
+    return code ? `Authentication failed (${code}).` : 'Registration failed. Please check your details.';
+  }
+  return clean;
+};
 
 export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
   const [formData, setFormData] = useState({
@@ -51,6 +92,10 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [successToast, setSuccessToast] = useState('');
 
+  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(60);
+  const [otpExpiryMinutes, setOtpExpiryMinutes] = useState(10);
+
   const showToast = (message) => {
     setSuccessToast(message);
     setTimeout(() => {
@@ -67,10 +112,11 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
     if (errorMessage) setErrorMessage('');
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
+    // Step 3: Validate all fields first
     if (!formData.firstName.trim()) {
       setErrorMessage('Please enter your first name.');
       return;
@@ -83,6 +129,14 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
       setErrorMessage('Please enter your email address.');
       return;
     }
+
+    // Step 4: Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email.trim())) {
+      setErrorMessage('Invalid email address format. Please enter a valid email.');
+      return;
+    }
+
     if (!formData.password) {
       setErrorMessage('Please create a password.');
       return;
@@ -104,67 +158,96 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
       return;
     }
 
+    // Pre-check if email is already registered locally
+    const existingStudent = sharedDatabase.getStudentByEmail(formData.email.trim());
+    if (existingStudent) {
+      setErrorMessage('This email is already registered. Please log in instead or use another email.');
+      return;
+    }
+
     setIsLoading(true);
 
-    authService
-      .signupWithFirebase(formData.email, formData.password, {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        phone: formData.phone,
-        country: formData.country
-      })
-      .then((res) => {
-        setIsLoading(false);
-        if (res && res.success && res.student) {
-          if (onRegisterSuccess) {
-            onRegisterSuccess(res.student);
-          }
-        } else {
-          if (res?.error?.message) {
-            const cleanErr = res.error.message.replace(/Firebase:\s*/i, '').replace(/\(auth\/[^)]+\)\.?/i, '').trim();
-            setErrorMessage(cleanErr || 'Registration error. Please check your details.');
-            return;
-          }
-          const newStudent = sharedDatabase.registerStudent({
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            email: formData.email,
-            password: formData.password,
-            phone: formData.phone,
-            country: formData.country,
-            authProvider: 'local'
-          });
-          if (onRegisterSuccess) {
-            onRegisterSuccess(newStudent);
-          }
-        }
-      })
-      .catch((err) => {
-        setIsLoading(false);
-        setErrorMessage(err.message || 'Registration failed.');
+    try {
+      // Step 4 & 5: Take the EXACT email entered and send a REAL verification OTP
+      const res = await otpService.sendOtp(formData.email.trim());
+      setIsLoading(false);
+
+      if (res && res.success) {
+        setOtpCooldown(res.cooldownSeconds || 60);
+        setOtpExpiryMinutes(res.expiresInMinutes || 10);
+        showToast(`Verification code sent to ${formData.email.trim()}`);
+        // Step 6: Show an OTP verification screen/modal
+        setIsOtpModalOpen(true);
+      } else {
+        setErrorMessage(res.error || 'Failed to send verification code. Please try again.');
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorMessage(err.message || 'Failed to request verification code.');
+    }
+  };
+
+  // Step 8 & 9: ONLY after successful OTP verification:
+  const handleOtpVerified = async (verificationToken) => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      // Create Firebase Auth account and Firestore profile
+      const res = await authService.signupWithFirebase(formData.email.trim(), formData.password, {
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        phone: formData.phone.trim(),
+        country: formData.country,
+        role: 'student',
+        verificationToken
       });
+
+      setIsLoading(false);
+
+      if (res && res.success && res.student) {
+        setIsOtpModalOpen(false);
+        showToast('Account created successfully! Redirecting...');
+        if (onRegisterSuccess) {
+          onRegisterSuccess(res.student);
+        }
+      } else {
+        const friendlyMsg = getFriendlyAuthErrorMessage(res?.error);
+        setErrorMessage(friendlyMsg);
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorMessage(getFriendlyAuthErrorMessage(err));
+    }
   };
 
   const handleGoogleSignup = async () => {
     setIsLoading(true);
+    setErrorMessage('');
     try {
-      const res = await authService.loginWithGoogle();
+      const res = await authService.loginWithGoogle({
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
+        country: formData.country,
+        role: 'student'
+      });
       setIsLoading(false);
       if (res && res.success && res.student) {
         if (onRegisterSuccess) {
-          onRegisterSuccess(res.student);
+          onRegisterSuccess(res.student, true);
         }
         return;
       } else if (res && !res.success && res.error) {
         if (res.error.code !== 'auth/popup-closed-by-user' && res.error.code !== 'auth/cancelled-popup-request') {
-          setErrorMessage(res.error.message || 'Google sign-up failed.');
+          setErrorMessage(getFriendlyAuthErrorMessage(res.error));
         }
       }
     } catch (e) {
       setIsLoading(false);
       console.warn('Firebase Google signup:', e);
       if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
-        setErrorMessage(e.message || 'Google sign-up failed.');
+        setErrorMessage(getFriendlyAuthErrorMessage(e));
       }
     } finally {
       setIsLoading(false);
@@ -464,7 +547,7 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
             {isLoading ? (
               <span className="btn-loading-content">
                 <span className="btn-spinner" />
-                <span>Creating account...</span>
+                <span>Sending verification code...</span>
               </span>
             ) : (
               <span className="btn-normal-content">
@@ -507,6 +590,15 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
           </div>
         </form>
       </div>
+
+      <OTPVerificationModal
+        isOpen={isOtpModalOpen}
+        email={formData.email.trim()}
+        initialCooldown={otpCooldown}
+        initialExpiryMinutes={otpExpiryMinutes}
+        onVerifySuccess={handleOtpVerified}
+        onClose={() => setIsOtpModalOpen(false)}
+      />
     </div>
   );
 };

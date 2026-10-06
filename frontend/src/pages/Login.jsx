@@ -23,12 +23,12 @@ export const Login = ({ onLoginSuccess }) => {
     } else if (role === 'educator') {
       authService.loginEducator();
       if (onLoginSuccess) {
-        onLoginSuccess('Dr. Priya S.', 'educator');
+        onLoginSuccess('Educator', 'educator');
       }
       navigate('/educator-dashboard');
     } else {
       const activeStudent = authService.loginStudent(studentObj || user);
-      const studentName = activeStudent?.name || (typeof user === 'string' ? user : 'Shaik Aathif');
+      const studentName = activeStudent?.name || (typeof user === 'string' ? user : 'Student');
       if (onLoginSuccess) {
         onLoginSuccess(studentName, 'student');
       }
@@ -38,15 +38,17 @@ export const Login = ({ onLoginSuccess }) => {
 
   const [loginNotice, setLoginNotice] = useState('');
 
-  const handleRegisterSuccess = (userData) => {
+  const handleRegisterSuccess = (userData, isGoogleAuth = false) => {
     setRegisteredUser(userData);
     setLoginNotice('');
-    setCurrentView('oauth');
+    const role = userData?.role || 'student';
+    handleLoginSuccess(userData?.name || 'Student', role, userData);
   };
 
   const handleOAuthSuccess = (verifiedUser) => {
     const student = verifiedUser || registeredUser;
-    handleLoginSuccess(student?.name || 'Student', 'student', student);
+    const role = student?.role || 'student';
+    handleLoginSuccess(student?.name || 'Student', role, student);
   };
 
   return (

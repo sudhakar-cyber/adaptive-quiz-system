@@ -292,7 +292,7 @@ export const QuizFeedbackView = ({
             <span className="badge-compulsory">Compulsory</span>
           </div>
           <p className="section-help-text">
-            Rate Dr. Priya S. / faculty course materials and coverage for this assessment topic.
+            Rate faculty course materials and coverage for this assessment topic.
           </p>
           {renderStarPicker(
             educatorRating,
@@ -378,7 +378,7 @@ export const QuizFeedbackView = ({
             </div>
           </div>
           <p className="section-help-text">
-            Have a direct question or clarification for Dr. Priya S.? It will be delivered to her instructor dashboard.
+            Have a direct question or clarification for the educator? It will be delivered to the instructor dashboard.
           </p>
           <input
             type="text"

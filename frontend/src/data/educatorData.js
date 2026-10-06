@@ -335,267 +335,9 @@ export const INITIAL_EDUCATOR_QUIZZES = [
   }
 ];
 
-export const INITIAL_EDUCATOR_STUDENTS = [
-  {
-    id: 'stud-101',
-    name: 'Rahul K.',
-    email: 'rahul.k@learnsmart.edu',
-    studentId: 'LS-2024-101',
-    quizzesCompleted: 18,
-    avgScore: 92.4,
-    highestScore: 100,
-    topSubject: 'Python Basics',
-    status: 'Top Performer',
-    statusVariant: 'success',
-    lastActive: '28 Sep 2025',
-    avatarInitials: 'RK',
-    subjectMastery: [
-      { subject: 'Python Basics', score: 96 },
-      { subject: 'Data Structures', score: 92 },
-      { subject: 'Web Security', score: 88 },
-      { subject: 'Machine Learning', score: 94 }
-    ],
-    recentSubmissions: [
-      { title: 'Python Basics & OOP', score: '92%', status: 'Completed', date: '28 Sep 2025' },
-      { title: 'Data Structures & Algorithms', score: '95%', status: 'Completed', date: '20 Sep 2025' },
-      { title: 'Machine Learning Foundations', score: '90%', status: 'Completed', date: '12 Sep 2025' }
-    ],
-    feedbackNote: 'Consistently exceptional work. Ready for advanced capstone and honors research.'
-  },
-  {
-    id: 'stud-102',
-    name: 'Priya S.',
-    email: 'priya.s@learnsmart.edu',
-    studentId: 'LS-2024-102',
-    quizzesCompleted: 16,
-    avgScore: 85.0,
-    highestScore: 92,
-    topSubject: 'Data Structures',
-    status: 'On Track',
-    statusVariant: 'info',
-    lastActive: '27 Sep 2025',
-    avatarInitials: 'PS',
-    subjectMastery: [
-      { subject: 'Data Structures', score: 88 },
-      { subject: 'Python Basics', score: 85 },
-      { subject: 'Cloud Computing', score: 82 },
-      { subject: 'Web Security', score: 85 }
-    ],
-    recentSubmissions: [
-      { title: 'Data Structures & Algorithms', score: '85%', status: 'Completed', date: '27 Sep 2025' },
-      { title: 'Python Basics & OOP', score: '88%', status: 'Completed', date: '19 Sep 2025' }
-    ],
-    feedbackNote: 'Solid analytical skills. Recommend reviewing graph algorithm shortest path optimizations.'
-  },
-  {
-    id: 'stud-103',
-    name: 'Sneha R.',
-    email: 'sneha.r@learnsmart.edu',
-    studentId: 'LS-2024-103',
-    quizzesCompleted: 17,
-    avgScore: 88.0,
-    highestScore: 96,
-    topSubject: 'Algorithms',
-    status: 'Top Performer',
-    statusVariant: 'success',
-    lastActive: '25 Sep 2025',
-    avatarInitials: 'SR',
-    subjectMastery: [
-      { subject: 'Data Structures', score: 92 },
-      { subject: 'Discrete Math', score: 90 },
-      { subject: 'Python Basics', score: 86 },
-      { subject: 'Web Security', score: 84 }
-    ],
-    recentSubmissions: [
-      { title: 'Data Structures & Algorithms', score: '88%', status: 'Completed', date: '25 Sep 2025' },
-      { title: 'Discrete Mathematics', score: '92%', status: 'Completed', date: '18 Sep 2025' }
-    ],
-    feedbackNote: 'Strong mathematical aptitude. Well prepared for upcoming departmental olympiad.'
-  },
-  {
-    id: 'stud-104',
-    name: 'Vikram M.',
-    email: 'vikram.m@learnsmart.edu',
-    studentId: 'LS-2024-104',
-    quizzesCompleted: 9,
-    avgScore: 58.2,
-    highestScore: 71,
-    topSubject: 'Python Syntax',
-    status: 'Needs Support',
-    statusVariant: 'warning',
-    lastActive: '26 Sep 2025',
-    avatarInitials: 'VM',
-    subjectMastery: [
-      { subject: 'Web Security', score: 52 },
-      { subject: 'Data Structures', score: 55 },
-      { subject: 'Python Basics', score: 68 },
-      { subject: 'Cloud Computing', score: 58 }
-    ],
-    recentSubmissions: [
-      { title: 'Web Security & OWASP Top 10', score: '71%', status: 'In Progress', date: '26 Sep 2025' },
-      { title: 'Data Structures & Algorithms', score: '48%', status: 'Completed', date: '14 Sep 2025' }
-    ],
-    feedbackNote: 'Needs extra office hours support on prepared statements and time complexity calculation.'
-  },
-  {
-    id: 'stud-105',
-    name: 'Arjun P.',
-    email: 'arjun.p@learnsmart.edu',
-    studentId: 'LS-2024-105',
-    quizzesCompleted: 20,
-    avgScore: 95.0,
-    highestScore: 100,
-    topSubject: 'Machine Learning',
-    status: 'Top Performer',
-    statusVariant: 'success',
-    lastActive: '24 Sep 2025',
-    avatarInitials: 'AP',
-    subjectMastery: [
-      { subject: 'Machine Learning', score: 98 },
-      { subject: 'Data Structures', score: 94 },
-      { subject: 'Python Basics', score: 95 },
-      { subject: 'Cloud Computing', score: 93 }
-    ],
-    recentSubmissions: [
-      { title: 'Machine Learning Foundations', score: '95%', status: 'Completed', date: '24 Sep 2025' },
-      { title: 'Python Basics & OOP', score: '100%', status: 'Completed', date: '15 Sep 2025' }
-    ],
-    feedbackNote: 'Outstanding grasp of machine learning mathematical formulations.'
-  },
-  {
-    id: 'stud-106',
-    name: 'Ananya D.',
-    email: 'ananya.d@learnsmart.edu',
-    studentId: 'LS-2024-106',
-    quizzesCompleted: 12,
-    avgScore: 68.4,
-    highestScore: 78,
-    topSubject: 'Database Systems',
-    status: 'Needs Support',
-    statusVariant: 'warning',
-    lastActive: '23 Sep 2025',
-    avatarInitials: 'AD',
-    subjectMastery: [
-      { subject: 'Database Systems', score: 72 },
-      { subject: 'Web Security', score: 64 },
-      { subject: 'Python Basics', score: 68 },
-      { subject: 'Data Structures', score: 69 }
-    ],
-    recentSubmissions: [
-      { title: 'Relational Database Systems', score: '68%', status: 'In Progress', date: '23 Sep 2025' },
-      { title: 'Web Security & OWASP Top 10', score: '65%', status: 'Completed', date: '11 Sep 2025' }
-    ],
-    feedbackNote: 'Recommend scheduled 1-on-1 review on normalization steps and SQL subqueries.'
-  },
-  {
-    id: 'stud-107',
-    name: 'Karthik N.',
-    email: 'karthik.n@learnsmart.edu',
-    studentId: 'LS-2024-107',
-    quizzesCompleted: 19,
-    avgScore: 91.2,
-    highestScore: 98,
-    topSubject: 'Cloud Computing',
-    status: 'Top Performer',
-    statusVariant: 'success',
-    lastActive: '22 Sep 2025',
-    avatarInitials: 'KN',
-    subjectMastery: [
-      { subject: 'Cloud Computing', score: 94 },
-      { subject: 'Python Basics', score: 90 },
-      { subject: 'Data Structures', score: 89 },
-      { subject: 'Web Security', score: 92 }
-    ],
-    recentSubmissions: [
-      { title: 'Cloud Computing & DevOps CI/CD', score: '91%', status: 'Completed', date: '22 Sep 2025' },
-      { title: 'Web Security & OWASP Top 10', score: '92%', status: 'Completed', date: '16 Sep 2025' }
-    ],
-    feedbackNote: 'Excellent cloud architecture comprehension and container deployment mastery.'
-  },
-  {
-    id: 'stud-108',
-    name: 'Divya M.',
-    email: 'divya.m@learnsmart.edu',
-    studentId: 'LS-2024-108',
-    quizzesCompleted: 14,
-    avgScore: 79.5,
-    highestScore: 88,
-    topSubject: 'Python Basics',
-    status: 'On Track',
-    statusVariant: 'info',
-    lastActive: '21 Sep 2025',
-    avatarInitials: 'DM',
-    subjectMastery: [
-      { subject: 'Python Basics', score: 84 },
-      { subject: 'Data Structures', score: 78 },
-      { subject: 'Discrete Math', score: 76 },
-      { subject: 'Machine Learning', score: 80 }
-    ],
-    recentSubmissions: [
-      { title: 'Python Basics & OOP', score: '82%', status: 'Completed', date: '21 Sep 2025' },
-      { title: 'Machine Learning Foundations', score: '80%', status: 'Completed', date: '13 Sep 2025' }
-    ],
-    feedbackNote: 'Steady improvement across weekly tests. Continuing at positive learning trajectory.'
-  }
-];
+export const INITIAL_EDUCATOR_STUDENTS = [];
 
-export const INITIAL_EDUCATOR_NOTIFICATIONS = [
-  {
-    id: 'notif-1',
-    title: 'Quiz Submission: Web Security',
-    message: 'Vikram M. submitted Web Security & OWASP Top 10 with a score of 71%. Review pending manual check.',
-    category: 'submission',
-    timestamp: '15 mins ago',
-    unread: true,
-    studentName: 'Vikram M.',
-    quizTitle: 'Web Security & OWASP Top 10',
-    type: 'review'
-  },
-  {
-    id: 'notif-2',
-    title: 'Manual Review Required: 3 Quizzes',
-    message: '3 quiz essay responses in Cloud Computing & DevOps CI/CD are awaiting subjective grading.',
-    category: 'review',
-    timestamp: '1 hour ago',
-    unread: true,
-    studentName: 'Multiple Students',
-    quizTitle: 'Cloud Computing & DevOps',
-    type: 'alert'
-  },
-  {
-    id: 'notif-3',
-    title: 'New High Score Alert: Python Basics',
-    message: 'Rahul K. scored 92% on the Python Basics & OOP assessment, achieving top decile mastery.',
-    category: 'submission',
-    timestamp: '3 hours ago',
-    unread: false,
-    studentName: 'Rahul K.',
-    quizTitle: 'Python Basics & OOP',
-    type: 'achievement'
-  },
-  {
-    id: 'notif-4',
-    title: 'At-Risk Early Alert: Ananya D.',
-    message: 'Ananya D. has completed 2 consecutive quizzes with scores under 70%. Personalized mentoring suggested.',
-    category: 'alert',
-    timestamp: 'Yesterday',
-    unread: false,
-    studentName: 'Ananya D.',
-    quizTitle: 'Database Systems',
-    type: 'warning'
-  },
-  {
-    id: 'notif-5',
-    title: 'Department Curriculum Audit Scheduled',
-    message: 'Quarter 3 performance audit report must be finalized and submitted by Friday 5:00 PM.',
-    category: 'system',
-    timestamp: '2 days ago',
-    unread: false,
-    studentName: 'Department Admin',
-    quizTitle: 'System Notice',
-    type: 'system'
-  }
-];
+export const INITIAL_EDUCATOR_NOTIFICATIONS = [];
 
 export const INITIAL_EDUCATOR_REPORTS = [
   {
@@ -650,7 +392,7 @@ export const EDUCATOR_ANALYTICS_DATA = {
     completionRate: '89.4%',
     avgTimeSpent: '16.5 mins',
     passRate: '89.2%',
-    activeStudents: 156,
+    activeStudents: 0,
     totalQuizzes: 24,
     questionsAnalyzed: 118
   },
@@ -697,26 +439,22 @@ export const EDUCATOR_ANALYTICS_DATA = {
 };
 
 export const INITIAL_EDUCATOR_PROFILE = {
-  fullName: 'Dr. Priya S.',
-  academicTitle: 'Associate Professor & Course Director',
-  department: 'School of Computer Science & Engineering',
+  fullName: 'Educator',
+  academicTitle: 'Faculty Member',
+  department: 'Computer Science',
   institution: 'LearnSmart University',
-  facultyId: 'FAC-CS-2021-042',
-  email: 'priya.sharma@learnsmart.edu',
-  phone: '+91 98450 12345',
-  officeLocation: 'Tech Block B, Suite 402',
-  officeHours: 'Mon & Thu: 2:00 PM – 4:00 PM (IST)',
-  bio: 'Dr. Priya S. holds a Ph.D. in Computer Science with over 12 years of experience in distributed systems, adaptive learning algorithms, and cybersecurity education. She has mentored over 1,200 students and authored numerous technical curricula.',
-  teachingPhilosophy: 'Empowering students through iterative, adaptive problem-solving and hands-on algorithmic design.',
-  assignedCourses: [
-    { code: 'CS-301', name: 'Data Structures & Algorithms', students: 62, semester: 'Fall 2025' },
-    { code: 'CS-405', name: 'Web Application Security', students: 48, semester: 'Fall 2025' },
-    { code: 'CS-202', name: 'Python for Software Engineering', students: 46, semester: 'Fall 2025' }
-  ],
+  facultyId: '',
+  email: '',
+  phone: '',
+  officeLocation: '',
+  officeHours: '',
+  bio: '',
+  teachingPhilosophy: '',
+  assignedCourses: [],
   stats: {
-    coursesInstructed: 4,
-    totalStudents: 156,
-    quizzesAuthored: 24,
-    educatorRating: '4.9 / 5.0'
+    coursesInstructed: 0,
+    totalStudents: 0,
+    quizzesAuthored: 0,
+    educatorRating: '5.0 / 5.0'
   }
 };

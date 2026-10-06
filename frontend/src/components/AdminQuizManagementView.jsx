@@ -29,7 +29,7 @@ export const AdminQuizManagementView = ({
     duration: '15 mins',
     difficulty: 'Medium',
     description: '',
-    createdBy: 'Dr. Priya S.'
+    createdBy: 'Educator'
   });
 
   // Effective list of quizzes with safe seed fallback
@@ -126,7 +126,7 @@ export const AdminQuizManagementView = ({
       duration: '15 mins',
       difficulty: 'Medium',
       description: '',
-      createdBy: 'Dr. Priya S.'
+      createdBy: 'Educator'
     });
   };
 
@@ -304,7 +304,7 @@ export const AdminQuizManagementView = ({
                       {/* Created By */}
                       <td>
                         <span className="quiz-creator-text">
-                          {quiz.createdBy || 'Dr. Priya S.'}
+                          {quiz.createdBy || 'Educator'}
                         </span>
                       </td>
 
@@ -399,7 +399,7 @@ export const AdminQuizManagementView = ({
                 </div>
                 <div>
                   <h3 className="modal-user-name">{selectedQuiz.title}</h3>
-                  <span className="quiz-creator-text">By {selectedQuiz.createdBy || 'Dr. Priya S.'}</span>
+                  <span className="quiz-creator-text">By {selectedQuiz.createdBy || 'Educator'}</span>
                 </div>
               </div>
               <button className="modal-close-btn" onClick={() => setSelectedQuiz(null)}>
@@ -586,7 +586,7 @@ export const AdminQuizManagementView = ({
                   <label>Author / Faculty Lead</label>
                   <input
                     type="text"
-                    placeholder="e.g. Dr. Priya S."
+                    placeholder="e.g. Faculty Lead"
                     value={newQuizForm.createdBy}
                     onChange={(e) => setNewQuizForm({ ...newQuizForm, createdBy: e.target.value })}
                   />

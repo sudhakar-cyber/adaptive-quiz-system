@@ -1,64 +1,6 @@
 import React, { useState } from 'react';
 
-export const INITIAL_SUBMISSIONS = [
-  {
-    id: 1,
-    student: 'Rahul K.',
-    quizTitle: 'Python Basics',
-    score: '92%',
-    status: 'Completed',
-    date: '28 Sep 2025'
-  },
-  {
-    id: 2,
-    student: 'Priya S.',
-    quizTitle: 'Data Structures',
-    score: '85%',
-    status: 'Completed',
-    date: '27 Sep 2025'
-  },
-  {
-    id: 3,
-    student: 'Vikram M.',
-    quizTitle: 'Web Security',
-    score: '71%',
-    status: 'In Progress',
-    date: '26 Sep 2025'
-  },
-  {
-    id: 4,
-    student: 'Sneha R.',
-    quizTitle: 'Algorithms',
-    score: '88%',
-    status: 'Completed',
-    date: '25 Sep 2025'
-  },
-  // Extra data for "View All" modal
-  {
-    id: 5,
-    student: 'Arjun P.',
-    quizTitle: 'Machine Learning Intro',
-    score: '95%',
-    status: 'Completed',
-    date: '24 Sep 2025'
-  },
-  {
-    id: 6,
-    student: 'Ananya D.',
-    quizTitle: 'Database Systems',
-    score: '68%',
-    status: 'In Progress',
-    date: '23 Sep 2025'
-  },
-  {
-    id: 7,
-    student: 'Karthik N.',
-    quizTitle: 'Cloud Computing',
-    score: '91%',
-    status: 'Completed',
-    date: '22 Sep 2025'
-  }
-];
+export const INITIAL_SUBMISSIONS = [];
 
 export const QuizSubmissionTable = ({
   submissions = INITIAL_SUBMISSIONS,
@@ -143,7 +85,7 @@ export const QuizSubmissionTable = ({
             ) : (
               <tr>
                 <td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: '#94A3B8' }}>
-                  No submissions match your search "{searchFilter}".
+                  {searchFilter ? `No submissions match your search "${searchFilter}".` : 'No submissions recorded yet.'}
                 </td>
               </tr>
             )}

@@ -1,13 +1,19 @@
 import { sharedDatabase } from './sharedDatabase.js';
 import {
   auth,
+  db,
   googleProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut as firebaseSignOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp
 } from '../config/firebase.js';
 
 export const authService = {
@@ -70,10 +76,10 @@ export const authService = {
           try {
             return JSON.parse(raw);
           } catch {
-            return { name: raw || 'Dr. Priya S.', role: 'educator' };
+            return { name: raw || 'Educator', role: 'educator' };
           }
         }
-        return { name: 'Dr. Priya S.', role: 'educator' };
+        return { name: 'Educator', role: 'educator' };
       }
 
       if (role === 'student') {
@@ -87,7 +93,7 @@ export const authService = {
           (fbUser?.displayName && fbUser.displayName.trim()) ||
           localStorage.getItem('learnsmart_user') ||
           storedProfile?.fullName ||
-          'Shaik Aathif';
+          'Student';
 
         const profile =
           (fbUser?.email ? sharedDatabase.getStudentByEmail(fbUser.email) : null) ||
@@ -101,7 +107,7 @@ export const authService = {
               fbUser?.email ||
               storedProfile?.email ||
               localStorage.getItem('learnsmart_email') ||
-              `${username.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
+              '',
             avatarImage:
               fbUser?.photoURL ||
               storedProfile?.avatarImage ||
@@ -150,19 +156,19 @@ export const authService = {
   },
 
   // Log in as Educator
-  loginEducator: () => {
+  loginEducator: (educatorData = null) => {
     try {
-      const educatorData = JSON.stringify({
-        name: 'Dr. Priya S.',
-        email: 'Educator@leaensmart.com',
+      const data = JSON.stringify(educatorData || {
+        name: 'Educator',
+        email: 'educator@learnsmart.com',
         role: 'Educator'
       });
       localStorage.setItem('learnsmart_role', 'educator');
-      localStorage.setItem('learnsmart_educator', educatorData);
-      localStorage.setItem('learnsmart_user', 'Dr. Priya S.');
+      localStorage.setItem('learnsmart_educator', data);
+      localStorage.setItem('learnsmart_user', educatorData?.name || 'Educator');
       sessionStorage.setItem('learnsmart_role', 'educator');
-      sessionStorage.setItem('learnsmart_educator', educatorData);
-      sessionStorage.setItem('learnsmart_user', 'Dr. Priya S.');
+      sessionStorage.setItem('learnsmart_educator', data);
+      sessionStorage.setItem('learnsmart_user', educatorData?.name || 'Educator');
     } catch (err) {
       console.error('Failed to set educator session:', err);
     }
@@ -237,10 +243,8 @@ export const authService = {
       }
 
       const activeStudent = student || {
-        name: studentName || 'Shaik Aathif',
-        email:
-          studentEmail ||
-          `${(studentName || 'shaik.aathif').toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
+        name: studentName || 'Student',
+        email: studentEmail || '',
         avatarImage: avatarImage || null,
         uid: uid || '',
         role: 'student'
@@ -268,9 +272,9 @@ export const authService = {
           avatarImage: activeStudent.avatarImage || null,
           photoURL: activeStudent.avatarImage || null,
           uid: activeStudent.uid || '',
-          phone: activeStudent.phone || '+91 98765 43210',
-          studentId: activeStudent.studentId || 'LS-2024-8841',
-          major: activeStudent.topSubject || 'Computer Science & Engineering',
+          phone: activeStudent.phone || '',
+          studentId: activeStudent.studentId || '',
+          major: activeStudent.topSubject || 'General / Onboarding',
           role: 'student'
         })
       );
@@ -293,24 +297,91 @@ export const authService = {
   // ==========================================
   // FIREBASE AUTHENTICATION INTEGRATION
   // ==========================================
+  /**
+   * Safely execute a Firestore promise with timeout protection.
+   * If Firestore API is disabled or the gRPC stream hangs, times out gracefully so auth never stalls.
+   */
+  safeFirestoreOp: async (promise, timeoutMs = 1500) => {
+    try {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore operation timed out')), timeoutMs)
+      );
+      return await Promise.race([promise, timeoutPromise]);
+    } catch (err) {
+      console.warn('Firestore safe operation skipped/timed out:', err?.message || err);
+      return null;
+    }
+  },
+
   loginWithFirebase: async (email, password) => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      const studentName =
-        (user.displayName && user.displayName.trim().length > 0)
-          ? user.displayName.trim()
-          : (user.email ? user.email.split('@')[0] : 'Student');
+      if (!user || !user.uid) {
+        return { success: false, error: new Error('Firebase login returned no user.') };
+      }
 
-      const activeStudent = authService.loginStudent({
-        name: studentName,
-        email: user.email,
-        avatarImage: user.photoURL || null,
-        photoURL: user.photoURL || null,
-        uid: user.uid,
-        authProvider: 'firebase'
-      });
-      return { success: true, user, student: activeStudent };
+      // Read or update profile in Firestore with timeout protection
+      let firestoreProfile = null;
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const docSnap = await authService.safeFirestoreOp(getDoc(userDocRef), 1500);
+        if (docSnap && docSnap.exists && docSnap.exists()) {
+          firestoreProfile = docSnap.data();
+          authService.safeFirestoreOp(
+            updateDoc(userDocRef, {
+              lastLoginAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }),
+            1500
+          ).catch(() => {});
+        } else {
+          const profileData = {
+            uid: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || (user.email ? user.email.split('@')[0] : 'Student'),
+            name: user.displayName || (user.email ? user.email.split('@')[0] : 'Student'),
+            photoURL: user.photoURL || null,
+            phoneNumber: user.phoneNumber || '',
+            role: 'student',
+            authProvider: 'firebase',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            lastLoginAt: serverTimestamp()
+          };
+          authService.safeFirestoreOp(setDoc(userDocRef, profileData), 1500).catch(() => {});
+          firestoreProfile = profileData;
+        }
+      } catch (fsErr) {
+        console.warn('Firestore login update warning:', fsErr);
+      }
+
+      const resolvedRole = firestoreProfile?.role || 'student';
+      const studentName =
+        (firestoreProfile?.displayName && firestoreProfile.displayName.trim()) ||
+        (user.displayName && user.displayName.trim()) ||
+        (user.email ? user.email.split('@')[0] : 'Student');
+
+      let activeUserObj = null;
+      if (resolvedRole === 'admin') {
+        authService.loginAdmin({ name: studentName, email: user.email, uid: user.uid, role: 'admin' });
+        activeUserObj = { name: studentName, email: user.email, role: 'admin', uid: user.uid };
+      } else if (resolvedRole === 'educator') {
+        authService.loginEducator({ name: studentName, email: user.email, uid: user.uid, role: 'educator' });
+        activeUserObj = { name: studentName, email: user.email, role: 'educator', uid: user.uid };
+      } else {
+        activeUserObj = authService.loginStudent({
+          name: studentName,
+          email: user.email,
+          avatarImage: user.photoURL || null,
+          photoURL: user.photoURL || null,
+          uid: user.uid,
+          role: 'student',
+          authProvider: 'firebase'
+        });
+      }
+
+      return { success: true, user, student: activeUserObj, role: resolvedRole, profile: firestoreProfile };
     } catch (error) {
       console.warn('Firebase email login error:', error);
       return { success: false, error };
@@ -321,69 +392,201 @@ export const authService = {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
+      if (!user || !user.uid) {
+        return { success: false, error: new Error('Firebase user creation returned no user.') };
+      }
+
       const fullName =
         `${additionalData.firstName || ''} ${additionalData.lastName || ''}`.trim() ||
         (user.displayName && user.displayName.trim()) ||
         user.email.split('@')[0];
+
+      const initialRole = additionalData.role || 'student';
+
+      // Create profile in Firestore with timeout protection (do NOT store password in Firestore!)
+      let firestoreProfile = null;
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const profileData = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: fullName,
+          name: fullName,
+          firstName: additionalData.firstName || '',
+          lastName: additionalData.lastName || '',
+          photoURL: user.photoURL || null,
+          phoneNumber: additionalData.phone || user.phoneNumber || '',
+          country: additionalData.country || '',
+          role: initialRole,
+          authProvider: 'firebase',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          lastLoginAt: serverTimestamp()
+        };
+        await authService.safeFirestoreOp(setDoc(userDocRef, profileData), 1500);
+        firestoreProfile = profileData;
+      } catch (fsErr) {
+        console.warn('Firestore user creation warning:', fsErr);
+      }
+
+      // Register student in local memory database (NEVER store password!)
+      const studentPayload = { ...additionalData };
+      delete studentPayload.password;
+      delete studentPayload.confirmPassword;
+
       const newStudent = sharedDatabase.registerStudent({
-        ...additionalData,
+        ...studentPayload,
         name: fullName,
         email: user.email,
+        phone: additionalData.phone || user.phoneNumber || '',
+        country: additionalData.country || '',
         avatarImage: user.photoURL || null,
         photoURL: user.photoURL || null,
         uid: user.uid,
         authProvider: 'firebase'
       });
       authService.loginStudent(newStudent);
-      return { success: true, user, student: newStudent };
+      return { success: true, user, student: newStudent, profile: firestoreProfile, role: initialRole };
     } catch (error) {
       console.warn('Firebase signup error:', error);
       return { success: false, error };
     }
   },
 
-  loginWithGoogle: async () => {
+  loginWithGoogle: async (additionalData = {}) => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       // 1. Get the authenticated Firebase user
       const user = result.user;
+      if (!user || !user.uid) {
+        return { success: false, error: new Error('Google authentication returned no user.') };
+      }
 
-      // 2. Read user.displayName, user.email, user.photoURL, user.uid
-      const displayName = user.displayName;
+      // 2. Read user details from Firebase User object
+      const displayName = user.displayName || '';
       const email = user.email || '';
       const photoURL = user.photoURL || null;
-      const uid = user.uid || '';
+      const uid = user.uid;
 
-      // 3. Do not use email address as username when displayName is available.
-      // 6. Safe fallback to email username only when displayName is null or empty.
-      const resolvedName = (displayName && displayName.trim().length > 0)
-        ? displayName.trim()
-        : (email && email.includes('@') ? email.split('@')[0] : 'Student');
+      // 3. Firestore profile sync: Create or update Firestore profile without duplicates
+      let firestoreProfile = null;
+      try {
+        const userDocRef = doc(db, 'users', uid);
+        const docSnap = await authService.safeFirestoreOp(getDoc(userDocRef), 1500);
 
-      // Save student profile with authentic Google data
-      const activeStudent = authService.loginStudent({
-        name: resolvedName,
-        email: email,
-        avatarImage: photoURL,
-        photoURL: photoURL,
-        uid: uid,
-        authProvider: 'google'
-      });
+        if (docSnap && docSnap.exists && docSnap.exists()) {
+          // Existing user: preserve existing role and createdAt, update lastLoginAt and latest fields
+          const existing = docSnap.data();
+          const updates = {
+            displayName: displayName || existing.displayName || '',
+            photoURL: photoURL || existing.photoURL || null,
+            lastLoginAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          };
+          if (additionalData.phone && !existing.phoneNumber) {
+            updates.phoneNumber = additionalData.phone;
+          }
+          if (additionalData.country && !existing.country) {
+            updates.country = additionalData.country;
+          }
+          authService.safeFirestoreOp(updateDoc(userDocRef, updates), 1500).catch((e) => console.warn('Firestore updateDoc warning:', e));
+          firestoreProfile = { ...existing, ...updates, uid };
+        } else {
+          // New user: create Firestore profile
+          const resolvedDisplayName =
+            displayName ||
+            `${additionalData.firstName || ''} ${additionalData.lastName || ''}`.trim() ||
+            (email ? email.split('@')[0] : 'Student');
+
+          const initialRole = additionalData.role || 'student';
+          const newProfile = {
+            uid,
+            email,
+            displayName: resolvedDisplayName,
+            name: resolvedDisplayName,
+            photoURL,
+            phoneNumber: additionalData.phone || user.phoneNumber || '',
+            country: additionalData.country || '',
+            role: initialRole,
+            authProvider: 'google',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            lastLoginAt: serverTimestamp()
+          };
+          authService.safeFirestoreOp(setDoc(userDocRef, newProfile), 1500).catch((e) => console.warn('Firestore setDoc warning:', e));
+          firestoreProfile = newProfile;
+        }
+      } catch (fsErr) {
+        console.warn('Firestore sync warning:', fsErr);
+      }
+
+      // 4. Resolve role and profile details
+      const resolvedRole = firestoreProfile?.role || additionalData.role || 'student';
+      const resolvedName =
+        (firestoreProfile?.displayName && firestoreProfile.displayName.trim()) ||
+        (displayName && displayName.trim()) ||
+        `${additionalData.firstName || ''} ${additionalData.lastName || ''}`.trim() ||
+        (email && email.includes('@') ? email.split('@')[0] : 'Student');
+
+      // 5. Store session based on role
+      let activeUserObj = null;
+      if (resolvedRole === 'admin') {
+        authService.loginAdmin({
+          name: resolvedName,
+          email,
+          uid,
+          photoURL,
+          role: 'admin'
+        });
+        activeUserObj = { name: resolvedName, email, role: 'admin', uid };
+      } else if (resolvedRole === 'educator') {
+        authService.loginEducator({
+          name: resolvedName,
+          email,
+          uid,
+          photoURL,
+          role: 'educator'
+        });
+        activeUserObj = { name: resolvedName, email, role: 'educator', uid };
+      } else {
+        activeUserObj = authService.loginStudent({
+          name: resolvedName,
+          email,
+          avatarImage: photoURL,
+          photoURL,
+          uid,
+          phone: firestoreProfile?.phoneNumber || additionalData.phone || user.phoneNumber || '',
+          country: firestoreProfile?.country || additionalData.country || '',
+          role: 'student',
+          authProvider: 'google'
+        });
+      }
 
       return {
         success: true,
-        user: {
-          displayName,
-          email,
-          photoURL,
-          uid
-        },
-        student: activeStudent
+        user,
+        role: resolvedRole,
+        student: activeUserObj,
+        profile: firestoreProfile
       };
     } catch (error) {
       console.warn('Firebase Google login error:', error);
       return { success: false, error };
     }
+  },
+
+  getFirestoreProfile: async (uid) => {
+    if (!uid) return null;
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const docSnap = await authService.safeFirestoreOp(getDoc(userDocRef), 1500);
+      if (docSnap && docSnap.exists && docSnap.exists()) {
+        return docSnap.data();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch Firestore profile:', e);
+    }
+    return null;
   },
 
   sendPasswordReset: async (email) => {

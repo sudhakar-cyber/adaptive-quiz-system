@@ -5,7 +5,7 @@ import {
   CheckIcon,
   GoogleIcon
 } from './Icons';
-import { sharedDatabase } from '../services/sharedDatabase';
+import { authService } from '../services/authService';
 
 export const OAuthVerification = ({
   registeredUser = null,
@@ -15,7 +15,6 @@ export const OAuthVerification = ({
 }) => {
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationStep, setVerificationStep] = useState(0); // 0: idle, 1: connecting, 2: token exchange, 3: verified
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successToast, setSuccessToast] = useState('');
@@ -30,7 +29,7 @@ export const OAuthVerification = ({
   };
 
   const fullName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Alex Morgan';
-  const email = student.email || 'student@learnsmart.edu';
+  const email = student.email || '';
 
   const userInitials = (() => {
     const parts = fullName.split(' ').filter(Boolean);
@@ -45,52 +44,53 @@ export const OAuthVerification = ({
     }, 4500);
   };
 
-  // Open the Google OAuth consent dialog
-  const handleStartGoogleOAuth = () => {
+  // Perform real Google OAuth via Firebase
+  const handleStartGoogleOAuth = async () => {
     setErrorMessage('');
-    setShowConsentModal(true);
+    setIsVerifying(true);
+
+    try {
+      const res = await authService.loginWithGoogle({
+        firstName: student.firstName || '',
+        lastName: student.lastName || '',
+        phone: student.phone || '',
+        country: student.country || '',
+        role: student.role || 'student'
+      });
+
+      setIsVerifying(false);
+
+      if (res && res.success && res.student) {
+        setIsSuccess(true);
+        setShowConsentModal(false);
+        showToast('Google account verified successfully!');
+        setTimeout(() => {
+          if (onOAuthSuccess) {
+            onOAuthSuccess(res.student);
+          }
+        }, 800);
+      } else if (res?.error) {
+        if (
+          res.error.code !== 'auth/popup-closed-by-user' &&
+          res.error.code !== 'auth/cancelled-popup-request'
+        ) {
+          setErrorMessage(res.error.message || 'Google authentication failed.');
+        }
+      }
+    } catch (e) {
+      setIsVerifying(false);
+      console.warn('Google OAuth verification error:', e);
+      if (
+        e.code !== 'auth/popup-closed-by-user' &&
+        e.code !== 'auth/cancelled-popup-request'
+      ) {
+        setErrorMessage(e.message || 'Google authentication failed.');
+      }
+    }
   };
 
-  // Execute authentic Google OAuth 2.0 handshake
   const handleConfirmAuthorization = () => {
-    setIsVerifying(true);
-    setVerificationStep(1);
-
-    // Step 1: Connecting to Google OAuth 2.0 authorization endpoint
-    setTimeout(() => {
-      setVerificationStep(2);
-
-      // Step 2: Exchanging auth code for ID & Access tokens
-      setTimeout(() => {
-        setVerificationStep(3);
-
-        // Step 3: Identity verified
-        setTimeout(() => {
-          setIsVerifying(false);
-          setShowConsentModal(false);
-          setIsSuccess(true);
-
-          // Update student in shared database
-          const verifiedStudent = sharedDatabase.registerStudent({
-            ...student,
-            name: fullName,
-            email: email,
-            authProvider: 'google-oauth',
-            isOAuthVerified: true,
-            isActive: true
-          });
-
-          showToast('Account verified via Google OAuth 2.0!');
-
-          // Automatically complete OAuth login after brief success confirmation
-          setTimeout(() => {
-            if (onOAuthSuccess) {
-              onOAuthSuccess(verifiedStudent);
-            }
-          }, 1200);
-        }, 800);
-      }, 900);
-    }, 800);
+    handleStartGoogleOAuth();
   };
 
   return (
@@ -251,17 +251,12 @@ export const OAuthVerification = ({
                 <div className="oauth-handshake-box">
                   <div className="oauth-handshake-spinner" />
                   <div className="oauth-handshake-step-text">
-                    {verificationStep === 1 && '🔄 Contacting Google OAuth 2.0 (accounts.google.com)...'}
-                    {verificationStep === 2 && '🔑 Exchanging Authorization Code & Google ID Token...'}
-                    {verificationStep === 3 && '🛡️ Google Cryptographic Token Verified! Access Granted.'}
+                    Authenticating with Google OAuth 2.0...
                   </div>
                   <div className="oauth-progress-bar">
                     <div
                       className="oauth-progress-bar-fill"
-                      style={{
-                        width:
-                          verificationStep === 1 ? '35%' : verificationStep === 2 ? '75%' : '100%'
-                      }}
+                      style={{ width: '100%' }}
                     />
                   </div>
                 </div>

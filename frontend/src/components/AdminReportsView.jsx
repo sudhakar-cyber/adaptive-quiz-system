@@ -137,13 +137,13 @@ export const AdminReportsView = ({
               <tr className="admin-table-row">
                 <td><strong>Quiz Published</strong></td>
                 <td>Data Structures Mastery</td>
-                <td>Dr. Priya S.</td>
+                <td>Course Educator</td>
                 <td>Today, 14:22</td>
                 <td><span className="status-badge active">Success</span></td>
               </tr>
               <tr className="admin-table-row">
                 <td><strong>User Account Verified</strong></td>
-                <td>Shaik Aathif (Student)</td>
+                <td>Student Registration</td>
                 <td>System Auto-Verify</td>
                 <td>Today, 11:05</td>
                 <td><span className="status-badge active">Success</span></td>

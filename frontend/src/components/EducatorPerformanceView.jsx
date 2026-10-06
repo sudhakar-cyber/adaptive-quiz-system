@@ -16,6 +16,7 @@ export const EducatorPerformanceView = ({
   externalSearch = '',
   onAddStudent,
   onRemoveStudent,
+  onClearAllStudents,
   onResetStudent
 }) => {
   const [searchQuery, setSearchQuery] = useState(externalSearch);
@@ -26,6 +27,7 @@ export const EducatorPerformanceView = ({
   const [openAddModal, setOpenAddModal] = useState(false);
   const [studentToRemove, setStudentToRemove] = useState(null);
   const [studentToReset, setStudentToReset] = useState(null);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [newStudentForm, setNewStudentForm] = useState({
     name: '',
     email: '',
@@ -490,6 +492,19 @@ export const EducatorPerformanceView = ({
     setStudentToRemove(null);
   };
 
+  const handleConfirmDeleteAll = () => {
+    if (onClearAllStudents) {
+      onClearAllStudents();
+    } else {
+      sharedDatabase.clearAllStudents();
+    }
+    setSelectedStudent(null);
+    setShowDeleteAllModal(false);
+    if (showToast) {
+      showToast('All students have been removed from the directory.');
+    }
+  };
+
   const handleConfirmReset = () => {
     if (studentToReset) {
       if (onResetStudent) {
@@ -729,12 +744,25 @@ export const EducatorPerformanceView = ({
       {/* Students Directory Table Card */}
       <div className="educator-content-card">
         <div className="educator-table-header-row">
-          <h2 className="educator-card-title">
-            Enrolled Students Directory ({filteredStudents.length})
-          </h2>
-          <span style={{ fontSize: '0.84rem', color: '#64748B' }}>
-            Showing active course roster
-          </span>
+          <div>
+            <h2 className="educator-card-title" style={{ margin: 0 }}>
+              Enrolled Students Directory ({filteredStudents.length})
+            </h2>
+            <span style={{ fontSize: '0.84rem', color: '#64748B' }}>
+              Showing active course roster
+            </span>
+          </div>
+          {students.length > 0 && (
+            <button
+              type="button"
+              className="educator-danger-btn sm"
+              onClick={() => setShowDeleteAllModal(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <TrashIcon size={14} color="#DC2626" />
+              <span>Delete All Students</span>
+            </button>
+          )}
         </div>
 
         <div className="educator-table-wrapper">
@@ -857,8 +885,19 @@ export const EducatorPerformanceView = ({
                 ))
               ) : (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: 'center', padding: '32px', color: '#94A3B8' }}>
-                    No students found matching "{searchQuery}".
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '36px 20px', color: '#94A3B8' }}>
+                    {students.length === 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '0.98rem', fontWeight: 600, color: '#64748B' }}>
+                          No enrolled students in the directory.
+                        </span>
+                        <span style={{ fontSize: '0.82rem', color: '#94A3B8' }}>
+                          Click "+ Add Student" above to enroll students into the roster.
+                        </span>
+                      </div>
+                    ) : (
+                      `No students found matching "${searchQuery}".`
+                    )}
                   </td>
                 </tr>
               )}
@@ -1279,6 +1318,50 @@ export const EducatorPerformanceView = ({
                 onClick={handleConfirmReset}
               >
                 Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Confirm Delete All Students Modal */}
+      {showDeleteAllModal && (
+        <div className="educator-modal-overlay" onClick={() => setShowDeleteAllModal(false)}>
+          <div
+            className="educator-modal-box"
+            style={{ maxWidth: '440px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="educator-modal-header">
+              <h3 className="educator-card-title" style={{ margin: 0, color: '#DC2626' }}>
+                Delete All Students from Directory?
+              </h3>
+              <button
+                type="button"
+                className="educator-modal-close-btn"
+                onClick={() => setShowDeleteAllModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <p style={{ fontSize: '0.86rem', color: '#475569', lineHeight: 1.5, margin: '14px 0' }}>
+              Are you sure you want to delete <strong>all {students.length} students</strong> from the enrolled students directory?
+              This will clear the entire cohort roster.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+              <button
+                type="button"
+                className="educator-secondary-btn"
+                onClick={() => setShowDeleteAllModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="educator-danger-btn"
+                onClick={handleConfirmDeleteAll}
+              >
+                Confirm Delete All
               </button>
             </div>
           </div>

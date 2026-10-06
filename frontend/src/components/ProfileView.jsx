@@ -21,9 +21,9 @@ import {
 import { sharedDatabase } from '../services/sharedDatabase';
 
 export const ProfileView = ({
-  displayName = 'Shaik Aathif',
+  displayName = 'Student',
   userEmail = '',
-  userInitials = 'SA',
+  userInitials = 'ST',
   profileImage = null,
   uid = '',
   startInEditMode = false,
@@ -49,15 +49,15 @@ export const ProfileView = ({
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
           return {
-            fullName: displayName || parsed.fullName || 'Shaik Aathif',
-            email: userEmail || parsed.email || 'shaik.aathif@learnsmart.edu',
-            phone: parsed.phone || '+91 98765 43210',
+            fullName: displayName || parsed.fullName || 'Student',
+            email: userEmail || parsed.email || '',
+            phone: parsed.phone || '',
             major: parsed.major || 'Computer Science & Engineering',
-            studentId: parsed.studentId || 'LS-2024-8841',
+            studentId: parsed.studentId || '',
             uid: uid || parsed.uid || '',
-            semester: parsed.semester || 'Year 3 (Semester 6)',
-            bio: parsed.bio || 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
-            targetGoal: parsed.targetGoal || 'Aiming for Software Engineering Internships at top technology companies in 2027.'
+            semester: parsed.semester || 'Year 1',
+            bio: parsed.bio || '',
+            targetGoal: parsed.targetGoal || ''
           };
         }
       }
@@ -65,14 +65,14 @@ export const ProfileView = ({
       console.warn('Failed to parse saved student profile', e);
     }
     return {
-      fullName: displayName || 'Shaik Aathif',
-      email: userEmail || 'shaik.aathif@learnsmart.edu',
-      phone: '+91 98765 43210',
+      fullName: displayName || 'Student',
+      email: userEmail || '',
+      phone: '',
       major: 'Computer Science & Engineering',
-      studentId: 'LS-2024-8841',
+      studentId: '',
       uid: uid || '',
-      semester: 'Year 3 (Semester 6)',
-      bio: 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
+      semester: 'Year 1',
+      bio: '',
       targetGoal: 'Aiming for Software Engineering Internships at top technology companies in 2027.'
     };
   });
@@ -491,7 +491,7 @@ export const ProfileView = ({
                       className="field-text-input"
                       value={formData.fullName}
                       onChange={(e) => handleInputChange('fullName', e.target.value)}
-                      placeholder="e.g. Shaik Aathif"
+                      placeholder="e.g. Alex Morgan"
                       required
                     />
                   </div>
@@ -589,9 +589,9 @@ export const ProfileView = ({
 };
 
 export const ProfileDropdownMenu = ({
-  displayName = 'Shaik Aathif',
+  displayName = 'Student',
   userEmail = '',
-  userInitials = 'SA',
+  userInitials = 'ST',
   profileImage = null,
   uid = '',
   onClose,
