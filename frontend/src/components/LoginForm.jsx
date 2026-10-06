@@ -11,6 +11,7 @@ import {
   CheckIcon
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
+import { authService } from '../services/authService';
 
 export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchToRegister, onLoginSuccess }) => {
   const [username, setUsername] = useState(initialUsername || '');
@@ -120,9 +121,7 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
       return;
     }
 
-    // Authenticate student against shared database
-    setIsLoading(true);
-    setTimeout(() => {
+    const proceedLocalLogin = () => {
       setIsLoading(false);
       const student = sharedDatabase.getStudentByUsername(trimmedUser);
 
@@ -162,29 +161,67 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
           onLoginSuccess(newStudent.name, 'student', newStudent);
         }
       }
-    }, 600);
-  };
+    };
 
-  const handleGoogleLogin = () => {
+    // Authenticate student against Firebase or shared database
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      // Retrieve or register Google student account in shared database
-      const googleStudent = sharedDatabase.registerStudent({
-        name: 'Alex Morgan',
-        firstName: 'Alex',
-        lastName: 'Morgan',
-        email: 'alex.morgan@gmail.com',
-        authProvider: 'google'
-      });
-      if (onLoginSuccess) {
-        onLoginSuccess(googleStudent.name, 'student', googleStudent);
-      }
-    }, 400);
+
+    if (trimmedUser.includes('@')) {
+      authService
+        .loginWithFirebase(trimmedUser, password)
+        .then((fbRes) => {
+          if (fbRes && fbRes.success && fbRes.student) {
+            setIsLoading(false);
+            if (onLoginSuccess) {
+              onLoginSuccess(fbRes.student.name, 'student', fbRes.student);
+            }
+          } else {
+            proceedLocalLogin();
+          }
+        })
+        .catch(() => {
+          proceedLocalLogin();
+        });
+    } else {
+      setTimeout(proceedLocalLogin, 400);
+    }
   };
 
-  const handleForgotPassword = (e) => {
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    try {
+      const res = await authService.loginWithGoogle();
+      setIsLoading(false);
+      if (res && res.success && res.student) {
+        if (onLoginSuccess) {
+          onLoginSuccess(res.student.name, 'student', res.student);
+        }
+        return;
+      } else if (res && !res.success && res.error) {
+        if (res.error.code !== 'auth/popup-closed-by-user' && res.error.code !== 'auth/cancelled-popup-request') {
+          showToast(res.error.message || 'Google Sign-In failed.');
+        }
+      }
+    } catch (e) {
+      setIsLoading(false);
+      console.warn('Firebase Google Login popup:', e);
+      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+        showToast(e.message || 'Google Sign-In failed.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e) => {
     e.preventDefault();
+    if (username.trim() && username.includes('@')) {
+      const res = await authService.sendPasswordReset(username.trim());
+      if (res && res.success) {
+        showToast(`Password reset link sent to ${username.trim()}`);
+        return;
+      }
+    }
     showToast('Password reset link sent to your registered email.');
   };
 

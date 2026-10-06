@@ -52,7 +52,7 @@ export const SubmitConfirmationModal = ({ isOpen, onCancel, onConfirm }) => {
               color: '#0F172A'
             }}
           >
-            Submit Test?
+            Submit Test & Proceed?
           </h3>
           <p
             style={{
@@ -62,7 +62,7 @@ export const SubmitConfirmationModal = ({ isOpen, onCancel, onConfirm }) => {
               lineHeight: 1.5
             }}
           >
-            Are you sure you want to submit your test? You will not be able to change your answers after submission.
+            Are you sure you want to finish your test? Your answers will be locked, and you will proceed to the <strong>compulsory test evaluation & feedback</strong> page before your final score is unlocked.
           </p>
         </div>
 
@@ -86,9 +86,9 @@ export const SubmitConfirmationModal = ({ isOpen, onCancel, onConfirm }) => {
             type="button"
             className="quiz-btn-nav quiz-btn-submit"
             onClick={onConfirm}
-            style={{ flex: 1, justifyContent: 'center', padding: '10px 16px', backgroundColor: '#10B981' }}
+            style={{ flex: 1.4, justifyContent: 'center', padding: '10px 16px', backgroundColor: '#10B981' }}
           >
-            Submit Test
+            Submit & Give Feedback
           </button>
         </div>
       </div>

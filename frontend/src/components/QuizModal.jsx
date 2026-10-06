@@ -6,12 +6,21 @@ import {
   RotateCcwIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
-  AwardIcon
+  AwardIcon,
+  StarIcon
 } from './Icons';
 import { QuizTimer } from './QuizTimer';
 import { SubmitConfirmationModal } from './SubmitConfirmationModal';
+import { QuizFeedbackView } from './QuizFeedbackView';
+import { sharedDatabase } from '../services/sharedDatabase';
 
-export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
+export const QuizModal = ({
+  quiz,
+  studentName = 'Student',
+  onClose,
+  onComplete,
+  showToast
+}) => {
   if (!quiz || !quiz.questions || quiz.questions.length === 0) {
     return null;
   }
@@ -55,9 +64,13 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
     }
     return getInitialDuration();
   });
+
+  // Phases: 'test' -> 'feedback' (compulsory) -> 'results'
+  const [quizPhase, setQuizPhase] = useState('test');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [submittedFeedback, setSubmittedFeedback] = useState(null);
 
   // Prevention of duplicate submissions
   const isSubmittingRef = useRef(false);
@@ -70,7 +83,7 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
 
   // Helper to continuously save active quiz attempt to storage
   const saveActiveAttempt = (idx, answers, time) => {
-    if (isSubmittingRef.current || isSubmitted) return;
+    if (isSubmittingRef.current || isSubmitted || quizPhase !== 'test') return;
     try {
       const payload = {
         quizId: quiz.id,
@@ -89,25 +102,25 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
 
   // Ensure initial save on mount
   useEffect(() => {
-    if (!isSubmitted && !isSubmittingRef.current) {
+    if (!isSubmitted && !isSubmittingRef.current && quizPhase === 'test') {
       saveActiveAttempt(currentIndex, selectedAnswers, timeLeft);
     }
   }, []);
 
   // Save whenever currentIndex or selectedAnswers change
   useEffect(() => {
-    if (!isSubmitted && !isSubmittingRef.current) {
+    if (!isSubmitted && !isSubmittingRef.current && quizPhase === 'test') {
       saveActiveAttempt(currentIndex, selectedAnswers, timeLeftRef.current);
     }
-  }, [currentIndex, selectedAnswers, isSubmitted]);
+  }, [currentIndex, selectedAnswers, isSubmitted, quizPhase]);
 
   // LEAVE PROTECTION: Prompt student when attempting to refresh or close tab
   useEffect(() => {
-    if (isSubmitted) return;
+    if (quizPhase === 'results') return;
 
     const handleBeforeUnload = (e) => {
       e.preventDefault();
-      e.returnValue = 'You have a test in progress. Are you sure you want to leave?';
+      e.returnValue = 'You have a test / compulsory evaluation in progress. Are you sure you want to leave?';
       return e.returnValue;
     };
 
@@ -115,22 +128,14 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isSubmitted]);
+  }, [quizPhase]);
 
-  // ONE submission function used by both "Submit Test" confirmation and timer expiration
-  const handleSubmitQuiz = () => {
-    if (isSubmittingRef.current || isSubmitted) return;
+  // Transition from test to COMPULSORY FEEDBACK PAGE
+  const handleProceedToFeedback = () => {
+    if (isSubmittingRef.current || quizPhase !== 'test') return;
     isSubmittingRef.current = true;
 
     setShowConfirmModal(false);
-
-    // Calculate result using existing quiz logic
-    const answers = selectedAnswersRef.current;
-    const correctCount = quiz.questions.reduce((acc, q, idx) => {
-      return answers[idx] === q.correctIndex ? acc + 1 : acc;
-    }, 0);
-    const totalQuestions = quiz.questions.length;
-    const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
 
     // ATTEMPT LOCK: Remove active attempt and record completed quiz ID
     try {
@@ -144,7 +149,34 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
       console.warn('Failed to lock completed quiz attempt:', err);
     }
 
+    setQuizPhase('feedback');
+  };
+
+  // Submission handler once student fills all compulsory feedback fields
+  const handleCompleteFeedbackAndUnlockResults = (feedbackPayload) => {
+    // Calculate result using test answers
+    const answers = selectedAnswersRef.current;
+    const correctCount = quiz.questions.reduce((acc, q, idx) => {
+      return answers[idx] === q.correctIndex ? acc + 1 : acc;
+    }, 0);
+    const totalQuestions = quiz.questions.length;
+    const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
+
+    // Save feedback into shared database
+    try {
+      sharedDatabase.saveQuizFeedback({
+        ...feedbackPayload,
+        score: `${scorePercentage}%`,
+        correctCount,
+        totalQuestions
+      });
+    } catch (e) {
+      console.warn('Failed to save quiz feedback:', e);
+    }
+
+    setSubmittedFeedback(feedbackPayload);
     setIsSubmitted(true);
+    setQuizPhase('results');
 
     // Notify parent component to update stats and history
     if (onComplete) {
@@ -154,20 +186,28 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
         category: quiz.category,
         score: scorePercentage,
         correctCount,
-        totalQuestions
+        totalQuestions,
+        feedback: feedbackPayload
       });
+    }
+
+    if (showToast) {
+      showToast('🌟 Feedback submitted! Test results are now unlocked.');
     }
   };
 
-  // TIMER: Ticks down and triggers handleSubmitQuiz on 00:00
+  // TIMER: Ticks down during active test and triggers compulsory feedback transition on 00:00
   useEffect(() => {
-    if (isSubmitted) return;
+    if (quizPhase !== 'test') return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          handleSubmitQuiz();
+          handleProceedToFeedback();
+          if (showToast) {
+            showToast("⏰ Time's up! Answers locked. Please complete compulsory feedback to view your score.");
+          }
           return 0;
         }
         const next = prev - 1;
@@ -177,14 +217,14 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isSubmitted]);
+  }, [quizPhase]);
 
   const currentQ = quiz.questions[currentIndex] || quiz.questions[0];
   const totalQuestions = quiz.questions.length;
   const answeredCount = Object.keys(selectedAnswers).length;
 
   const handleSelectOption = (optionIndex) => {
-    if (isSubmitted) return;
+    if (quizPhase !== 'test') return;
     setSelectedAnswers((prev) => ({
       ...prev,
       [currentIndex]: optionIndex
@@ -197,6 +237,10 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
   const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
 
   const handleFinishAndSave = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    if (showToast) {
+      showToast('🎉 Test completed and saved to dashboard!');
+    }
     if (onClose) {
       onClose();
     }
@@ -217,12 +261,12 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
-        // Prevent closing by clicking backdrop while in progress
+        // Prevent closing by clicking backdrop while in progress or during feedback
         e.stopPropagation();
       }}
     >
       <div className="quiz-modal-card" onClick={(e) => e.stopPropagation()}>
-        {/* Header: Note that Close / Exit button is deliberately omitted during active test */}
+        {/* Header: Note that Close / Exit button is deliberately omitted during active test & feedback */}
         <div className="quiz-modal-header">
           <div className="quiz-header-meta">
             <span
@@ -238,14 +282,34 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
           </div>
 
           <div className="quiz-header-controls">
-            {!isSubmitted && (
+            {quizPhase === 'test' && (
               <QuizTimer timeLeft={timeLeft} />
             )}
-            {/* Student cannot casually exit during test. Do not show close button while in-progress. */}
+            {quizPhase === 'feedback' && (
+              <span className="badge-compulsory" style={{ fontSize: '0.74rem', padding: '4px 10px' }}>
+                ⚠️ Compulsory Feedback Step
+              </span>
+            )}
+            {quizPhase === 'results' && (
+              <span
+                style={{
+                  color: '#00BA88',
+                  fontWeight: 800,
+                  fontSize: '0.82rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+              >
+                <CheckCircleIcon size={16} color="#00BA88" />
+                <span>Completed</span>
+              </span>
+            )}
           </div>
         </div>
 
-        {!isSubmitted ? (
+        {/* PHASE 1: ACTIVE QUIZ QUESTIONS */}
+        {quizPhase === 'test' && (
           <div className="quiz-modal-body">
             <div className="quiz-progress-section">
               <div className="quiz-progress-text">
@@ -332,6 +396,7 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
                   type="button"
                   className="quiz-btn-nav quiz-btn-submit"
                   onClick={() => setShowConfirmModal(true)}
+                  id="submit-test-btn"
                 >
                   <CheckCircleIcon size={17} color="#FFFFFF" />
                   <span>Submit Test</span>
@@ -339,7 +404,21 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
               )}
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* PHASE 2: COMPULSORY FEEDBACK PAGE */}
+        {quizPhase === 'feedback' && (
+          <QuizFeedbackView
+            quiz={quiz}
+            studentName={studentName}
+            totalQuestions={totalQuestions}
+            answeredCount={answeredCount}
+            onSubmitFeedback={handleCompleteFeedbackAndUnlockResults}
+          />
+        )}
+
+        {/* PHASE 3: FINAL RESULTS & REVIEW */}
+        {quizPhase === 'results' && (
           <div className="quiz-results-container">
             <div className="results-celebration-card">
               <div className="results-icon-bubble">
@@ -388,6 +467,49 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
                 </div>
               </div>
             </div>
+
+            {/* Compulsory Feedback Confirmation Card */}
+            {submittedFeedback && (
+              <div className="results-feedback-summary">
+                <div className="results-fb-header">
+                  <CheckCircleIcon size={18} color="#00BA88" />
+                  <span>Compulsory Test Evaluation Submitted to Educator (Dr. Priya S.)</span>
+                </div>
+                <div className="results-fb-scores-row">
+                  <span>
+                    Clarity: <strong>{submittedFeedback.clarityRating}/5 ★</strong>
+                  </span>
+                  <span>
+                    Difficulty: <strong>{submittedFeedback.difficultyRating}/5 ★</strong>
+                  </span>
+                  <span>
+                    Educator: <strong>{submittedFeedback.educatorRating}/5 ★</strong>
+                  </span>
+                </div>
+                {submittedFeedback.tags && submittedFeedback.tags.length > 0 && (
+                  <div className="feedback-tags-grid" style={{ marginBottom: '8px' }}>
+                    {submittedFeedback.tags.map((t, idx) => (
+                      <span
+                        key={idx}
+                        className="feedback-tag-chip selected"
+                        style={{ fontSize: '0.72rem', padding: '3px 10px', cursor: 'default' }}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="results-fb-comment">"{submittedFeedback.comments}"</p>
+                {submittedFeedback.educatorMessage && (
+                  <p
+                    className="results-fb-comment"
+                    style={{ marginTop: '4px', color: '#1A6BFF' }}
+                  >
+                    Direct note to Dr. Priya: "{submittedFeedback.educatorMessage}"
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="results-review-section">
               <button
@@ -466,6 +588,7 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
                 type="button"
                 className="quiz-action-btn btn-finish"
                 onClick={handleFinishAndSave}
+                id="finish-quiz-btn"
               >
                 <span>Finish & Return to Dashboard</span>
                 <ArrowRightIcon size={16} />
@@ -479,7 +602,7 @@ export const QuizModal = ({ quiz, onClose, onComplete, showToast }) => {
       <SubmitConfirmationModal
         isOpen={showConfirmModal}
         onCancel={() => setShowConfirmModal(false)}
-        onConfirm={handleSubmitQuiz}
+        onConfirm={handleProceedToFeedback}
       />
     </div>
   );

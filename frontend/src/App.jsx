@@ -6,18 +6,23 @@ import { Dashboard } from './components/Dashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminRoute, EducatorRoute, StudentRoute, PublicAuthRoute } from './routes/ProtectedRoute';
 import { authService } from './services/authService';
+import { auth, onAuthStateChanged } from './config/firebase';
 
 function AppRoutes() {
   const navigate = useNavigate();
   const [studentUser, setStudentUser] = useState(() => {
     try {
+      const fbUser = auth.currentUser;
+      if (fbUser?.displayName && fbUser.displayName.trim()) {
+        return fbUser.displayName.trim();
+      }
       return localStorage.getItem('learnsmart_user') || 'Shaik Aathif';
     } catch {
       return 'Shaik Aathif';
     }
   });
 
-  // Keep student user synchronized with storage events
+  // Keep student user synchronized with auth and storage events
   useEffect(() => {
     const handleStorageChange = () => {
       const activeUser = localStorage.getItem('learnsmart_user');
@@ -25,8 +30,16 @@ function AppRoutes() {
         setStudentUser(activeUser);
       }
     };
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user?.displayName && user.displayName.trim()) {
+        setStudentUser(user.displayName.trim());
+      }
+    });
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      unsubscribeAuth();
+    };
   }, []);
 
   const handleLoginSuccess = (user, role) => {

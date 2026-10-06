@@ -16,6 +16,7 @@ import {
 } from './Icons';
 
 import { sharedDatabase } from '../services/sharedDatabase';
+import { authService } from '../services/authService';
 
 const COUNTRIES = [
   'United States',
@@ -105,40 +106,69 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      // Create and persist student profile in the shared database
-      const newStudent = sharedDatabase.registerStudent({
+    authService
+      .signupWithFirebase(formData.email, formData.password, {
         firstName: formData.firstName,
         lastName: formData.lastName,
-        email: formData.email,
-        password: formData.password,
         phone: formData.phone,
-        country: formData.country,
-        authProvider: 'local'
+        country: formData.country
+      })
+      .then((res) => {
+        setIsLoading(false);
+        if (res && res.success && res.student) {
+          if (onRegisterSuccess) {
+            onRegisterSuccess(res.student);
+          }
+        } else {
+          if (res?.error?.message) {
+            const cleanErr = res.error.message.replace(/Firebase:\s*/i, '').replace(/\(auth\/[^)]+\)\.?/i, '').trim();
+            setErrorMessage(cleanErr || 'Registration error. Please check your details.');
+            return;
+          }
+          const newStudent = sharedDatabase.registerStudent({
+            firstName: formData.firstName,
+            lastName: formData.lastName,
+            email: formData.email,
+            password: formData.password,
+            phone: formData.phone,
+            country: formData.country,
+            authProvider: 'local'
+          });
+          if (onRegisterSuccess) {
+            onRegisterSuccess(newStudent);
+          }
+        }
+      })
+      .catch((err) => {
+        setIsLoading(false);
+        setErrorMessage(err.message || 'Registration failed.');
       });
-
-      if (onRegisterSuccess) {
-        onRegisterSuccess(newStudent);
-      }
-    }, 600);
   };
 
-  const handleGoogleSignup = () => {
+  const handleGoogleSignup = async () => {
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await authService.loginWithGoogle();
       setIsLoading(false);
-      const googleStudent = sharedDatabase.registerStudent({
-        name: 'Alex Morgan',
-        firstName: 'Alex',
-        lastName: 'Morgan',
-        email: 'alex.morgan@gmail.com',
-        authProvider: 'google'
-      });
-      if (onRegisterSuccess) {
-        onRegisterSuccess(googleStudent);
+      if (res && res.success && res.student) {
+        if (onRegisterSuccess) {
+          onRegisterSuccess(res.student);
+        }
+        return;
+      } else if (res && !res.success && res.error) {
+        if (res.error.code !== 'auth/popup-closed-by-user' && res.error.code !== 'auth/cancelled-popup-request') {
+          setErrorMessage(res.error.message || 'Google sign-up failed.');
+        }
       }
-    }, 400);
+    } catch (e) {
+      setIsLoading(false);
+      console.warn('Firebase Google signup:', e);
+      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+        setErrorMessage(e.message || 'Google sign-up failed.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
