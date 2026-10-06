@@ -15,9 +15,9 @@ export const DashboardHeader = ({
   onLogout,
   onOpenNotifications,
   onOpenProfile,
-  educatorName = 'Dr. Priya S.',
+  educatorName = 'Educator',
   educatorRole = 'Educator',
-  notificationCount = 2,
+  notificationCount = 0,
   avatarUrl = null,
   notificationsList = []
 }) => {
@@ -27,12 +27,12 @@ export const DashboardHeader = ({
   const notifMenuRef = useRef(null);
 
   const educatorInitials = (() => {
-    if (!educatorName) return 'PS';
+    if (!educatorName) return 'ED';
     const cleanName = educatorName.replace(/^(Dr\.|Prof\.|Mr\.|Mrs\.|Ms\.)\s*/i, '').trim();
     const parts = cleanName.split(/\s+/);
     if (parts.length === 1 && parts[0]) return parts[0].slice(0, 2).toUpperCase();
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    return 'PS';
+    return 'ED';
   })();
 
   useEffect(() => {
@@ -152,9 +152,8 @@ export const DashboardHeader = ({
                     </div>
                   ))
                 ) : (
-                  <div style={{ padding: '10px 12px', borderBottom: '1px solid #F8FAFC', fontSize: '0.82rem' }}>
-                    <p style={{ margin: 0, fontWeight: 600, color: '#1E293B' }}>Vikram M. submitted Web Security</p>
-                    <span style={{ fontSize: '0.74rem', color: '#64748B' }}>15 minutes ago</span>
+                  <div style={{ padding: '16px 12px', fontSize: '0.82rem', color: '#94A3B8', textAlign: 'center' }}>
+                    No new notifications
                   </div>
                 )}
               </div>

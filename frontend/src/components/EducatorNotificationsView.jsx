@@ -17,7 +17,7 @@ export const EducatorNotificationsView = ({
   notifications = [],
   onUpdateNotifications,
   students = [],
-  educatorName = 'Dr. Priya S.',
+  educatorName = 'Educator',
   showToast,
   onNavigateToTab
 }) => {

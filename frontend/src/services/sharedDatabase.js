@@ -1,5 +1,5 @@
-import { INITIAL_EDUCATOR_STUDENTS, INITIAL_EDUCATOR_QUIZZES } from '../data/educatorData.js';
-import { INITIAL_NOTIFICATIONS, QUIZ_CATALOG } from '../data/quizData.js';
+import { INITIAL_EDUCATOR_QUIZZES } from '../data/educatorData.js';
+import { INITIAL_NOTIFICATIONS } from '../data/quizData.js';
 
 const STORAGE_KEY_STUDENTS = 'learnsmart_shared_students';
 const STORAGE_KEY_LEGACY = 'learnsmart_educator_students';
@@ -14,12 +14,7 @@ const EVENT_STUDENT_NOTIFICATIONS_UPDATED = 'learnsmart_student_notifications_up
 const EVENT_ADMIN_UPDATED = 'learnsmart_admin_updated';
 const EVENT_QUIZZES_UPDATED = 'learnsmart_quizzes_updated';
 
-const DEFAULT_SUBMISSIONS = [
-  { id: 1, student: 'Rahul K.', quizTitle: 'Python Basics', score: '92%', status: 'Completed', date: '28 Sep 2025' },
-  { id: 2, student: 'Priya S.', quizTitle: 'Data Structures', score: '85%', status: 'Completed', date: '27 Sep 2025' },
-  { id: 3, student: 'Vikram M.', quizTitle: 'Web Security', score: '71%', status: 'In Progress', date: '26 Sep 2025' },
-  { id: 4, student: 'Sneha R.', quizTitle: 'Algorithms', score: '88%', status: 'Completed', date: '25 Sep 2025' }
-];
+const DEFAULT_SUBMISSIONS = [];
 
 // Helper: Extract Initials from Full Name
 export const getInitials = (name = '') => {
@@ -35,49 +30,53 @@ const generateStudentId = (existingList = []) => {
   return `LS-2024-${currentCount}`;
 };
 
+// Automatic cleanup of legacy default/mock accounts from localStorage
+// Automatic cleanup of legacy default/mock student accounts from localStorage
+const DB_VERSION_KEY = 'learnsmart_db_clean_v8_purge_default_student';
+const purgeLegacyDefaultUsers = () => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (!localStorage.getItem(DB_VERSION_KEY)) {
+      localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
+
+      // Remove default demo student session from local and session storage
+      const storedUser = (localStorage.getItem('learnsmart_user') || '').toLowerCase();
+      const storedEmail = (localStorage.getItem('learnsmart_email') || '').toLowerCase();
+      const storedRole = (localStorage.getItem('learnsmart_role') || '').toLowerCase();
+
+      if (
+        storedRole === 'student' ||
+        storedUser.includes('shaik') ||
+        storedUser.includes('aathif') ||
+        storedEmail.includes('shaik') ||
+        storedEmail.includes('aathif') ||
+        storedEmail === 'student@learnsmart.edu'
+      ) {
+        localStorage.removeItem('learnsmart_user');
+        localStorage.removeItem('learnsmart_email');
+        localStorage.removeItem('learnsmart_student_profile');
+        localStorage.removeItem('learnsmart_uid');
+        localStorage.removeItem('learnsmart_role');
+        localStorage.removeItem('learnsmart_completed_quizzes');
+        localStorage.removeItem('learnsmart_active_quiz_attempt');
+        localStorage.removeItem('learnsmart_student_notifications');
+        try {
+          sessionStorage.clear();
+        } catch {}
+      }
+
+      localStorage.setItem(DB_VERSION_KEY, 'true');
+    }
+  } catch (err) {
+    console.warn('Failed to clear default students from localStorage:', err);
+  }
+};
+purgeLegacyDefaultUsers();
+
 // Base Seed Students with required role and metadata
 const getInitialSeedStudents = () => {
-  const seed = [...INITIAL_EDUCATOR_STUDENTS];
-
-  // Ensure default Shaik Aathif student profile is included
-  const hasShaik = seed.some((s) => s.name.toLowerCase().includes('shaik aathif') || s.email.toLowerCase().includes('shaik.aathif'));
-  if (!hasShaik) {
-    seed.unshift({
-      id: 'stud-100',
-      name: 'Shaik Aathif',
-      email: 'shaik.aathif@learnsmart.edu',
-      studentId: 'LS-2024-8841',
-      quizzesCompleted: 18,
-      avgScore: 85.4,
-      highestScore: 95,
-      topSubject: 'Python Basics',
-      status: 'Top Performer',
-      statusVariant: 'success',
-      lastActive: 'Today',
-      avatarInitials: 'SA',
-      role: 'student',
-      created_at: new Date('2025-08-15T09:00:00Z').toISOString(),
-      isActive: true,
-      subjectMastery: [
-        { subject: 'Python Basics', score: 92 },
-        { subject: 'Data Structures', score: 85 },
-        { subject: 'Web Security', score: 80 }
-      ],
-      recentSubmissions: [
-        { title: 'Python Basics & OOP', score: '92%', status: 'Completed', date: '28 Sep 2025' },
-        { title: 'Data Structures & Algorithms', score: '88%', status: 'Completed', date: '21 Sep 2025' }
-      ],
-      feedbackNote: 'Strong self-directed learner. Ready for advanced capstone topics.'
-    });
-  }
-
-  // Ensure every seed student has role = 'student', created_at, and isActive = true
-  return seed.map((s, idx) => ({
-    ...s,
-    role: 'student',
-    created_at: s.created_at || new Date(Date.now() - (seed.length - idx) * 86400000).toISOString(),
-    isActive: s.isActive !== undefined ? s.isActive : true
-  }));
+  return [];
 };
 
 // Initialize / Load Students from LocalStorage
@@ -86,160 +85,61 @@ const loadStoredStudents = () => {
     const saved = localStorage.getItem(STORAGE_KEY_STUDENTS) || localStorage.getItem(STORAGE_KEY_LEGACY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((s) => ({
-          ...s,
-          role: 'student',
-          isActive: s.isActive !== undefined ? s.isActive : true
-        }));
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((s) => {
+            const email = (s.email || '').toLowerCase();
+            const name = (s.name || '').toLowerCase();
+            return !email.includes('shaik.aathif') && !name.includes('shaik aathif');
+          })
+          .map((s) => ({
+            ...s,
+            role: 'student',
+            isActive: s.isActive !== undefined ? s.isActive : true
+          }));
       }
     }
   } catch (err) {
     console.warn('Failed to load students from localStorage:', err);
   }
 
-  const initial = getInitialSeedStudents();
-  try {
-    localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(initial));
-    localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify(initial));
-  } catch (err) {
-    console.warn('Failed to seed students to localStorage:', err);
-  }
-  return initial;
+  return [];
 };
 
 // Seed Educators
 const INITIAL_SEED_EDUCATORS = [
   {
     id: 'edu-201',
-    name: 'Dr. Priya S.',
-    email: 'priya.sharma@learnsmart.edu',
-    educatorId: 'FAC-CS-2021-042',
-    department: 'Computer Science & Engineering',
-    institution: 'LearnSmart University',
-    role: 'Educator',
-    status: 'Active',
-    statusVariant: 'success',
-    joinedDate: '27 Sep 2025',
-    lastActive: 'Today, 14:15',
-    avatarInitials: 'PS',
-    avatarImage: null,
-    quizzesCreated: 8,
-    activeQuizzes: 6,
-    totalStudents: 156,
-    avgPerformance: 84.6,
-    rating: 4.9,
-    isActive: true
-  },
-  {
-    id: 'edu-202',
-    name: 'Prof. Ramesh Verma',
-    email: 'ramesh.verma@learnsmart.edu',
-    educatorId: 'FAC-CS-2020-019',
-    department: 'Cyber Security & Forensics',
+    name: 'Dr. Sarah Jenkins',
+    email: 'educator@learnsmart.com',
+    password: 'Educator@123',
+    educatorId: 'FAC-CS-2025-101',
+    department: 'Computer Science',
     institution: 'LearnSmart University',
     role: 'Educator',
     status: 'Active',
     statusVariant: 'success',
     joinedDate: '15 Aug 2025',
-    lastActive: 'Yesterday',
-    avatarInitials: 'RV',
-    avatarImage: null,
-    quizzesCreated: 5,
-    activeQuizzes: 4,
-    totalStudents: 112,
-    avgPerformance: 79.2,
-    rating: 4.7,
-    isActive: true
-  },
-  {
-    id: 'edu-203',
-    name: 'Dr. Kavita Sen',
-    email: 'kavita.sen@learnsmart.edu',
-    educatorId: 'FAC-CS-2022-064',
-    department: 'Data Science & AI',
-    institution: 'LearnSmart University',
-    role: 'Educator',
-    status: 'Active',
-    statusVariant: 'success',
-    joinedDate: '10 Jul 2025',
-    lastActive: '3 days ago',
-    avatarInitials: 'KS',
-    avatarImage: null,
-    quizzesCreated: 6,
-    activeQuizzes: 5,
-    totalStudents: 98,
-    avgPerformance: 88.0,
-    rating: 4.8,
-    isActive: true
-  },
-  {
-    id: 'edu-204',
-    name: 'Prof. Ananya Iyer',
-    email: 'ananya.iyer@learnsmart.edu',
-    educatorId: 'FAC-CS-2023-088',
-    department: 'Full Stack & Web Architecture',
-    institution: 'LearnSmart University',
-    role: 'Educator',
-    status: 'Active',
-    statusVariant: 'success',
-    joinedDate: '01 Jun 2025',
-    lastActive: '1 week ago',
-    avatarInitials: 'AI',
+    lastActive: 'Just now',
+    avatarInitials: 'SJ',
     avatarImage: null,
     quizzesCreated: 4,
-    activeQuizzes: 3,
-    totalStudents: 85,
-    avgPerformance: 81.4,
-    rating: 4.6,
+    activeQuizzes: 4,
+    totalStudents: 48,
+    avgPerformance: 88.5,
+    rating: 4.9,
     isActive: true
   }
 ];
 
 const INITIAL_ADMIN_NOTIFICATIONS = [
   {
-    id: 'admin-notif-1',
-    title: 'New Student Registered',
-    message: 'Arjun M. completed registration for Computer Science & Engineering cohort.',
-    category: 'user',
-    timestamp: '10 mins ago',
-    unread: true,
-    type: 'success'
-  },
-  {
-    id: 'admin-notif-2',
-    title: 'New Quiz Published',
-    message: 'Dr. Priya S. published "Web Security & OWASP Top 10" with 5 questions.',
-    category: 'quiz',
-    timestamp: '45 mins ago',
-    unread: true,
-    type: 'info'
-  },
-  {
-    id: 'admin-notif-3',
-    title: 'High Score Milestone',
-    message: 'Rahul K. achieved 92% in Python Basics & OOP assessment.',
-    category: 'academic',
-    timestamp: '2 hours ago',
-    unread: true,
-    type: 'achievement'
-  },
-  {
-    id: 'admin-notif-4',
-    title: 'Quiz Attempt Spike',
-    message: '18 new submissions recorded in Data Structures & Algorithms today.',
-    category: 'activity',
-    timestamp: '5 hours ago',
-    unread: true,
-    type: 'info'
-  },
-  {
-    id: 'admin-notif-5',
-    title: 'System Health Check: Online',
-    message: 'All system microservices, database storage, and auth endpoints operating at 99.98% uptime.',
+    id: 'admin-notif-system',
+    title: 'System Online',
+    message: 'Adaptive Quiz Platform is running smoothly.',
     category: 'system',
-    timestamp: '1 day ago',
-    unread: true,
+    timestamp: 'Today',
+    unread: false,
     type: 'system'
   }
 ];
@@ -406,7 +306,7 @@ export const sharedDatabase = {
     if (!email) return null;
     const lower = email.trim().toLowerCase();
     const all = loadStoredStudents();
-    return all.find((s) => s.email && s.email.toLowerCase() === lower && s.isActive !== false) || null;
+    return all.find((s) => s.email && s.email.toLowerCase() === lower) || null;
   },
 
   // Find student by username or email or name or uid
@@ -464,7 +364,8 @@ export const sharedDatabase = {
     avatarImage = null,
     photoURL = null,
     uid = '',
-    authProvider = 'local'
+    authProvider = 'local',
+    isActive = true
   }) => {
     const all = loadStoredStudents();
     const cleanEmail = (email || '').trim().toLowerCase();
@@ -474,7 +375,7 @@ export const sharedDatabase = {
     // Check if student already exists by email or uid
     const existingIndex = all.findIndex(
       (s) => (cleanEmail && s.email && s.email.toLowerCase() === cleanEmail) ||
-             (uid && s.uid && s.uid === uid)
+        (uid && s.uid && s.uid === uid)
     );
 
     if (existingIndex !== -1) {
@@ -487,6 +388,7 @@ export const sharedDatabase = {
         uid: uid || existing.uid || '',
         avatarInitials: getInitials((fullName && fullName !== 'Student') ? fullName : existing.name),
         authProvider: authProvider || existing.authProvider,
+        password: password || existing.password || '',
         isActive: true,
         lastActive: 'Just now'
       };
@@ -516,7 +418,7 @@ export const sharedDatabase = {
       avatarImage: resolvedAvatar,
       uid: uid || '',
       authProvider,
-      isActive: true,
+      isActive: isActive !== undefined ? isActive : true,
       subjectMastery: [
         { subject: 'Python Basics', score: 0 },
         { subject: 'Data Structures', score: 0 },
@@ -579,6 +481,22 @@ export const sharedDatabase = {
     const updated = all.filter((s) => s.id !== studentId);
     persistStudents(updated);
     return updated.filter((s) => s.isActive !== false);
+  },
+
+  // Educator deletes all students from directory
+  clearAllStudents: () => {
+    persistStudents([]);
+    try {
+      localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
+    } catch (e) {
+      console.warn('Failed to clear students storage:', e);
+    }
+    return [];
+  },
+
+  removeAllStudents: () => {
+    return sharedDatabase.clearAllStudents();
   },
 
   // Educator resets a student's performance metrics & unlocks quizzes
@@ -738,7 +656,7 @@ export const sharedDatabase = {
     category = 'announcement',
     targetStudentIds = 'all',
     targetStudentNames = [],
-    educatorName = 'Dr. Priya S.',
+    educatorName = 'Educator',
     priority = 'normal'
   }) => {
     try {
@@ -789,9 +707,93 @@ export const sharedDatabase = {
     return all.find((e) => e.id === id || e.educatorId === id) || null;
   },
 
+  getEducatorByEmail: (email) => {
+    if (!email) return null;
+    const lower = email.trim().toLowerCase();
+    const all = loadStoredEducators();
+    const found = all.find((e) => e.email && e.email.toLowerCase() === lower);
+    if (found) return found;
+    if (lower === 'educator@learnsmart.com' || lower === 'educator') {
+      return INITIAL_SEED_EDUCATORS[0];
+    }
+    return null;
+  },
+
+  getEducatorByUsername: (identifier) => {
+    if (!identifier) return null;
+    const lower = identifier.trim().toLowerCase();
+    const all = loadStoredEducators();
+    const found = all.find(
+      (e) =>
+        (e.email && e.email.toLowerCase() === lower) ||
+        (e.name && e.name.toLowerCase() === lower) ||
+        (e.educatorId && e.educatorId.toLowerCase() === lower) ||
+        ((e.email || '').split('@')[0].toLowerCase() === lower.split('@')[0])
+    );
+    if (found) return found;
+    if (lower === 'educator@learnsmart.com' || lower === 'educator') {
+      return INITIAL_SEED_EDUCATORS[0];
+    }
+    return null;
+  },
+
+  getAdminUser: (identifier) => {
+    if (!identifier) return null;
+    const lower = identifier.trim().toLowerCase();
+    const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_ADMIN);
+      if (raw) {
+        const stored = JSON.parse(raw);
+        if (stored) {
+          const emailMatch = stored.email && stored.email.toLowerCase() === lower;
+          const nameMatch = stored.name && stored.name.toLowerCase() === lower;
+          const userMatch = (stored.email || '').split('@')[0].toLowerCase() === lower.split('@')[0];
+          if (emailMatch || nameMatch || userMatch) return stored;
+        }
+      }
+    } catch { }
+    if (lower === 'admin@learnsmart.edu' || lower === 'admin') {
+      return {
+        id: 'admin-001',
+        name: 'System Admin',
+        email: 'admin@learnsmart.edu',
+        password: 'Admin@123',
+        role: 'admin',
+        userType: 'admin',
+        status: 'Active',
+        statusVariant: 'success',
+        isActive: true
+      };
+    }
+    return null;
+  },
+
+  registerAdmin: ({ name = 'Admin', email = 'admin@learnsmart.edu', password = '' } = {}) => {
+    const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
+    const adminObj = {
+      id: 'admin-001',
+      name: name || 'Admin',
+      email: email.trim().toLowerCase(),
+      password: password || '',
+      role: 'admin',
+      userType: 'admin',
+      status: 'Active',
+      statusVariant: 'success',
+      isActive: true
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY_ADMIN, JSON.stringify(adminObj));
+    } catch (e) {
+      console.warn('Failed to persist admin:', e);
+    }
+    return adminObj;
+  },
+
   addEducator: ({
     name = '',
     email = '',
+    password = '',
     department = 'Computer Science',
     institution = 'LearnSmart University',
     educatorId = ''
@@ -804,6 +806,7 @@ export const sharedDatabase = {
       id: `edu-${Date.now()}`,
       name: fullName,
       email: cleanEmail,
+      password: password || '',
       educatorId: educatorId.trim() || `FAC-CS-2025-${all.length + 101}`,
       department: department.trim() || 'Computer Science',
       institution: institution.trim() || 'LearnSmart University',
@@ -888,7 +891,7 @@ export const sharedDatabase = {
       passRate: 0,
       lastUpdated: 'Just now',
       description: quizData.description || '',
-      createdBy: quizData.createdBy || 'Dr. Priya S.',
+      createdBy: quizData.createdBy || 'Educator',
       questions: quizData.questions || []
     };
 
@@ -1102,15 +1105,15 @@ export const sharedDatabase = {
       : 82.5;
 
     return {
-      totalUsers: 480 + liveTotalUsers,
-      totalQuizzes: 80 + liveTotalQuizzes,
-      activeQuizzes: 40 + liveActiveQuizzes,
+      totalUsers: liveTotalUsers,
+      totalQuizzes: liveTotalQuizzes,
+      activeQuizzes: liveActiveQuizzes,
       systemHealth: 'Online',
       totalStudents: students.length,
       totalEducators: educators.length,
-      completedQuizzes: 150 + liveCompleted,
+      completedQuizzes: liveCompleted,
       avgScore: `${avgScore}%`,
-      completionRate: '82.7%',
+      completionRate: '100%',
       serverUptime: '99.98%',
       apiLatency: '42ms'
     };
@@ -1177,53 +1180,10 @@ export const sharedDatabase = {
     ];
   },
 
-  // Recent Users (Matching table in attached image)
-  getRecentUsers: (limit = 3) => {
-    const base = [
-      {
-        id: 'rec-1',
-        name: 'Rahul K.',
-        role: 'Student',
-        status: 'Active',
-        statusVariant: 'success',
-        joinedDate: '28 Sep 2025',
-        avatarInitials: 'RK'
-      },
-      {
-        id: 'rec-2',
-        name: 'Dr. Priya S.',
-        role: 'Educator',
-        status: 'Active',
-        statusVariant: 'success',
-        joinedDate: '27 Sep 2025',
-        avatarInitials: 'PS'
-      },
-      {
-        id: 'rec-3',
-        name: 'Arjun M.',
-        role: 'Student',
-        status: 'Active',
-        statusVariant: 'success',
-        joinedDate: '26 Sep 2025',
-        avatarInitials: 'AM'
-      }
-    ];
-
-    const students = sharedDatabase.getStudents();
-    const extraStudents = students
-      .filter((s) => s.id !== 'stud-100' && s.id !== 'stud-101')
-      .slice(0, 2)
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        role: 'Student',
-        status: s.isActive === false ? 'Inactive' : 'Active',
-        statusVariant: s.isActive === false ? 'danger' : 'success',
-        joinedDate: s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Today',
-        avatarInitials: s.avatarInitials || getInitials(s.name)
-      }));
-
-    return [...extraStudents, ...base].slice(0, limit);
+  // Recent Users
+  getRecentUsers: (limit = 5) => {
+    const all = sharedDatabase.getUsers();
+    return all.slice(0, limit);
   },
 
   // Admin Notifications

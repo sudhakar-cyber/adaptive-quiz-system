@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserIcon, ShieldIcon, CheckCircleIcon, LockIcon } from './Icons';
+import { CheckCircleIcon, LockIcon } from './Icons';
 
 export const AdminProfileView = ({
   adminUser = { name: 'Admin', role: 'Administrator', email: 'admin@learnsmart.edu' }

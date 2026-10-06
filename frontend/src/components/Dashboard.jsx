@@ -33,7 +33,7 @@ import { ProfileView, ProfileDropdownMenu } from './ProfileView';
 import { sharedDatabase } from '../services/sharedDatabase';
 import { auth, onAuthStateChanged } from '../config/firebase';
 
-export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
+export const Dashboard = ({ username = 'Student', onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState('');
@@ -97,7 +97,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     if (auth.currentUser?.displayName && auth.currentUser.displayName.trim()) {
       return auth.currentUser.displayName.trim();
     }
-    return username || 'Shaik Aathif';
+    return username || 'Student';
   });
   const [profileImage, setProfileImage] = useState(() => {
     try {
@@ -107,7 +107,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     }
   });
   const [totalQuizzesTaken, setTotalQuizzesTaken] = useState(() => {
-    return currentStudent?.quizzesCompleted !== undefined ? currentStudent.quizzesCompleted : 18;
+    return currentStudent?.quizzesCompleted !== undefined ? currentStudent.quizzesCompleted : 0;
   });
   const [averageScore, setAverageScore] = useState(() => {
     return currentStudent?.avgScore !== undefined ? currentStudent.avgScore : 85.4;
@@ -289,7 +289,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     } catch {}
 
     const raw = currentUsername || username || localStorage.getItem('learnsmart_user');
-    if (!raw || raw.trim() === '') return 'Shaik Aathif';
+    if (!raw || raw.trim() === '') return 'Student';
 
     if (raw.includes('@')) {
       const emailPrefix = raw.split('@')[0];
@@ -316,7 +316,9 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
       sharedDatabase.getStudentByUsername(displayName) ||
       sharedDatabase.getStudentByUsername(currentUsername);
     if (student?.email) return student.email;
-    return `${(displayName || 'shaik.aathif').toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`;
+    return displayName && displayName !== 'Student'
+      ? `${displayName.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`
+      : '';
   })();
 
   // Unique user ID from Firebase or storage
@@ -518,7 +520,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     // Record quiz attempt into shared database so Educator Dashboard updates
     sharedDatabase.recordQuizAttempt({
       studentName: currentUsername,
-      studentEmail: currentStudent?.email || `${currentUsername.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
+      studentEmail: currentStudent?.email || userEmail || '',
       quizTitle,
       score,
       category

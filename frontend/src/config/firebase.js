@@ -9,6 +9,14 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp
+} from 'firebase/firestore';
 
 // Firebase configuration for Adaptive-Quiz-System (adaptive-quiz-system-957ee)
 const firebaseConfig = {
@@ -24,12 +32,14 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export {
   app,
   auth,
+  db,
   googleProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
@@ -37,6 +47,11 @@ export {
   sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
   firebaseConfig
 };
 

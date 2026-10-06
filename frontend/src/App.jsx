@@ -16,9 +16,9 @@ function AppRoutes() {
       if (fbUser?.displayName && fbUser.displayName.trim()) {
         return fbUser.displayName.trim();
       }
-      return localStorage.getItem('learnsmart_user') || 'Shaik Aathif';
+      return localStorage.getItem('learnsmart_user') || 'Student';
     } catch {
-      return 'Shaik Aathif';
+      return 'Student';
     }
   });
 
@@ -51,23 +51,23 @@ function AppRoutes() {
       navigate('/educator-dashboard');
     } else {
       authService.loginStudent(user);
-      setStudentUser(typeof user === 'string' ? user : user?.name || 'Shaik Aathif');
+      setStudentUser(typeof user === 'string' ? user : user?.name || 'Student');
       navigate('/dashboard');
     }
   };
 
-  const handleAdminLogout = () => {
-    authService.logout();
+  const handleAdminLogout = async () => {
+    await authService.logout();
     navigate('/login');
   };
 
-  const handleEducatorLogout = () => {
-    authService.logout();
+  const handleEducatorLogout = async () => {
+    await authService.logout();
     navigate('/login');
   };
 
-  const handleStudentLogout = () => {
-    authService.logout();
+  const handleStudentLogout = async () => {
+    await authService.logout();
     navigate('/login');
   };
 

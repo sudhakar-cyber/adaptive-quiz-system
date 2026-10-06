@@ -107,6 +107,11 @@ export const EducatorDashboard = ({ onLogout }) => {
     showToast('Student removed from active cohort.');
   };
 
+  const handleClearAllStudents = () => {
+    sharedDatabase.clearAllStudents();
+    showToast('All students removed from the directory.');
+  };
+
   const handleResetStudent = (studentId) => {
     sharedDatabase.resetStudent(studentId);
     showToast('Student performance data reset successfully.');
@@ -177,7 +182,7 @@ export const EducatorDashboard = ({ onLogout }) => {
         onLogout={onLogout}
         onOpenNotifications={() => setActiveTab('Notifications')}
         onOpenProfile={() => setActiveTab('Profile')}
-        educatorName={profileData.fullName || 'Dr. Priya S.'}
+        educatorName={profileData.fullName || 'Educator'}
         educatorRole={profileData.academicTitle ? 'Faculty' : 'Educator'}
         notificationCount={unreadNotifCount}
         avatarUrl={avatarImage}
@@ -203,7 +208,7 @@ export const EducatorDashboard = ({ onLogout }) => {
               {/* Greeting Section */}
               <section className="educator-greeting-section">
                 <h1 className="educator-greeting-title">
-                  Welcome, {profileData.fullName || 'Dr. Priya S.'}!
+                  Welcome, {profileData.fullName || 'Educator'}!
                 </h1>
                 <p className="educator-greeting-sub">
                   Manage quizzes, track student progress, and analyze learning outcomes.
@@ -295,6 +300,7 @@ export const EducatorDashboard = ({ onLogout }) => {
               externalSearch={searchQuery}
               onAddStudent={handleAddStudent}
               onRemoveStudent={handleRemoveStudent}
+              onClearAllStudents={handleClearAllStudents}
               onResetStudent={handleResetStudent}
             />
           )}
@@ -315,7 +321,7 @@ export const EducatorDashboard = ({ onLogout }) => {
               notifications={notifications}
               onUpdateNotifications={handleUpdateNotifications}
               students={students}
-              educatorName={profileData.fullName || 'Dr. Priya S.'}
+              educatorName={profileData.fullName || 'Educator'}
               showToast={showToast}
               onNavigateToTab={setActiveTab}
             />

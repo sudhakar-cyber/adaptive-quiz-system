@@ -473,7 +473,7 @@ export const QuizModal = ({
               <div className="results-feedback-summary">
                 <div className="results-fb-header">
                   <CheckCircleIcon size={18} color="#00BA88" />
-                  <span>Compulsory Test Evaluation Submitted to Educator (Dr. Priya S.)</span>
+                  <span>Compulsory Test Evaluation Submitted to Course Educator</span>
                 </div>
                 <div className="results-fb-scores-row">
                   <span>

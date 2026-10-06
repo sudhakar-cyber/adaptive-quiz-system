@@ -1225,9 +1225,287 @@ html, body {
   font-size: 0.92rem;
 }
 
+/* ==========================================================================
+   OTP Verification Screen / Modal Styles
+   ========================================================================== */
+.otp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.22s ease-out;
+}
 
+.otp-modal-container {
+  width: 100%;
+  max-width: 460px;
+  animation: modalSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
 
-.dashboard-layout {
+.otp-modal-card {
+  background: #FFFFFF;
+  border-radius: 22px;
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  padding: clamp(24px, 3.5vh, 34px) clamp(22px, 3vw, 36px) clamp(20px, 2.8vh, 28px);
+  display: flex;
+  flex-direction: column;
+}
+
+.otp-modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.otp-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(26, 107, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.otp-modal-title {
+  font-size: clamp(1.35rem, 1.8vw, 1.55rem);
+  font-weight: 800;
+  color: var(--brand-navy, #0F172A);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.02em;
+}
+
+.otp-modal-subheading {
+  font-size: 0.88rem;
+  color: #64748B;
+  margin: 0;
+}
+
+.otp-target-email-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #F1F5F9;
+  border: 1px solid #E2E8F0;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  margin-top: 8px;
+  max-width: 100%;
+}
+
+.otp-email-text {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #1E293B;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.otp-change-email-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary-blue, #1A6BFF);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: opacity 0.2s ease;
+}
+
+.otp-change-email-btn:hover {
+  opacity: 0.8;
+}
+
+.otp-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.otp-inputs-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 10px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.otp-inputs-row {
+  display: flex;
+  justify-content: center;
+  gap: clamp(6px, 1.2vw, 10px);
+  margin-bottom: 18px;
+}
+
+.otp-digit-box {
+  width: clamp(40px, 5.5vw, 48px);
+  height: clamp(48px, 6.5vh, 56px);
+  border: 1.5px solid #CBD5E1;
+  border-radius: 12px;
+  background: #FFFFFF;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--brand-navy, #0F172A);
+  text-align: center;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.otp-digit-box:focus {
+  border-color: var(--primary-blue, #1A6BFF);
+  box-shadow: 0 0 0 3px rgba(26, 107, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.otp-digit-box.filled {
+  border-color: #94A3B8;
+  background-color: #F8FAFC;
+}
+
+.otp-digit-box.error {
+  border-color: #EF4444;
+  background-color: #FEF2F2;
+}
+
+.otp-timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+  font-size: 0.82rem;
+  color: #64748B;
+  padding: 0 4px;
+}
+
+.otp-expiry-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.otp-expiry-indicator strong {
+  color: #1E293B;
+  font-family: monospace;
+  font-size: 0.88rem;
+}
+
+.otp-expired-warning {
+  color: #EF4444;
+  font-weight: 600;
+}
+
+.otp-resend-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.otp-cooldown-text {
+  color: #94A3B8;
+}
+
+.otp-cooldown-text strong {
+  color: #64748B;
+}
+
+.otp-resend-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--primary-blue, #1A6BFF);
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.15s ease;
+}
+
+.otp-resend-btn:hover:not(:disabled) {
+  color: var(--primary-blue-hover, #0F4CD9);
+}
+
+.otp-resend-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.otp-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.otp-cancel-btn {
+  flex: 1;
+  height: clamp(38px, 4.8vh, 44px);
+  background: transparent;
+  border: 1px solid #CBD5E1;
+  border-radius: 9px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #64748B;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.otp-cancel-btn:hover:not(:disabled) {
+  background: #F8FAFC;
+  color: #1E293B;
+}
+
+.otp-verify-submit-btn {
+  flex: 2;
+  margin: 0;
+}
+
+.otp-error-alert {
+  margin-bottom: 16px;
+}
+
+.otp-success-alert {
+  background-color: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: #065F46;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.otp-security-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: #94A3B8;
+  margin-top: 4px;
+}
+
+/* ==========================================================================
+   Dashboard Layout Styles
+   ========================================================================== */
+.dashboard-layout,
+.dashboard-container {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
@@ -1237,6 +1515,7 @@ html, body {
   overflow: hidden;
   font-family: var(--font-family);
   color: var(--text-main);
+  box-sizing: border-box;
 }
 
 .dashboard-toast {
@@ -1437,6 +1716,7 @@ html, body {
   flex: 1;
   min-height: 0;
   width: 100%;
+  overflow: hidden;
 }
 
 .dashboard-sidebar {
@@ -1446,14 +1726,32 @@ html, body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 20px 14px;
+  padding: 16px 14px 14px 14px;
   flex-shrink: 0;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 8px;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: #E2E8F0;
+  border-radius: 4px;
 }
 
 .sidebar-nav-item {
@@ -1472,6 +1770,7 @@ html, body {
   transition: all 0.18s ease;
   text-align: left;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .sidebar-nav-item:hover {
@@ -1509,8 +1808,11 @@ html, body {
 
 .sidebar-bottom {
   margin-top: auto;
-  padding-top: 14px;
+  padding-top: 12px;
   border-top: 1px solid #F1F5F9;
+  flex-shrink: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sidebar-logout-button {
@@ -1519,7 +1821,7 @@ html, body {
   gap: 10px;
   padding: 10px 14px;
   border-radius: 10px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   font-family: inherit;
   font-size: 0.88rem;
@@ -1528,10 +1830,29 @@ html, body {
   cursor: pointer;
   transition: all 0.18s ease;
   width: 100%;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.sidebar-logout-button svg {
+  flex-shrink: 0;
+  color: inherit;
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+
+.sidebar-logout-button span {
+  font-weight: 600;
+  line-height: 1;
 }
 
 .sidebar-logout-button:hover {
   background-color: #FEF2F2;
+  color: #DC2626;
+  border-color: #FEE2E2;
+}
+
+.sidebar-logout-button:hover svg {
+  transform: translateX(2px);
   color: #DC2626;
 }
 

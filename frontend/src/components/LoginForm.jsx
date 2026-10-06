@@ -45,7 +45,7 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
     }, 4000);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -62,128 +62,175 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
     const trimmedUser = username.trim();
     const lowerUser = trimmedUser.toLowerCase();
 
-    // Check admin credentials:
-    // Email: admin@learnsmart.edu, admin@learnsmart.com, or admin
-    // Password: Admin@123 or admin123
-    const isAdminTargetEmail =
-      lowerUser === 'admin@learnsmart.edu' ||
-      lowerUser === 'admin@learnsmart.com' ||
-      lowerUser === 'admin';
+    setIsLoading(true);
 
-    const isAdminAttempt =
-      isAdminTargetEmail ||
-      lowerUser.includes('admin') ||
-      password === 'Admin@123' ||
-      password === 'admin123';
+    try {
+      let resolvedRole = null;
+      let resolvedProfile = null;
+      let resolvedName = '';
 
-    if (isAdminAttempt) {
-      if (isAdminTargetEmail && (password === 'Admin@123' || password === 'admin123')) {
-        setIsLoading(true);
-        setTimeout(() => {
-          setIsLoading(false);
-          if (onLoginSuccess) {
-            onLoginSuccess('Admin', 'admin');
+      // 1. If username format looks like an email, attempt Firebase Authentication
+      if (trimmedUser.includes('@')) {
+        const fbRes = await authService.loginWithFirebase(trimmedUser, password);
+        if (fbRes && fbRes.success && fbRes.user) {
+          const authUser = fbRes.user;
+
+          // Check if this Firebase authenticated user matches Admin
+          const adminUser = typeof sharedDatabase.getAdminUser === 'function'
+            ? sharedDatabase.getAdminUser(trimmedUser)
+            : null;
+
+          if (adminUser || lowerUser === 'admin@learnsmart.edu') {
+            resolvedRole = 'admin';
+            resolvedProfile = adminUser || { name: 'Admin', email: authUser.email, role: 'admin' };
+            resolvedName = resolvedProfile.name || 'Admin';
+          } else {
+            // Check if user is a registered Educator
+            const educator = typeof sharedDatabase.getEducatorByEmail === 'function'
+              ? sharedDatabase.getEducatorByEmail(trimmedUser)
+              : sharedDatabase.getAllEducators().find((edu) => edu.email && edu.email.toLowerCase() === lowerUser);
+
+            if (educator) {
+              if (educator.isActive === false) {
+                await authService.logout();
+                setIsLoading(false);
+                setErrorMessage('This account has been deactivated. Please contact your administrator.');
+                return;
+              }
+              resolvedRole = 'educator';
+              resolvedProfile = educator;
+              resolvedName = educator.name || 'Educator';
+            } else {
+              // Check if user is a registered Student
+              const student = sharedDatabase.getStudentByEmail(trimmedUser) ||
+                sharedDatabase.getStudentByUid(authUser.uid);
+
+              if (student) {
+                if (student.isActive === false) {
+                  await authService.logout();
+                  setIsLoading(false);
+                  setErrorMessage('This account has been deactivated. Please contact your educator.');
+                  return;
+                }
+                resolvedRole = student.role || 'student';
+                resolvedProfile = student;
+                resolvedName = student.name || 'Student';
+              } else {
+                // Verified via Firebase Auth, sync as student
+                const studentName = (authUser.displayName && authUser.displayName.trim()) || authUser.email.split('@')[0];
+                const newStudent = sharedDatabase.registerStudent({
+                  name: studentName,
+                  email: authUser.email,
+                  uid: authUser.uid,
+                  password,
+                  authProvider: 'firebase'
+                });
+                resolvedRole = 'student';
+                resolvedProfile = newStudent;
+                resolvedName = newStudent.name;
+              }
+            }
           }
-        }, 500);
-      } else {
-        setErrorMessage('Invalid administrator email or password.');
-      }
-      return;
-    }
-
-    // Check educator credentials:
-    // Email: Educator@leaensmart.com (also supporting educator@learnsmart.com)
-    // Password: Educator@123
-    const isEducatorTargetEmail =
-      lowerUser === 'educator@leaensmart.com' ||
-      lowerUser === 'educator@learnsmart.com';
-
-    const isEducatorAttempt =
-      isEducatorTargetEmail ||
-      lowerUser === 'educator' ||
-      lowerUser.includes('educator') ||
-      lowerUser.endsWith('@leaensmart.com') ||
-      lowerUser.endsWith('@learnsmart.com') ||
-      password === 'Educator@123';
-
-    if (isEducatorAttempt) {
-      if (isEducatorTargetEmail && password === 'Educator@123') {
-        setIsLoading(true);
-        setTimeout(() => {
-          setIsLoading(false);
-          if (onLoginSuccess) {
-            onLoginSuccess('Dr. Priya S.', 'educator');
+        } else if (fbRes?.error) {
+          // Check for account status Firebase errors
+          if (fbRes.error.code === 'auth/user-disabled') {
+            setIsLoading(false);
+            setErrorMessage('This account has been disabled. Please contact support.');
+            return;
           }
-        }, 500);
-      } else {
-        setErrorMessage('Invalid educator email or password.');
+          if (fbRes.error.code === 'auth/too-many-requests') {
+            setIsLoading(false);
+            setErrorMessage('Too many unsuccessful login attempts. Please try again later.');
+            return;
+          }
+        }
       }
-      return;
-    }
 
-    const proceedLocalLogin = () => {
-      setIsLoading(false);
-      const student = sharedDatabase.getStudentByUsername(trimmedUser);
+      // 2. If Firebase authentication did not resolve a profile (e.g. offline, username login, or local-only accounts)
+      // verify strictly against the project's registered accounts database (sharedDatabase)
+      if (!resolvedProfile) {
+        // A. Check registered students
+        const student = sharedDatabase.getStudentByUsername(trimmedUser);
+        if (student) {
+          if (!student.password || student.password !== password) {
+            setIsLoading(false);
+            setErrorMessage('Invalid email or password.');
+            return;
+          }
+          if (student.isActive === false) {
+            setIsLoading(false);
+            setErrorMessage('This account has been deactivated. Please contact your educator.');
+            return;
+          }
+          resolvedRole = student.role || 'student';
+          resolvedProfile = student;
+          resolvedName = student.name || 'Student';
+        }
 
-      // Check if student was deactivated by educator
-      if (student && student.isActive === false) {
-        setErrorMessage('This account has been deactivated. Please contact your educator.');
+        // B. Check registered educators
+        if (!resolvedProfile) {
+          const educator = typeof sharedDatabase.getEducatorByUsername === 'function'
+            ? sharedDatabase.getEducatorByUsername(trimmedUser)
+            : sharedDatabase.getAllEducators().find(
+                (edu) =>
+                  (edu.email && edu.email.toLowerCase() === lowerUser) ||
+                  (edu.name && edu.name.toLowerCase() === lowerUser)
+              );
+
+          if (educator) {
+            if (!educator.password || educator.password !== password) {
+              setIsLoading(false);
+              setErrorMessage('Invalid email or password.');
+              return;
+            }
+            if (educator.isActive === false) {
+              setIsLoading(false);
+              setErrorMessage('This account has been deactivated. Please contact your administrator.');
+              return;
+            }
+            resolvedRole = 'educator';
+            resolvedProfile = educator;
+            resolvedName = educator.name || 'Educator';
+          }
+        }
+
+        // C. Check registered admin
+        if (!resolvedProfile && typeof sharedDatabase.getAdminUser === 'function') {
+          const admin = sharedDatabase.getAdminUser(trimmedUser);
+          if (admin) {
+            if (!admin.password || admin.password !== password) {
+              setIsLoading(false);
+              setErrorMessage('Invalid email or password.');
+              return;
+            }
+            if (admin.isActive === false) {
+              setIsLoading(false);
+              setErrorMessage('This account has been deactivated. Please contact your administrator.');
+              return;
+            }
+            resolvedRole = 'admin';
+            resolvedProfile = admin;
+            resolvedName = admin.name || 'Admin';
+          }
+        }
+      }
+
+      // 3. If no registered user matched with valid credentials, reject login
+      if (!resolvedProfile) {
+        setIsLoading(false);
+        setErrorMessage('Invalid email or password.');
         return;
       }
 
-      if (student) {
-        if (student.password && student.password !== password) {
-          setErrorMessage('Incorrect password.');
-          return;
-        }
-        if (onLoginSuccess) {
-          onLoginSuccess(student.name, 'student', student);
-        }
-      } else {
-        // Register newly logging in student to shared database
-        const cleanName = trimmedUser.includes('@')
-          ? trimmedUser.split('@')[0].replace(/[._-]/g, ' ')
-          : trimmedUser;
-        const formattedName = cleanName
-          .split(' ')
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-
-        const newStudent = sharedDatabase.registerStudent({
-          name: formattedName || 'Shaik Aathif',
-          email: trimmedUser.includes('@')
-            ? trimmedUser
-            : `${trimmedUser.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
-          password
-        });
-
-        if (onLoginSuccess) {
-          onLoginSuccess(newStudent.name, 'student', newStudent);
-        }
+      // 4. Successful authentication -> Route based on resolved role
+      setIsLoading(false);
+      if (onLoginSuccess) {
+        onLoginSuccess(resolvedName, resolvedRole, resolvedProfile);
       }
-    };
-
-    // Authenticate student against Firebase or shared database
-    setIsLoading(true);
-
-    if (trimmedUser.includes('@')) {
-      authService
-        .loginWithFirebase(trimmedUser, password)
-        .then((fbRes) => {
-          if (fbRes && fbRes.success && fbRes.student) {
-            setIsLoading(false);
-            if (onLoginSuccess) {
-              onLoginSuccess(fbRes.student.name, 'student', fbRes.student);
-            }
-          } else {
-            proceedLocalLogin();
-          }
-        })
-        .catch(() => {
-          proceedLocalLogin();
-        });
-    } else {
-      setTimeout(proceedLocalLogin, 400);
+    } catch (err) {
+      console.error('Login authentication error:', err);
+      setIsLoading(false);
+      setErrorMessage('Invalid email or password.');
     }
   };
 

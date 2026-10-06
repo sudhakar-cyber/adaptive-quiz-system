@@ -34,16 +34,16 @@ export const EducatorProfileView = ({
 
   // Edit form state
   const [formData, setFormData] = useState({
-    fullName: profileData.fullName || 'Dr. Priya S.',
-    academicTitle: profileData.academicTitle || 'Associate Professor & Course Director',
-    department: profileData.department || 'School of Computer Science & Engineering',
-    email: profileData.email || 'priya.sharma@learnsmart.edu',
-    phone: profileData.phone || '+91 98450 12345',
-    facultyId: profileData.facultyId || 'FAC-CS-2021-042',
-    officeLocation: profileData.officeLocation || 'Tech Block B, Suite 402',
-    officeHours: profileData.officeHours || 'Mon & Thu: 2:00 PM – 4:00 PM (IST)',
-    bio: profileData.bio || 'Dr. Priya S. holds a Ph.D. in Computer Science with over 12 years of experience in distributed systems, adaptive learning algorithms, and cybersecurity education.',
-    teachingPhilosophy: profileData.teachingPhilosophy || 'Empowering students through iterative, adaptive problem-solving and hands-on algorithmic design.'
+    fullName: profileData.fullName || 'Educator',
+    academicTitle: profileData.academicTitle || 'Faculty Member',
+    department: profileData.department || 'Computer Science',
+    email: profileData.email || 'educator@learnsmart.com',
+    phone: profileData.phone || '',
+    facultyId: profileData.facultyId || '',
+    officeLocation: profileData.officeLocation || '',
+    officeHours: profileData.officeHours || '',
+    bio: profileData.bio || '',
+    teachingPhilosophy: profileData.teachingPhilosophy || ''
   });
 
   // Password state
@@ -55,12 +55,12 @@ export const EducatorProfileView = ({
   const [passwordError, setPasswordError] = useState('');
 
   const educatorInitials = (() => {
-    const name = formData.fullName || profileData.fullName || 'Dr. Priya S.';
+    const name = formData.fullName || profileData.fullName || 'Educator';
     const cleanName = name.replace(/^(Dr\.|Prof\.|Mr\.|Mrs\.|Ms\.)\s*/i, '').trim();
     const parts = cleanName.split(/\s+/);
     if (parts.length === 1 && parts[0]) return parts[0].slice(0, 2).toUpperCase();
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    return 'PS';
+    return 'ED';
   })();
 
   const handleAvatarUpload = (e) => {
