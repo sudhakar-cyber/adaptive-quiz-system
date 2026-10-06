@@ -31,6 +31,7 @@ import { LearningPathView } from './LearningPathView';
 import { NotificationsView, NotificationsDropdown } from './NotificationsView';
 import { ProfileView, ProfileDropdownMenu } from './ProfileView';
 import { sharedDatabase } from '../services/sharedDatabase';
+import { auth, onAuthStateChanged } from '../config/firebase';
 
 export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -43,6 +44,24 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [startEditProfile, setStartEditProfile] = useState(false);
+
+  // Authenticated Firebase user state
+  const [firebaseUser, setFirebaseUser] = useState(() => auth.currentUser);
+
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setFirebaseUser(user);
+        if (user.displayName && user.displayName.trim()) {
+          setCurrentUsername(user.displayName.trim());
+        }
+        if (user.photoURL) {
+          setProfileImage(user.photoURL);
+        }
+      }
+    });
+    return () => unsubscribeAuth();
+  }, []);
 
   const [activeQuizModal, setActiveQuizModal] = useState(() => {
     try {
@@ -74,10 +93,15 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
 
   const currentStudent = sharedDatabase.getStudentByUsername(username);
 
-  const [currentUsername, setCurrentUsername] = useState(username || 'Shaik Aathif');
+  const [currentUsername, setCurrentUsername] = useState(() => {
+    if (auth.currentUser?.displayName && auth.currentUser.displayName.trim()) {
+      return auth.currentUser.displayName.trim();
+    }
+    return username || 'Shaik Aathif';
+  });
   const [profileImage, setProfileImage] = useState(() => {
     try {
-      return localStorage.getItem('learnsmart_avatar') || null;
+      return auth.currentUser?.photoURL || localStorage.getItem('learnsmart_avatar') || null;
     } catch {
       return null;
     }
@@ -239,21 +263,97 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
     setTimeout(() => setToastMessage(''), 3500);
   };
 
+  // Determine display name using Firebase Authentication currentUser data first
+  // Critical rule: Do not use the email address as the username when displayName is available.
+  // Safe fallback to email username only when displayName is null or empty.
   const displayName = (() => {
-    if (!currentUsername || currentUsername.trim() === '') return 'Shaik Aathif';
-    let name = currentUsername.split('@')[0];
-    return name
-      .replace(/[._-]/g, ' ')
-      .split(' ')
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
+    if (firebaseUser) {
+      if (firebaseUser.displayName && firebaseUser.displayName.trim().length > 0) {
+        return firebaseUser.displayName.trim();
+      }
+      if (firebaseUser.email && firebaseUser.email.includes('@')) {
+        const emailPrefix = firebaseUser.email.split('@')[0];
+        return emailPrefix
+          .replace(/[._-]/g, ' ')
+          .split(' ')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+      }
+    }
+
+    try {
+      const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
+      if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@')) {
+        return savedProfile.fullName.trim();
+      }
+    } catch {}
+
+    const raw = currentUsername || username || localStorage.getItem('learnsmart_user');
+    if (!raw || raw.trim() === '') return 'Shaik Aathif';
+
+    if (raw.includes('@')) {
+      const emailPrefix = raw.split('@')[0];
+      return emailPrefix
+        .replace(/[._-]/g, ' ')
+        .split(' ')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    }
+
+    return raw.trim();
+  })();
+
+  // User email displayed separately
+  const userEmail = (() => {
+    if (firebaseUser?.email) return firebaseUser.email;
+    const storedEmail = localStorage.getItem('learnsmart_email');
+    if (storedEmail) return storedEmail;
+    try {
+      const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
+      if (savedProfile?.email) return savedProfile.email;
+    } catch {}
+    const student =
+      sharedDatabase.getStudentByUsername(displayName) ||
+      sharedDatabase.getStudentByUsername(currentUsername);
+    if (student?.email) return student.email;
+    return `${(displayName || 'shaik.aathif').toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`;
+  })();
+
+  // Unique user ID from Firebase or storage
+  const userUid = (() => {
+    if (firebaseUser?.uid) return firebaseUser.uid;
+    const storedUid = localStorage.getItem('learnsmart_uid');
+    if (storedUid) return storedUid;
+    try {
+      const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
+      if (savedProfile?.uid) return savedProfile.uid;
+    } catch {}
+    const student =
+      sharedDatabase.getStudentByUsername(displayName) ||
+      sharedDatabase.getStudentByUsername(currentUsername);
+    if (student?.uid) return student.uid;
+    return '';
+  })();
+
+  // Effective profile avatar image
+  const effectiveProfileImage = (() => {
+    if (profileImage) return profileImage;
+    if (firebaseUser?.photoURL) return firebaseUser.photoURL;
+    const storedAvatar = localStorage.getItem('learnsmart_avatar');
+    if (storedAvatar) return storedAvatar;
+    const student =
+      sharedDatabase.getStudentByUsername(displayName) ||
+      sharedDatabase.getStudentByUsername(currentUsername);
+    if (student?.avatarImage) return student.avatarImage;
+    return null;
   })();
 
   const userInitials = (() => {
     if (!displayName) return 'SA';
     const parts = displayName.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1 && parts[0]) return parts[0].slice(0, 2).toUpperCase();
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return 'SA';
   })();
 
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
@@ -417,7 +517,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
 
     // Record quiz attempt into shared database so Educator Dashboard updates
     sharedDatabase.recordQuizAttempt({
-      studentName: displayName,
+      studentName: currentUsername,
       studentEmail: currentStudent?.email || `${currentUsername.toLowerCase().replace(/\s+/g, '.')}@learnsmart.edu`,
       quizTitle,
       score,
@@ -559,14 +659,20 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
               tabIndex={0}
             >
               <div className="student-avatar-badge" aria-label={displayName}>
-                {profileImage ? (
-                  <img src={profileImage} alt={displayName} className="student-avatar-img" />
+                {effectiveProfileImage ? (
+                  <img
+                    src={effectiveProfileImage}
+                    alt={displayName}
+                    className="student-avatar-img"
+                    referrerPolicy="no-referrer"
+                  />
                 ) : (
                   userInitials
                 )}
               </div>
               <div className="user-meta">
                 <span className="user-name">{displayName}</span>
+                {userEmail && <span className="user-email" title={userEmail}>{userEmail}</span>}
                 <span className="user-role">Student</span>
               </div>
               <span
@@ -580,8 +686,10 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
             {showProfileDropdown && (
               <ProfileDropdownMenu
                 displayName={displayName}
+                userEmail={userEmail}
                 userInitials={userInitials}
-                profileImage={profileImage}
+                profileImage={effectiveProfileImage}
+                uid={userUid}
                 onClose={() => setShowProfileDropdown(false)}
                 onNavigate={(tab) => {
                   if (tab === 'edit-profile') {
@@ -700,6 +808,11 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
                 <div className="greeting-text-wrap">
                   <h1 className="greeting-title">Hello, {displayName}! 👋</h1>
                   <p className="greeting-subtext">Keep learning, you're doing great!</p>
+                  {userEmail && (
+                    <div className="greeting-email-badge">
+                      <span>{userEmail}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="greeting-cta-wrap">
                   <button
@@ -1220,8 +1333,10 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
           {activeTab === 'profile' && (
             <ProfileView
               displayName={displayName}
+              userEmail={userEmail}
               userInitials={userInitials}
-              profileImage={profileImage}
+              profileImage={effectiveProfileImage}
+              uid={userUid}
               startInEditMode={startEditProfile}
               onEditClosed={() => setStartEditProfile(false)}
               onUpdateProfile={(updatedData) => {
@@ -1263,6 +1378,7 @@ export const Dashboard = ({ username = 'Shaik Aathif', onLogout }) => {
       {activeQuizModal && (
         <QuizModal
           quiz={activeQuizModal}
+          studentName={currentUsername}
           onClose={() => setActiveQuizModal(null)}
           onComplete={handleQuizCompleted}
           showToast={showToast}

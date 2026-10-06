@@ -409,14 +409,18 @@ export const sharedDatabase = {
     return all.find((s) => s.email && s.email.toLowerCase() === lower && s.isActive !== false) || null;
   },
 
-  // Find student by username or email or name
+  // Find student by username or email or name or uid
   getStudentByUsername: (identifier) => {
     if (!identifier) return null;
     const lower = identifier.trim().toLowerCase();
     const all = loadStoredStudents();
 
+    // 0. Direct uid match
+    let match = all.find((s) => s.uid && s.uid.toLowerCase() === lower);
+    if (match) return match;
+
     // 1. Direct email match
-    let match = all.find((s) => s.email && s.email.toLowerCase() === lower);
+    match = all.find((s) => s.email && s.email.toLowerCase() === lower);
     if (match) return match;
 
     // 2. Direct name match
@@ -441,6 +445,13 @@ export const sharedDatabase = {
     return all.find((s) => s.id === id) || null;
   },
 
+  // Find student by Firebase UID
+  getStudentByUid: (uid) => {
+    if (!uid) return null;
+    const all = loadStoredStudents();
+    return all.find((s) => s.uid === uid && s.isActive !== false) || null;
+  },
+
   // Register a new Student (from Register Page or Google Signup)
   registerStudent: ({
     firstName = '',
@@ -450,22 +461,32 @@ export const sharedDatabase = {
     password = '',
     phone = '',
     country = '',
+    avatarImage = null,
+    photoURL = null,
+    uid = '',
     authProvider = 'local'
   }) => {
     const all = loadStoredStudents();
     const cleanEmail = (email || '').trim().toLowerCase();
+    const resolvedAvatar = avatarImage || photoURL || null;
     const fullName = name ? name.trim() : `${firstName} ${lastName}`.trim() || 'Student';
 
-    // Check if student already exists
+    // Check if student already exists by email or uid
     const existingIndex = all.findIndex(
-      (s) => s.email && s.email.toLowerCase() === cleanEmail
+      (s) => (cleanEmail && s.email && s.email.toLowerCase() === cleanEmail) ||
+             (uid && s.uid && s.uid === uid)
     );
 
     if (existingIndex !== -1) {
-      // If student was deactivated, reactivate
+      // If student was deactivated, reactivate and update fields
       const existing = all[existingIndex];
       const updated = {
         ...existing,
+        name: (fullName && fullName !== 'Student') ? fullName : existing.name,
+        avatarImage: resolvedAvatar || existing.avatarImage || null,
+        uid: uid || existing.uid || '',
+        avatarInitials: getInitials((fullName && fullName !== 'Student') ? fullName : existing.name),
+        authProvider: authProvider || existing.authProvider,
         isActive: true,
         lastActive: 'Just now'
       };
@@ -475,7 +496,7 @@ export const sharedDatabase = {
     }
 
     const newStudent = {
-      id: `stud-${Date.now()}`,
+      id: uid ? `stud-${uid}` : `stud-${Date.now()}`,
       name: fullName,
       email: cleanEmail,
       password: password || '',
@@ -492,6 +513,8 @@ export const sharedDatabase = {
       statusVariant: 'info',
       lastActive: 'Just now',
       avatarInitials: getInitials(fullName),
+      avatarImage: resolvedAvatar,
+      uid: uid || '',
       authProvider,
       isActive: true,
       subjectMastery: [
@@ -1265,6 +1288,64 @@ export const sharedDatabase = {
         window.removeEventListener('storage', handleStorageEvent);
       }
     };
+  },
+
+  // ==========================================
+  // QUIZ FEEDBACK MANAGEMENT
+  // ==========================================
+  saveQuizFeedback: (feedbackData) => {
+    try {
+      const STORAGE_KEY_FEEDBACKS = 'learnsmart_quiz_feedbacks';
+      const existing = JSON.parse(localStorage.getItem(STORAGE_KEY_FEEDBACKS) || '[]');
+      const newFeedback = {
+        id: `fb-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        ...feedbackData
+      };
+      const updated = [newFeedback, ...existing];
+      localStorage.setItem(STORAGE_KEY_FEEDBACKS, JSON.stringify(updated));
+
+      // Push real-time notification to educator notifications
+      try {
+        const notifKey = 'learnsmart_educator_notifications';
+        const rawNotifs = localStorage.getItem(notifKey);
+        const currentNotifs = rawNotifs ? JSON.parse(rawNotifs) : [];
+        const newNotif = {
+          id: `ed-notif-${Date.now()}`,
+          title: `Quiz Feedback: ${feedbackData.quizTitle || 'Assessment'}`,
+          message: `${feedbackData.studentName || 'Student'} rated "${feedbackData.quizTitle || 'Quiz'}" with ${feedbackData.clarityRating || 5}/5 stars: "${(feedbackData.comments || '').slice(0, 80)}..."`,
+          category: 'feedback',
+          type: 'feedback',
+          time: 'Just now',
+          read: false,
+          sender: feedbackData.studentName || 'Student'
+        };
+        const updatedNotifs = [newNotif, ...currentNotifs];
+        localStorage.setItem(notifKey, JSON.stringify(updatedNotifs));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('storage'));
+        }
+      } catch (err) {
+        console.warn('Failed to dispatch educator notification for feedback:', err);
+      }
+
+      return newFeedback;
+    } catch (e) {
+      console.warn('Failed to save quiz feedback:', e);
+      return null;
+    }
+  },
+
+  getQuizFeedbacks: (quizId = null) => {
+    try {
+      const list = JSON.parse(localStorage.getItem('learnsmart_quiz_feedbacks') || '[]');
+      if (quizId) return list.filter((f) => f.quizId === quizId);
+      return list;
+    } catch (e) {
+      return [];
+    }
   },
 
   // Subscribe to real-time student updates

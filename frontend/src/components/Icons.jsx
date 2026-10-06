@@ -36,7 +36,7 @@ export const ChartIcon = ({ className = '', size = 22, color = '#00BA88' }) => (
   </svg>
 );
 
-export const StarIcon = ({ className = '', size = 22, color = '#F59E0B' }) => (
+export const StarIcon = ({ className = '', size = 22, color = '#F59E0B', fill = 'none' }) => (
   <svg
     width={size}
     height={size}
@@ -51,6 +51,7 @@ export const StarIcon = ({ className = '', size = 22, color = '#F59E0B' }) => (
       strokeWidth="2.2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      fill={fill}
     />
   </svg>
 );

@@ -22,8 +22,10 @@ import { sharedDatabase } from '../services/sharedDatabase';
 
 export const ProfileView = ({
   displayName = 'Shaik Aathif',
+  userEmail = '',
   userInitials = 'SA',
   profileImage = null,
+  uid = '',
   startInEditMode = false,
   onEditClosed,
   onUpdateProfile,
@@ -48,10 +50,11 @@ export const ProfileView = ({
         if (parsed && typeof parsed === 'object') {
           return {
             fullName: displayName || parsed.fullName || 'Shaik Aathif',
-            email: parsed.email || 'shaik.aathif@learnsmart.edu',
+            email: userEmail || parsed.email || 'shaik.aathif@learnsmart.edu',
             phone: parsed.phone || '+91 98765 43210',
             major: parsed.major || 'Computer Science & Engineering',
             studentId: parsed.studentId || 'LS-2024-8841',
+            uid: uid || parsed.uid || '',
             semester: parsed.semester || 'Year 3 (Semester 6)',
             bio: parsed.bio || 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
             targetGoal: parsed.targetGoal || 'Aiming for Software Engineering Internships at top technology companies in 2027.'
@@ -63,10 +66,11 @@ export const ProfileView = ({
     }
     return {
       fullName: displayName || 'Shaik Aathif',
-      email: 'shaik.aathif@learnsmart.edu',
+      email: userEmail || 'shaik.aathif@learnsmart.edu',
       phone: '+91 98765 43210',
       major: 'Computer Science & Engineering',
       studentId: 'LS-2024-8841',
+      uid: uid || '',
       semester: 'Year 3 (Semester 6)',
       bio: 'Passionate computer science student specializing in data structures, algorithmic optimization, and full-stack web applications.',
       targetGoal: 'Aiming for Software Engineering Internships at top technology companies in 2027.'
@@ -74,12 +78,15 @@ export const ProfileView = ({
   });
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
-  // Sync with prop if display name changes
+  // Sync with prop if display name, email, or uid changes
   useEffect(() => {
-    if (displayName && !formData.fullName) {
-      setFormData((prev) => ({ ...prev, fullName: displayName }));
-    }
-  }, [displayName]);
+    setFormData((prev) => ({
+      ...prev,
+      fullName: displayName || prev.fullName,
+      email: userEmail || prev.email,
+      uid: uid || prev.uid || ''
+    }));
+  }, [displayName, userEmail, uid]);
 
   // Handle external trigger to open edit modal (e.g. from dropdown)
   useEffect(() => {
@@ -244,6 +251,7 @@ export const ProfileView = ({
                 src={currentAvatar}
                 alt={formData.fullName}
                 className="profile-avatar-large-img"
+                referrerPolicy="no-referrer"
               />
             ) : (
               <div className="profile-avatar-large">
@@ -271,6 +279,7 @@ export const ProfileView = ({
             </p>
             <div className="profile-id-pills">
               <span className="id-pill">ID: {formData.studentId}</span>
+              {formData.uid && <span className="id-pill">UID: {formData.uid.slice(0, 10)}...</span>}
               <span className="id-pill">Academic Year: 2024-2027</span>
             </div>
           </div>
@@ -314,6 +323,13 @@ export const ProfileView = ({
               <span className="detail-item-label">Email Address:</span>
               <span className="detail-item-value">{formData.email}</span>
             </div>
+
+            {formData.uid && (
+              <div className="profile-detail-item">
+                <span className="detail-item-label">Firebase UID:</span>
+                <span className="detail-item-value" style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{formData.uid}</span>
+              </div>
+            )}
 
             <div className="profile-detail-item">
               <span className="detail-item-label">Phone Number:</span>
@@ -574,8 +590,10 @@ export const ProfileView = ({
 
 export const ProfileDropdownMenu = ({
   displayName = 'Shaik Aathif',
+  userEmail = '',
   userInitials = 'SA',
   profileImage = null,
+  uid = '',
   onClose,
   onNavigate,
   onLogout
@@ -588,12 +606,14 @@ export const ProfileDropdownMenu = ({
             src={profileImage}
             alt={displayName}
             className="dropdown-avatar-img"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="dropdown-avatar-badge">{userInitials}</div>
         )}
         <div className="dropdown-user-details">
           <span className="dropdown-user-name">{displayName}</span>
+          {userEmail && <span className="dropdown-user-email">{userEmail}</span>}
           <span className="dropdown-user-role">Student • CS & Engg</span>
         </div>
       </div>
