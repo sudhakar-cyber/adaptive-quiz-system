@@ -856,6 +856,71 @@ export const sharedDatabase = {
     return updated;
   },
 
+  // Resolve registered email from username, name, or email string
+  resolveUserEmail: (identifier) => {
+    if (!identifier || typeof identifier !== 'string') return null;
+    const clean = identifier.trim().toLowerCase();
+    if (clean.includes('@') && clean.includes('.')) {
+      return clean;
+    }
+    const student = sharedDatabase.getStudentByUsername(clean);
+    if (student && student.email) return student.email.toLowerCase();
+
+    const educator = sharedDatabase.getEducatorByUsername(clean);
+    if (educator && educator.email) return educator.email.toLowerCase();
+
+    const admin = sharedDatabase.getAdminUser(clean);
+    if (admin && admin.email) return admin.email.toLowerCase();
+
+    return null;
+  },
+
+  // Update password across student, educator, or admin records
+  updateUserPassword: (email, newPassword) => {
+    if (!email || !newPassword) return false;
+    const cleanEmail = email.trim().toLowerCase();
+    let updated = false;
+
+    // Check students
+    const students = loadStoredStudents();
+    const studentIdx = students.findIndex(
+      (s) => s.email && s.email.toLowerCase() === cleanEmail
+    );
+    if (studentIdx !== -1) {
+      students[studentIdx].password = newPassword;
+      persistStudents(students);
+      updated = true;
+    }
+
+    // Check educators
+    const educators = loadStoredEducators();
+    const eduIdx = educators.findIndex(
+      (e) => e.email && e.email.toLowerCase() === cleanEmail
+    );
+    if (eduIdx !== -1) {
+      educators[eduIdx].password = newPassword;
+      persistEducators(educators);
+      updated = true;
+    }
+
+    // Check admin
+    const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
+    try {
+      const rawAdmin = localStorage.getItem(STORAGE_KEY_ADMIN);
+      if (rawAdmin) {
+        const adminObj = JSON.parse(rawAdmin);
+        if (adminObj && adminObj.email && adminObj.email.toLowerCase() === cleanEmail) {
+          adminObj.password = newPassword;
+          localStorage.setItem(STORAGE_KEY_ADMIN, JSON.stringify(adminObj));
+          updated = true;
+        }
+      }
+    } catch {}
+
+    return updated;
+  },
+
+
   // ==========================================
   // QUIZ MANAGEMENT
   // ==========================================

@@ -94,7 +94,8 @@ export const StudentRoute = ({ children }) => {
     return <RouteLoader />;
   }
 
-  if (role === 'student' && (user || authService.isStudent())) {
+  const effectiveRole = role || (user ? 'student' : null);
+  if (effectiveRole === 'student' && (user || authService.isStudent())) {
     return children;
   }
 
@@ -121,7 +122,8 @@ export const PublicAuthRoute = ({ children }) => {
     return <Navigate to="/educator-dashboard" replace />;
   }
 
-  if (role === 'student' && (user || authService.isStudent())) {
+  const effectiveRole = role || (user ? 'student' : null);
+  if (effectiveRole === 'student' && (user || authService.isStudent())) {
     return <Navigate to="/dashboard" replace />;
   }
 

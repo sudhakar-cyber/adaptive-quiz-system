@@ -35,7 +35,7 @@ async function fetchWithFallback(endpoint, options = {}) {
 
 export const otpService = {
   /**
-   * Request a real 6-digit verification code to be sent to the user's email.
+   * Request a real 4-digit verification code to be sent to the user's email.
    * @param {string} email
    * @returns {Promise<{success: boolean, message?: string, error?: string, cooldownSeconds?: number}>}
    */
@@ -104,7 +104,7 @@ export const otpService = {
   },
 
   /**
-   * Verify the 6-digit OTP entered by the user.
+   * Verify the 4-digit OTP entered by the user.
    * @param {string} email
    * @param {string} otp
    * @returns {Promise<{success: boolean, verificationToken?: string, error?: string}>}
@@ -112,10 +112,10 @@ export const otpService = {
   verifyOtp: async (email, otp) => {
     try {
       const cleanOtp = (otp || '').trim();
-      if (!cleanOtp || cleanOtp.length !== 6) {
+      if (!cleanOtp || cleanOtp.length !== 4) {
         return {
           success: false,
-          error: 'Please enter the complete 6-digit verification code.'
+          error: 'Please enter the complete 4-digit verification code.'
         };
       }
 

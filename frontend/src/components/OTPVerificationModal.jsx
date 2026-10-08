@@ -10,7 +10,7 @@ export const OTPVerificationModal = ({
   initialCooldown = 60,
   initialExpiryMinutes = 10
 }) => {
-  const [digits, setDigits] = useState(['', '', '', '', '', '']);
+  const [digits, setDigits] = useState(['', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -23,7 +23,7 @@ export const OTPVerificationModal = ({
   // Auto-focus first input when modal opens
   useEffect(() => {
     if (isOpen) {
-      setDigits(['', '', '', '', '', '']);
+      setDigits(['', '', '', '']);
       setErrorMessage('');
       setCooldown(initialCooldown);
       setExpirySeconds(initialExpiryMinutes * 60);
@@ -62,7 +62,6 @@ export const OTPVerificationModal = ({
   };
 
   const handleDigitChange = (index, value) => {
-    // Only accept numeric digit
     const cleaned = value.replace(/\D/g, '');
     if (!cleaned) {
       const next = [...digits];
@@ -72,14 +71,13 @@ export const OTPVerificationModal = ({
     }
 
     const next = [...digits];
-    // If user pasted or entered single digit
     const singleDigit = cleaned.slice(-1);
     next[index] = singleDigit;
     setDigits(next);
     if (errorMessage) setErrorMessage('');
 
     // Auto-advance focus
-    if (index < 5) {
+    if (index < 3) {
       inputRefs.current[index + 1]?.focus();
     }
   };
@@ -89,34 +87,34 @@ export const OTPVerificationModal = ({
       inputRefs.current[index - 1]?.focus();
     } else if (e.key === 'ArrowLeft' && index > 0) {
       inputRefs.current[index - 1]?.focus();
-    } else if (e.key === 'ArrowRight' && index < 5) {
+    } else if (e.key === 'ArrowRight' && index < 3) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
   const handlePaste = (e) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
     if (!pasted) return;
 
     const next = [...digits];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       next[i] = pasted[i] || '';
     }
     setDigits(next);
     if (errorMessage) setErrorMessage('');
 
-    const focusIndex = Math.min(pasted.length, 5);
+    const focusIndex = Math.min(pasted.length, 3);
     inputRefs.current[focusIndex]?.focus();
   };
 
   const fullCode = digits.join('');
-  const isComplete = fullCode.length === 6 && digits.every((d) => d !== '');
+  const isComplete = fullCode.length === 4 && digits.every((d) => d !== '');
 
   const handleVerify = async (e) => {
     if (e) e.preventDefault();
     if (!isComplete) {
-      setErrorMessage('Please enter all 6 digits of your verification code.');
+      setErrorMessage('Please enter all 4 digits of your verification code.');
       return;
     }
 
@@ -139,7 +137,6 @@ export const OTPVerificationModal = ({
         setErrorMessage(
           res.error || 'Incorrect verification code. Please check your email and try again.'
         );
-        // Focus first box on wrong OTP so user can re-enter
         inputRefs.current[0]?.focus();
       }
     } catch (err) {
@@ -158,7 +155,7 @@ export const OTPVerificationModal = ({
     try {
       const res = await otpService.resendOtp(email);
       if (res && res.success) {
-        setDigits(['', '', '', '', '', '']);
+        setDigits(['', '', '', '']);
         setCooldown(60);
         setExpirySeconds(10 * 60);
         setSuccessToast(`A new verification code has been sent to ${email}`);
@@ -184,7 +181,7 @@ export const OTPVerificationModal = ({
             </div>
             <h2 id="otp-title" className="otp-modal-title">Verify Your Email</h2>
             <p className="otp-modal-subheading">
-              We have sent a 6-digit verification code to
+              We have sent a 4-digit verification code to
             </p>
             <div className="otp-target-email-pill">
               <span className="otp-email-text">{email}</span>
@@ -213,7 +210,7 @@ export const OTPVerificationModal = ({
           )}
 
           <form onSubmit={handleVerify} className="otp-form" noValidate>
-            <label className="otp-inputs-label">Enter 6-Digit Code</label>
+            <label className="otp-inputs-label">Enter 4-Digit Code</label>
             <div className="otp-inputs-row" onPaste={handlePaste}>
               {digits.map((digit, i) => (
                 <input

@@ -41,6 +41,7 @@ def health():
         "status": "healthy",
         "service": "LearnSmart Auth API",
         "port": config.PORT,
+        "resend_configured": bool(config.RESEND_API_KEY),
         "smtp_configured": bool(config.SMTP_USER and config.SMTP_PASS)
     }
 

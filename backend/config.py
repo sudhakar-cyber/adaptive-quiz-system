@@ -8,6 +8,10 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 class Config:
     PORT = int(os.getenv("PORT", 5000))
     
+    # Resend Email Configuration
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+    RESEND_FROM = os.getenv("RESEND_FROM", "LearnSmart <onboarding@resend.dev>").strip()
+
     # SMTP Email Configuration
     SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT = int(os.getenv("SMTP_PORT", 587))

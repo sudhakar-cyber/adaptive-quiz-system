@@ -545,8 +545,13 @@ html, body {
 }
 
 .forgot-password-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
   color: var(--primary-blue);
   text-decoration: none;
+  font-family: inherit;
   font-size: clamp(0.8rem, 0.95vw, 0.85rem);
   font-weight: 500;
   transition: color 0.15s ease, text-decoration 0.15s ease;
@@ -1499,6 +1504,202 @@ html, body {
   font-size: 0.74rem;
   color: #94A3B8;
   margin-top: 4px;
+}
+
+/* ==========================================================================
+   Forgot Password Modal & Reset Password Page Styles
+   ========================================================================== */
+.modal-close-button {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: #F1F5F9;
+  color: #64748B;
+  font-size: 1.25rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-close-button:hover:not(:disabled) {
+  background: #E2E8F0;
+  color: #0F172A;
+  transform: rotate(90deg);
+}
+
+.forgot-modal-card {
+  position: relative;
+  max-width: 440px;
+}
+
+.forgot-icon-wrap {
+  background: rgba(26, 107, 255, 0.12);
+}
+
+.modal-card-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.error-alert-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.modal-footer-nav {
+  text-align: center;
+}
+
+.modal-cancel-link {
+  background: none;
+  border: none;
+  color: #64748B;
+  font-size: 0.86rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  font-family: inherit;
+}
+
+.modal-cancel-link:hover:not(:disabled) {
+  color: #0F172A;
+  text-decoration: underline;
+}
+
+.forgot-success-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.forgot-success-icon-wrap {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.35);
+}
+
+.forgot-instructions-box {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.forgot-instructions-text {
+  font-size: 0.86rem;
+  color: #475569;
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.forgot-expiry-pill {
+  display: inline-block;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #0284C7;
+  background: #E0F2FE;
+  padding: 3px 10px;
+  border-radius: 9999px;
+}
+
+.direct-link-box {
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  border-radius: 10px;
+  padding: 10px 14px;
+  width: 100%;
+  text-align: left;
+}
+
+.direct-link-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1D4ED8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.direct-link-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.direct-link-anchor {
+  font-size: 0.82rem;
+  color: #1A6BFF;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.direct-link-anchor:hover {
+  text-decoration: underline;
+}
+
+.copy-link-btn {
+  background: #DBEAFE;
+  border: 1px solid #93C5FD;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #1E40AF;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.copy-link-btn:hover {
+  background: #BFDBFE;
+}
+
+.forgot-success-actions {
+  width: 100%;
+}
+
+/* Reset Password Page Layout */
+.reset-password-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.reset-password-container {
+  width: 100%;
+  max-width: 440px;
+  position: relative;
+  z-index: 10;
+}
+
+.reset-card {
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+
+.password-strength-wrap {
+  width: 100%;
 }
 
 /* ==========================================================================
