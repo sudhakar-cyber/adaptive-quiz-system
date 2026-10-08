@@ -124,10 +124,20 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     }
   });
   const [quizHistory, setQuizHistory] = useState(() => {
-    if (currentStudent?.quizzesCompleted === 0) {
-      return [];
+    try {
+      const student = sharedDatabase.getStudentByUsername(username);
+      if (student && student.quizzesCompleted === 0) {
+        return [];
+      }
+      const saved = localStorage.getItem('learnsmart_student_quiz_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return student?.quizzesCompleted === 0 ? [] : INITIAL_HISTORY;
+    } catch {
+      return INITIAL_HISTORY;
     }
-    return INITIAL_HISTORY;
   });
 
   useEffect(() => {
@@ -153,6 +163,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
             localStorage.removeItem('learnsmart_completed_quizzes');
             localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
             localStorage.removeItem('learnsmart_active_quiz_attempt');
+            localStorage.removeItem('learnsmart_student_quiz_history');
           } catch (e) {
             console.warn(e);
           }
@@ -183,6 +194,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
           localStorage.removeItem('learnsmart_completed_quizzes');
           localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
           localStorage.removeItem('learnsmart_active_quiz_attempt');
+          localStorage.removeItem('learnsmart_student_quiz_history');
         } catch (err) {
           console.warn(err);
         }
@@ -399,21 +411,99 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   const activePerformanceData =
     performanceTimeframe === 'week' ? weekPerformanceData : monthPerformanceData;
 
-  const subjectProgress = isZeroQuizzes
-    ? [
-        { name: 'Mathematics', score: 0, color: '#00C48C', pct: 0.2 },
-        { name: 'Data Structures', score: 0, color: '#00D2D3', pct: 0.2 },
-        { name: 'Python', score: 0, color: '#FFB900', pct: 0.2 },
-        { name: 'Web Security', score: 0, color: '#FF7675', pct: 0.2 },
-        { name: 'Others', score: 0, color: '#6C5CE7', pct: 0.2 }
-      ]
-    : [
-        { name: 'Mathematics', score: 90, color: '#00C48C', pct: 0.28 },
-        { name: 'Data Structures', score: 82, color: '#00D2D3', pct: 0.24 },
-        { name: 'Python', score: 76, color: '#FFB900', pct: 0.20 },
-        { name: 'Web Security', score: 68, color: '#FF7675', pct: 0.16 },
-        { name: 'Others', score: 60, color: '#6C5CE7', pct: 0.12 }
-      ];
+  const SUBJECT_CONFIGS = [
+    {
+      name: 'Mathematics',
+      color: '#00C48C',
+      bgLight: '#E6FAF0',
+      defaultScore: 90
+    },
+    {
+      name: 'Data Structures',
+      color: '#00D2D3',
+      bgLight: '#E0FAFA',
+      defaultScore: 82
+    },
+    {
+      name: 'Python',
+      color: '#FFB900',
+      bgLight: '#FFF8E6',
+      defaultScore: 76
+    },
+    {
+      name: 'Web Security',
+      color: '#FF7675',
+      bgLight: '#FFF0F0',
+      defaultScore: 68
+    },
+    {
+      name: 'Others',
+      color: '#6C5CE7',
+      bgLight: '#F3E8FF',
+      defaultScore: 60
+    }
+  ];
+
+  const mapQuizToSubject = (quizTitle = '', category = '') => {
+    const t = (quizTitle || '').toLowerCase();
+    const c = (category || '').toLowerCase();
+    if (t.includes('python')) return 'Python';
+    if (c === 'dsa' || t.includes('data structure') || t.includes('algorithm') || t.includes('tree') || t.includes('dsa')) {
+      return 'Data Structures';
+    }
+    if (c === 'mathematics' || t.includes('math') || t.includes('discrete') || t.includes('logic')) {
+      return 'Mathematics';
+    }
+    if (c === 'cyber security' || t.includes('security') || t.includes('owasp') || t.includes('cyber')) {
+      return 'Web Security';
+    }
+    return 'Others';
+  };
+
+  const subjectProgress = React.useMemo(() => {
+    if (isZeroQuizzes) {
+      return SUBJECT_CONFIGS.map((cfg) => ({
+        name: cfg.name,
+        score: 0,
+        color: cfg.color,
+        bgLight: cfg.bgLight,
+        attemptsCount: 0
+      }));
+    }
+
+    const hasCustomQuizzes = quizHistory.some((h) => h.id > 10000);
+
+    return SUBJECT_CONFIGS.map((cfg) => {
+      const attempts = quizHistory.filter(
+        (item) => mapQuizToSubject(item.title, item.category) === cfg.name
+      );
+
+      let score = 0;
+      if (attempts.length > 0) {
+        const sum = attempts.reduce((acc, curr) => {
+          const s = typeof curr.score === 'number' ? curr.score : parseInt(curr.score, 10) || 0;
+          return acc + s;
+        }, 0);
+        score = Math.round(sum / attempts.length);
+      } else {
+        score = hasCustomQuizzes ? 0 : cfg.defaultScore;
+      }
+
+      return {
+        name: cfg.name,
+        score,
+        color: cfg.color,
+        bgLight: cfg.bgLight,
+        attemptsCount: attempts.length
+      };
+    });
+  }, [isZeroQuizzes, quizHistory]);
+
+  const overallProgress = isZeroQuizzes
+    ? 0
+    : Math.round(
+        subjectProgress.reduce((sum, s) => sum + s.score, 0) / subjectProgress.length
+      );
 
   const chartW = 350;
   const chartH = 150;
@@ -442,15 +532,25 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   const donutR = 54;
   const donutStroke = 18;
   const donutC = 2 * Math.PI * donutR;
+  const numSubjects = subjectProgress.length || 5;
+  const sectorLen = donutC / numSubjects;
+  const sectorGap = 3;
+  const maxArc = sectorLen - sectorGap;
 
-  let runningPct = 0;
-  const donutSegmentsWithOffsets = subjectProgress.map((seg) => {
-    const currentOffset = -runningPct * donutC;
-    runningPct += seg.pct;
+  const donutSegments = subjectProgress.map((seg, idx) => {
+    const slotOffset = -(idx * sectorLen);
+    const fillArc =
+      isZeroQuizzes || seg.score <= 0
+        ? 0
+        : Math.min(maxArc, Math.max(1, (seg.score / 100) * maxArc));
+
     return {
       ...seg,
-      dashArray: `${seg.pct * donutC} ${donutC}`,
-      dashOffset: currentOffset
+      slotOffset,
+      trackDashArray: `${maxArc} ${donutC - maxArc}`,
+      fillDashArray: `${fillArc} ${donutC - fillArc}`,
+      hitDashArray: `${sectorLen} ${donutC - sectorLen}`,
+      fillArc
     };
   });
 
@@ -497,7 +597,15 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       status: score >= 80 ? 'Mastered' : score >= 70 ? 'Passed' : 'Needs Review',
       date: 'Just now'
     };
-    setQuizHistory((prev) => [newHistoryItem, ...prev]);
+    setQuizHistory((prev) => {
+      const updated = [newHistoryItem, ...prev];
+      try {
+        localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify(updated));
+      } catch (e) {
+        console.warn(e);
+      }
+      return updated;
+    });
 
     const newNotif = {
       id: Date.now(),
@@ -1082,38 +1190,77 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                         className="donut-svg"
                       >
                         <g transform="rotate(-90 80 80)">
-                          {donutSegmentsWithOffsets.map((seg, idx) => {
+                          {/* Background sector tracks with gaps */}
+                          {donutSegments.map((seg, idx) => (
+                            <circle
+                              key={`track-${idx}`}
+                              cx="80"
+                              cy="80"
+                              r={donutR}
+                              fill="transparent"
+                              stroke="#E2E8F0"
+                              strokeWidth={donutStroke}
+                              strokeDasharray={seg.trackDashArray}
+                              strokeDashoffset={seg.slotOffset}
+                              strokeLinecap="butt"
+                            />
+                          ))}
+
+                          {/* Active colored progress fill arcs */}
+                          {donutSegments.map((seg, idx) => {
+                            if (seg.fillArc <= 0) return null;
                             const isHovered =
                               hoveredSubject && hoveredSubject.name === seg.name;
                             return (
                               <circle
-                                key={idx}
+                                key={`fill-${idx}`}
                                 cx="80"
                                 cy="80"
                                 r={donutR}
                                 fill="transparent"
                                 stroke={seg.color}
-                                strokeWidth={isHovered ? donutStroke + 3 : donutStroke}
-                                strokeDasharray={seg.dashArray}
-                                strokeDashoffset={seg.dashOffset}
+                                strokeWidth={isHovered ? donutStroke + 4 : donutStroke}
+                                strokeDasharray={seg.fillDashArray}
+                                strokeDashoffset={seg.slotOffset}
                                 strokeLinecap="butt"
                                 style={{
                                   cursor: 'pointer',
                                   transition: 'stroke-width 0.2s ease, opacity 0.2s ease',
-                                  opacity: hoveredSubject && !isHovered ? 0.45 : 1
+                                  opacity: hoveredSubject && !isHovered ? 0.4 : 1
                                 }}
                                 onMouseEnter={() => setHoveredSubject(seg)}
                                 onMouseLeave={() => setHoveredSubject(null)}
                               />
                             );
                           })}
+
+                          {/* Transparent hover hit-areas covering each sector */}
+                          {donutSegments.map((seg, idx) => (
+                            <circle
+                              key={`hit-${idx}`}
+                              cx="80"
+                              cy="80"
+                              r={donutR}
+                              fill="transparent"
+                              stroke="transparent"
+                              strokeWidth={donutStroke + 8}
+                              strokeDasharray={seg.hitDashArray}
+                              strokeDashoffset={seg.slotOffset}
+                              style={{ cursor: 'pointer' }}
+                              onMouseEnter={() => setHoveredSubject(seg)}
+                              onMouseLeave={() => setHoveredSubject(null)}
+                              onClick={() => setActiveTab('progress')}
+                            >
+                              <title>{`${seg.name}: ${seg.score}%`}</title>
+                            </circle>
+                          ))}
                         </g>
                       </svg>
                       <div className="donut-center-text">
                         <span className="donut-percentage">
-                          {hoveredSubject ? `${hoveredSubject.score}%` : '78%'}
+                          {hoveredSubject ? `${hoveredSubject.score}%` : `${overallProgress}%`}
                         </span>
-                        <span className="donut-sublabel">
+                        <span className="donut-sublabel" title={hoveredSubject ? hoveredSubject.name : 'Overall Progress'}>
                           {hoveredSubject ? hoveredSubject.name : 'Overall Progress'}
                         </span>
                       </div>
@@ -1309,6 +1456,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
               avgScore={`${averageScore}%`}
               streakDays={streakDays}
               quizHistory={quizHistory}
+              subjectProgress={subjectProgress}
               onRetakeQuiz={handleStartQuizByIdOrTitle}
             />
           )}

@@ -420,9 +420,11 @@ export const sharedDatabase = {
       authProvider,
       isActive: isActive !== undefined ? isActive : true,
       subjectMastery: [
-        { subject: 'Python Basics', score: 0 },
+        { subject: 'Mathematics', score: 0 },
         { subject: 'Data Structures', score: 0 },
-        { subject: 'Web Security', score: 0 }
+        { subject: 'Python', score: 0 },
+        { subject: 'Web Security', score: 0 },
+        { subject: 'Others', score: 0 }
       ],
       recentSubmissions: [],
       feedbackNote: 'New student registered. Welcome to LearnSmart Adaptive Learning!'
@@ -532,6 +534,7 @@ export const sharedDatabase = {
         localStorage.removeItem('learnsmart_completed_quizzes');
         localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
         localStorage.removeItem('learnsmart_active_quiz_attempt');
+        localStorage.removeItem('learnsmart_student_quiz_history');
         localStorage.setItem(
           'learnsmart_last_reset_student',
           JSON.stringify({
@@ -601,10 +604,57 @@ export const sharedDatabase = {
 
       const updatedSubmissions = [newSubmission, ...(student.recentSubmissions || [])].slice(0, 5);
 
+      // Determine subject domain for quiz
+      const resolveSubject = (t = '', c = '') => {
+        const text = `${t} ${c}`.toLowerCase();
+        if (text.includes('python')) return 'Python';
+        if (text.includes('data structure') || text.includes('algorithm') || text.includes('tree') || text.includes('dsa')) {
+          return 'Data Structures';
+        }
+        if (text.includes('math') || text.includes('discrete') || text.includes('logic')) {
+          return 'Mathematics';
+        }
+        if (text.includes('security') || text.includes('owasp') || text.includes('cyber')) {
+          return 'Web Security';
+        }
+        return 'Others';
+      };
+
+      const subName = resolveSubject(quizTitle, category);
+      const currentMastery = Array.isArray(student.subjectMastery) && student.subjectMastery.length > 0
+        ? [...student.subjectMastery]
+        : [
+            { subject: 'Mathematics', score: 0 },
+            { subject: 'Data Structures', score: 0 },
+            { subject: 'Python', score: 0 },
+            { subject: 'Web Security', score: 0 },
+            { subject: 'Others', score: 0 }
+          ];
+
+      const matchIdx = currentMastery.findIndex(
+        (m) => m.subject.toLowerCase() === subName.toLowerCase() ||
+               m.subject.toLowerCase().includes(subName.toLowerCase()) ||
+               subName.toLowerCase().includes(m.subject.toLowerCase())
+      );
+
+      let updatedMastery;
+      if (matchIdx !== -1) {
+        const prevScore = currentMastery[matchIdx].score || 0;
+        const newScore = prevScore === 0 ? score : Math.round((prevScore + score) / 2);
+        currentMastery[matchIdx] = { ...currentMastery[matchIdx], score: newScore };
+        updatedMastery = currentMastery;
+      } else {
+        updatedMastery = [...currentMastery, { subject: subName, score }];
+      }
+
+      const topSub = [...updatedMastery].sort((a, b) => (b.score || 0) - (a.score || 0))[0]?.subject || student.topSubject || 'General';
+
       sharedDatabase.updateStudent(student.id, {
         quizzesCompleted: newTotal,
         avgScore: newAvg,
         highestScore: newHigh,
+        topSubject: topSub,
+        subjectMastery: updatedMastery,
         lastActive: 'Just now',
         status: newAvg >= 85 ? 'Top Performer' : newAvg >= 70 ? 'On Track' : 'Needs Support',
         statusVariant: newAvg >= 85 ? 'success' : newAvg >= 70 ? 'info' : 'warning',
