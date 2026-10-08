@@ -14,52 +14,93 @@ export const ProgressView = ({
   avgScore = '85.4%',
   streakDays = 7,
   quizHistory = [],
+  subjectProgress = null,
   onRetakeQuiz
 }) => {
   const isReset = quizzesTaken === 0;
 
-  const subjectBreakdown = [
-    {
-      name: 'Mathematics',
-      score: isReset ? 0 : 90,
-      color: '#00C48C',
-      mastery: isReset ? 'Not Started' : 'Mastered',
-      topicsCompleted: isReset ? '0 / 15 Topics' : '14 / 15 Topics',
-      bgLight: '#E6FAF0'
-    },
-    {
-      name: 'Data Structures & Algorithms',
-      score: isReset ? 0 : 82,
-      color: '#00D2D3',
-      mastery: isReset ? 'Not Started' : 'Proficient',
-      topicsCompleted: isReset ? '0 / 15 Topics' : '12 / 15 Topics',
-      bgLight: '#E0FAFA'
-    },
-    {
-      name: 'Python Programming',
-      score: isReset ? 0 : 76,
-      color: '#FFB900',
-      mastery: isReset ? 'Not Started' : 'Intermediate',
-      topicsCompleted: isReset ? '0 / 12 Topics' : '9 / 12 Topics',
-      bgLight: '#FFF8E6'
-    },
-    {
-      name: 'Web Security',
-      score: isReset ? 0 : 68,
-      color: '#FF7675',
-      mastery: isReset ? 'Not Started' : 'Developing',
-      topicsCompleted: isReset ? '0 / 10 Topics' : '6 / 10 Topics',
-      bgLight: '#FFF0F0'
-    },
-    {
-      name: 'Others (Cloud & OS)',
-      score: isReset ? 0 : 60,
-      color: '#6C5CE7',
-      mastery: isReset ? 'Not Started' : 'Foundational',
-      topicsCompleted: isReset ? '0 / 8 Topics' : '5 / 8 Topics',
-      bgLight: '#F3E8FF'
-    }
-  ];
+  const getMastery = (score) => {
+    if (score === 0) return 'Not Started';
+    if (score >= 85) return 'Mastered';
+    if (score >= 75) return 'Proficient';
+    if (score >= 60) return 'Intermediate';
+    return 'Developing';
+  };
+
+  const subjectBreakdown = subjectProgress
+    ? subjectProgress.map((subj) => {
+        const totalTopics =
+          subj.name.includes('Math') || subj.name.includes('Data')
+            ? 15
+            : subj.name.includes('Python')
+            ? 12
+            : subj.name.includes('Security')
+            ? 10
+            : 8;
+        const completedTopics =
+          isReset || subj.score === 0
+            ? 0
+            : Math.min(totalTopics, Math.max(1, Math.round((subj.score / 100) * totalTopics)));
+        const fullName =
+          subj.name === 'Data Structures'
+            ? 'Data Structures & Algorithms'
+            : subj.name === 'Python'
+            ? 'Python Programming'
+            : subj.name === 'Others'
+            ? 'Others (Cloud & OS)'
+            : subj.name;
+
+        return {
+          name: fullName,
+          score: isReset ? 0 : subj.score,
+          color: subj.color,
+          mastery: isReset || subj.score === 0 ? 'Not Started' : getMastery(subj.score),
+          topicsCompleted: `${completedTopics} / ${totalTopics} Topics`,
+          bgLight: subj.bgLight || '#F8FAFC'
+        };
+      })
+    : [
+        {
+          name: 'Mathematics',
+          score: isReset ? 0 : 90,
+          color: '#00C48C',
+          mastery: isReset ? 'Not Started' : 'Mastered',
+          topicsCompleted: isReset ? '0 / 15 Topics' : '14 / 15 Topics',
+          bgLight: '#E6FAF0'
+        },
+        {
+          name: 'Data Structures & Algorithms',
+          score: isReset ? 0 : 82,
+          color: '#00D2D3',
+          mastery: isReset ? 'Not Started' : 'Proficient',
+          topicsCompleted: isReset ? '0 / 15 Topics' : '12 / 15 Topics',
+          bgLight: '#E0FAFA'
+        },
+        {
+          name: 'Python Programming',
+          score: isReset ? 0 : 76,
+          color: '#FFB900',
+          mastery: isReset ? 'Not Started' : 'Intermediate',
+          topicsCompleted: isReset ? '0 / 12 Topics' : '9 / 12 Topics',
+          bgLight: '#FFF8E6'
+        },
+        {
+          name: 'Web Security',
+          score: isReset ? 0 : 68,
+          color: '#FF7675',
+          mastery: isReset ? 'Not Started' : 'Developing',
+          topicsCompleted: isReset ? '0 / 10 Topics' : '6 / 10 Topics',
+          bgLight: '#FFF0F0'
+        },
+        {
+          name: 'Others (Cloud & OS)',
+          score: isReset ? 0 : 60,
+          color: '#6C5CE7',
+          mastery: isReset ? 'Not Started' : 'Foundational',
+          topicsCompleted: isReset ? '0 / 8 Topics' : '5 / 8 Topics',
+          bgLight: '#F3E8FF'
+        }
+      ];
 
   return (
     <div className="tab-view-container progress-view">
@@ -174,35 +215,58 @@ export const ProgressView = ({
           </div>
 
           <div className="insights-container">
-            <div className="insight-block insight-positive">
-              <div className="insight-badge-pill badge-green">
-                <CheckCircleIcon size={14} color="#059669" />
-                <span>Strongest Areas</span>
+            {isReset ? (
+              <div className="insight-block insight-positive" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                <div className="insight-badge-pill" style={{ background: '#EFF6FF', color: '#1D4ED8' }}>
+                  <TargetIcon size={14} color="#1D4ED8" />
+                  <span>Adaptive Diagnostic Ready</span>
+                </div>
+                <p style={{ fontSize: '0.82rem', color: '#64748B', margin: '8px 0 0 0', lineHeight: 1.5 }}>
+                  Take quizzes in Mathematics, Python, Data Structures, or Web Security to unlock personalized AI diagnostic insights on your strengths and focus areas.
+                </p>
               </div>
-              <ul className="insight-bullets">
-                <li>
-                  <strong>Discrete Mathematics:</strong> 90% mastery rate across Set Theory and Logic questions.
-                </li>
-                <li>
-                  <strong>Python Syntax & Loops:</strong> Consistent 100% accuracy in list comprehensions.
-                </li>
-              </ul>
-            </div>
+            ) : (
+              <>
+                <div className="insight-block insight-positive">
+                  <div className="insight-badge-pill badge-green">
+                    <CheckCircleIcon size={14} color="#059669" />
+                    <span>Strongest Areas</span>
+                  </div>
+                  <ul className="insight-bullets">
+                    {(() => {
+                      const sorted = [...subjectBreakdown].filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+                      const top = sorted.slice(0, 2);
+                      if (top.length === 0) {
+                        return <li><strong>Getting Started:</strong> Practice core modules to build strength metrics.</li>;
+                      }
+                      return top.map((s) => (
+                        <li key={s.name}>
+                          <strong>{s.name}:</strong> {s.score}% mastery rate with solid accuracy.
+                        </li>
+                      ));
+                    })()}
+                  </ul>
+                </div>
 
-            <div className="insight-block insight-warning">
-              <div className="insight-badge-pill badge-amber">
-                <TargetIcon size={14} color="#D97706" />
-                <span>Recommended Focus Areas</span>
-              </div>
-              <ul className="insight-bullets">
-                <li>
-                  <strong>Binary Search Trees (DSA):</strong> Practice tree rotations and balancing algorithms.
-                </li>
-                <li>
-                  <strong>Cross-Site Scripting (XSS):</strong> Review CSP directives and DOM sanitization.
-                </li>
-              </ul>
-            </div>
+                <div className="insight-block insight-warning">
+                  <div className="insight-badge-pill badge-amber">
+                    <TargetIcon size={14} color="#D97706" />
+                    <span>Recommended Focus Areas</span>
+                  </div>
+                  <ul className="insight-bullets">
+                    {(() => {
+                      const sorted = [...subjectBreakdown].sort((a, b) => a.score - b.score);
+                      const bottom = sorted.slice(0, 2);
+                      return bottom.map((s) => (
+                        <li key={s.name}>
+                          <strong>{s.name}:</strong> {s.score > 0 ? `Target ${s.score}% area to improve overall mastery.` : 'Not yet attempted. Take a quiz to assess skill level.'}
+                        </li>
+                      ));
+                    })()}
+                  </ul>
+                </div>
+              </>
+            )}
 
             <div className="weekly-goal-box">
               <div className="goal-text-row">
