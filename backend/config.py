@@ -15,6 +15,16 @@ class Config:
     SMTP_USER = os.getenv("SMTP_USER", "").strip()
     SMTP_PASS = os.getenv("SMTP_PASS", "").strip()
     SMTP_FROM = os.getenv("SMTP_FROM", os.getenv("SMTP_USER", "LearnSmart Adaptive Quiz <noreply@learnsmart.edu>")).strip()
+    # Resend API Configuration
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+    RESEND_FROM = os.getenv("RESEND_FROM", "LearnSmart <onboarding@resend.dev>").strip()
+
+    # Security & Rate Limiting Settings
+    OTP_SECRET_SALT = os.getenv("OTP_SECRET_SALT", "learnsmart_adaptive_quiz_secret_salt_2026_xyz").strip()
+    OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", 10))
+    OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", 60))
+    OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", 5))
+    OTP_MAX_HOURLY_RESENDS = int(os.getenv("OTP_MAX_HOURLY_RESENDS", 5))
 
 
 config = Config()

@@ -71,21 +71,61 @@ export const EducatorDashboard = ({ onLogout }) => {
     }
   });
 
-  const [submissions, setSubmissions] = useState(() => {
-    try {
-      const saved = localStorage.getItem('learnsmart_shared_submissions');
-      return saved ? JSON.parse(saved) : INITIAL_SUBMISSIONS;
-    } catch {
-      return INITIAL_SUBMISSIONS;
-    }
-  });
+  const [submissions, setSubmissions] = useState(() => sharedDatabase.getSubmissions());
 
-  // Subscribe to real-time student updates across tabs & events
+  // Subscribe to real-time student updates, submissions, quizzes, and storage across tabs
   useEffect(() => {
-    const unsubscribe = sharedDatabase.subscribe((updatedStudents) => {
+    const unsubStudents = sharedDatabase.subscribe((updatedStudents) => {
       setStudents(updatedStudents);
     });
-    return unsubscribe;
+
+    const unsubSubmissions = sharedDatabase.subscribeSubmissions
+      ? sharedDatabase.subscribeSubmissions((updatedSubmissions) => {
+          setSubmissions(updatedSubmissions);
+        })
+      : () => {};
+
+    const handleSubmissionsUpdated = (e) => {
+      const updated = e?.detail || sharedDatabase.getSubmissions();
+      setSubmissions(updated);
+    };
+
+    const handleQuizzesUpdated = (e) => {
+      const updated = e?.detail || sharedDatabase.getQuizzes();
+      setQuizzes(updated);
+    };
+
+    const handleStorageChange = (e) => {
+      if (!e.key || e.key === 'learnsmart_shared_submissions') {
+        setSubmissions(sharedDatabase.getSubmissions());
+      }
+      if (!e.key || e.key === 'learnsmart_educator_quizzes') {
+        setQuizzes(sharedDatabase.getQuizzes());
+      }
+      if (!e.key || e.key === 'learnsmart_shared_students' || e.key === 'learnsmart_educator_students') {
+        setStudents(sharedDatabase.getStudents());
+      }
+      if (!e.key || e.key === 'learnsmart_educator_notifications') {
+        try {
+          const savedNotifs = localStorage.getItem('learnsmart_educator_notifications');
+          if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('learnsmart_submissions_updated', handleSubmissionsUpdated);
+    window.addEventListener('learnsmart_quizzes_updated', handleQuizzesUpdated);
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      unsubStudents();
+      unsubSubmissions();
+      window.removeEventListener('learnsmart_submissions_updated', handleSubmissionsUpdated);
+      window.removeEventListener('learnsmart_quizzes_updated', handleQuizzesUpdated);
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
@@ -162,6 +202,47 @@ export const EducatorDashboard = ({ onLogout }) => {
     setOpenCreateModal(false);
   };
 
+  // Dynamic Cohort Metrics
+  const activeQuizzesCount = quizzes.filter((q) => q.status === 'Active').length;
+  const topPerformersCount = students.filter(
+    (s) => s.status === 'Top Performer' || (s.avgScore || 0) >= 85
+  ).length;
+  const atRiskCount = students.filter(
+    (s) => s.status === 'Needs Support' || ((s.avgScore || 0) > 0 && s.avgScore < 60)
+  ).length;
+
+  const totalQuizzesCount = Math.max(1, quizzes.length);
+  const totalCompletions = students.reduce((sum, s) => sum + (s.quizzesCompleted || 0), 0);
+
+  const avgCompletionRate = (() => {
+    if (students.length === 0) {
+      if (submissions.length > 0) {
+        const completed = submissions.filter((s) => (s.status || '').toLowerCase() === 'completed').length;
+        return `${Math.round((completed / submissions.length) * 100)}%`;
+      }
+      return '0%';
+    }
+    if (totalCompletions > 0) {
+      const pct = Math.min(100, Math.round((totalCompletions / (students.length * totalQuizzesCount)) * 100));
+      return `${pct}%`;
+    }
+    const withScores = students.filter((s) => (s.avgScore || 0) > 0);
+    if (withScores.length > 0) {
+      const avg = Math.round(withScores.reduce((sum, s) => sum + s.avgScore, 0) / withScores.length);
+      return `${avg}%`;
+    }
+    if (submissions.length > 0) {
+      const completed = submissions.filter((s) => (s.status || '').toLowerCase() === 'completed').length;
+      return `${Math.round((completed / submissions.length) * 100)}%`;
+    }
+    return '0%';
+  })();
+
+  const pendingSubmissionsCount = submissions.filter(
+    (s) => s.status && s.status.toLowerCase() !== 'completed'
+  ).length;
+  const pendingReviewsCount = atRiskCount + pendingSubmissionsCount + unreadNotifCount;
+
   return (
     <div className="educator-dashboard-container">
       {/* Toast Notification */}
@@ -201,7 +282,7 @@ export const EducatorDashboard = ({ onLogout }) => {
         />
 
         {/* Main Content Area */}
-        <main className="educator-main-content">
+        <main className={`educator-main-content ${activeTab === 'Dashboard' ? 'educator-main-content-dashboard' : ''}`}>
           {/* TAB 1: OVERVIEW DASHBOARD */}
           {activeTab === 'Dashboard' && (
             <>
@@ -220,22 +301,34 @@ export const EducatorDashboard = ({ onLogout }) => {
                 <StatCard
                   title="Total Quizzes"
                   value={quizzes.length.toString()}
+                  subtitle={`${activeQuizzesCount} Active • ${quizzes.length - activeQuizzesCount} Drafts`}
                   variant="blue"
+                  onClick={() => setActiveTab('Manage Quizzes')}
+                  actionHint="Manage →"
                 />
                 <StatCard
                   title="Total Students"
                   value={students.length.toString()}
+                  subtitle={`${topPerformersCount} Top • ${atRiskCount} Needs Support`}
                   variant="green"
+                  onClick={() => setActiveTab('Student Performance')}
+                  actionHint="View →"
                 />
                 <StatCard
                   title="Avg. Completion"
-                  value="82.7%"
+                  value={avgCompletionRate}
+                  subtitle={totalCompletions > 0 ? `${totalCompletions} attempts completed` : 'Cohort curriculum progress'}
                   variant="amber"
+                  onClick={() => setActiveTab('Analytics')}
+                  actionHint="Analytics →"
                 />
                 <StatCard
                   title="Pending Reviews"
-                  value={unreadNotifCount.toString()}
+                  value={pendingReviewsCount.toString()}
+                  subtitle={`${atRiskCount} at-risk • ${pendingSubmissionsCount} pending`}
                   variant="purple"
+                  onClick={() => setActiveTab(atRiskCount > 0 ? 'Student Performance' : 'Notifications')}
+                  actionHint="Review →"
                 />
               </section>
 
@@ -246,7 +339,10 @@ export const EducatorDashboard = ({ onLogout }) => {
                   searchFilter={searchQuery}
                   onViewAll={() => setActiveTab('Student Performance')}
                 />
-                <StudentPerformanceChart />
+                <StudentPerformanceChart
+                  students={students}
+                  onViewAll={() => setActiveTab('Student Performance')}
+                />
               </section>
 
               {/* Bottom Section: Quick Actions */}

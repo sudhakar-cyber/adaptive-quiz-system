@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   StarIcon,
   FlameIcon,
@@ -6,8 +6,11 @@ import {
   CheckCircleIcon,
   TrendingUpIcon,
   AwardIcon,
-  RotateCcwIcon
+  RotateCcwIcon,
+  XIcon,
+  SparklesIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const ProgressView = ({
   quizzesTaken = 18,
@@ -15,8 +18,10 @@ export const ProgressView = ({
   streakDays = 7,
   quizHistory = [],
   subjectProgress = null,
-  onRetakeQuiz
+  onRetakeQuiz,
+  onStartQuiz
 }) => {
+  const [showPercentileModal, setShowPercentileModal] = useState(false);
   const isReset = quizzesTaken === 0;
 
   const getMastery = (score) => {
@@ -102,6 +107,140 @@ export const ProgressView = ({
         }
       ];
 
+  const numericAvg = useMemo(() => {
+    if (typeof avgScore === 'number') return isNaN(avgScore) ? 0 : avgScore;
+    if (!avgScore) return 0;
+    const cleaned = String(avgScore).replace('%', '').trim();
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? 0 : parsed;
+  }, [avgScore]);
+
+  const percentileData = useMemo(() => {
+    if (isReset || numericAvg === 0) {
+      return {
+        isRanked: false,
+        percentile: 0,
+        percentileDisplay: 'Unranked',
+        topPercent: 0,
+        topPercentDisplay: 'Unranked',
+        rank: null,
+        rankDisplay: 'Unranked',
+        cohortSize: 85,
+        cohortMedian: 72.0,
+        tier: 'Unranked',
+        tierBadgeColor: '#64748B',
+        tierBadgeBg: '#F1F5F9',
+        scoreDiff: 0,
+        subjectStandings: subjectBreakdown.map((s) => ({
+          name: s.name,
+          score: s.score || 0,
+          color: s.color,
+          percentile: 0,
+          tier: 'Not Started'
+        }))
+      };
+    }
+
+    // Cohort benchmark distribution: Mean = 72.0%, Standard Deviation = 11.5%
+    const mean = 72.0;
+    const std = 11.5;
+    const z = (numericAvg - mean) / std;
+
+    // Cumulative normal distribution CDF approximation (Abramowitz & Stegun)
+    const t = 1.0 / (1.0 + 0.2316419 * Math.abs(z));
+    const d = 0.3989423 * Math.exp(-z * z / 2.0);
+    const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    const cdf = z > 0 ? 1.0 - p : p;
+
+    const percentile = Math.min(99, Math.max(1, Math.round(cdf * 100)));
+    const topPercent = Math.max(1, 100 - percentile);
+
+    // Dynamic cohort size from shared database or standard cohort of 85
+    let cohortTotal = 85;
+    try {
+      const students = sharedDatabase.getStudents();
+      if (students && students.length > 5) {
+        cohortTotal = Math.max(85, students.length);
+      }
+    } catch {}
+
+    const rank = Math.max(1, Math.min(cohortTotal, Math.round(((100 - percentile) / 100) * cohortTotal) || 1));
+
+    let tier = 'Developing';
+    let tierBadgeColor = '#EA580C';
+    let tierBadgeBg = '#FFF2E6';
+
+    if (percentile >= 90) {
+      tier = 'Elite / Top Tier';
+      tierBadgeColor = '#7C3AED';
+      tierBadgeBg = '#F3E8FF';
+    } else if (percentile >= 75) {
+      tier = 'Advanced';
+      tierBadgeColor = '#2563EB';
+      tierBadgeBg = '#EFF6FF';
+    } else if (percentile >= 50) {
+      tier = 'Proficient';
+      tierBadgeColor = '#059669';
+      tierBadgeBg = '#ECFDF5';
+    } else if (percentile >= 30) {
+      tier = 'Intermediate';
+      tierBadgeColor = '#D97706';
+      tierBadgeBg = '#FEF3C7';
+    }
+
+    const percentileDisplay = percentile >= 80 ? `Top ${topPercent}%` : `${percentile}th %ile`;
+
+    // Compute subject standings relative to cohort benchmark
+    const subjectStandings = subjectBreakdown.map((s) => {
+      const sScore = s.score || 0;
+      if (sScore === 0) {
+        return {
+          name: s.name,
+          score: 0,
+          color: s.color,
+          percentile: 0,
+          tier: 'Not Attempted'
+        };
+      }
+      const subZ = (sScore - mean) / std;
+      const subT = 1.0 / (1.0 + 0.2316419 * Math.abs(subZ));
+      const subD = 0.3989423 * Math.exp(-subZ * subZ / 2.0);
+      const subP = subD * subT * (0.3193815 + subT * (-0.3565638 + subT * (1.781478 + subT * (-1.821256 + subT * 1.330274))));
+      const subCdf = subZ > 0 ? 1.0 - subP : subP;
+      const subPct = Math.min(99, Math.max(1, Math.round(subCdf * 100)));
+      let subTier = 'Developing';
+      if (subPct >= 90) subTier = 'Elite (Top 10%)';
+      else if (subPct >= 75) subTier = 'Advanced';
+      else if (subPct >= 50) subTier = 'Proficient';
+      else if (subPct >= 30) subTier = 'Intermediate';
+
+      return {
+        name: s.name,
+        score: sScore,
+        color: s.color,
+        percentile: subPct,
+        tier: subTier
+      };
+    });
+
+    return {
+      isRanked: true,
+      percentile,
+      percentileDisplay,
+      topPercent,
+      topPercentDisplay: `Top ${topPercent}%`,
+      rank,
+      rankDisplay: `Rank #${rank} in cohort`,
+      cohortSize: cohortTotal,
+      cohortMedian: mean,
+      scoreDiff: +(numericAvg - mean).toFixed(1),
+      tier,
+      tierBadgeColor,
+      tierBadgeBg,
+      subjectStandings
+    };
+  }, [isReset, numericAvg, subjectBreakdown]);
+
   return (
     <div className="tab-view-container progress-view">
       <div className="tab-view-header">
@@ -153,14 +292,35 @@ export const ProgressView = ({
           </div>
         </div>
 
-        <div className="kpi-card card-kpi-purple">
+        <div
+          className="kpi-card card-kpi-purple interactive-kpi-card"
+          onClick={() => setShowPercentileModal(true)}
+          role="button"
+          tabIndex={0}
+          title="Click to view detailed Global Percentile & Cohort Analytics"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setShowPercentileModal(true);
+            }
+          }}
+        >
           <div className="kpi-icon-wrap bg-purple-light">
             <AwardIcon size={24} color="#8B5CF6" />
           </div>
           <div className="kpi-data">
-            <span className="kpi-label">Global Percentile</span>
-            <span className="kpi-value">Top 5%</span>
-            <span className="kpi-subtext text-purple">Rank #42 in cohort</span>
+            <div className="kpi-label-row">
+              <span className="kpi-label">Global Percentile</span>
+              <span className="kpi-click-pill">Details ↗</span>
+            </div>
+            <span className="kpi-value">
+              {percentileData.isRanked ? percentileData.percentileDisplay : 'Unranked'}
+            </span>
+            <span className="kpi-subtext text-purple">
+              {percentileData.isRanked
+                ? `Rank #${percentileData.rank} in cohort`
+                : 'Take a quiz to rank'}
+            </span>
           </div>
         </div>
       </div>
@@ -347,6 +507,260 @@ export const ProgressView = ({
           </table>
         </div>
       </div>
+
+      {/* Global Percentile & Cohort Analytics Modal */}
+      {showPercentileModal && (
+        <div
+          className="percentile-modal-backdrop"
+          onClick={() => setShowPercentileModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="percentile-modal-title"
+        >
+          <div
+            className="percentile-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="percentile-modal-header">
+              <div className="percentile-header-title-group">
+                <div className="percentile-header-icon-wrap">
+                  <AwardIcon size={24} color="#7C3AED" />
+                </div>
+                <div>
+                  <h3 id="percentile-modal-title" className="percentile-modal-title">
+                    Global Percentile & Cohort Standing
+                  </h3>
+                  <p className="percentile-modal-subtitle">
+                    Comparative benchmark across {percentileData.cohortSize} active platform learners
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="percentile-modal-close-btn"
+                onClick={() => setShowPercentileModal(false)}
+                aria-label="Close dialog"
+              >
+                <XIcon size={18} color="#64748B" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="percentile-modal-body">
+              {/* Hero Banner */}
+              <div className="percentile-hero-banner">
+                <div className="percentile-hero-left">
+                  <span
+                    className="percentile-tier-pill"
+                    style={{
+                      color: percentileData.tierBadgeColor,
+                      backgroundColor: percentileData.tierBadgeBg
+                    }}
+                  >
+                    {percentileData.tier}
+                  </span>
+                  <div className="percentile-hero-main-stat">
+                    {percentileData.isRanked ? percentileData.percentileDisplay : 'Unranked'}
+                  </div>
+                  <p className="percentile-hero-desc">
+                    {percentileData.isRanked ? (
+                      <>
+                        You scored higher than <strong>{percentileData.percentile}%</strong> of all learners in your cohort with an average of <strong>{numericAvg.toFixed(1)}%</strong>.
+                      </>
+                    ) : (
+                      'You have not completed any quizzes yet. Take your first quiz to calculate your percentile and cohort rank.'
+                    )}
+                  </p>
+                </div>
+
+                <div className="percentile-hero-right">
+                  <div className="cohort-rank-badge-box">
+                    <span className="cohort-rank-label">Cohort Standing</span>
+                    <span className="cohort-rank-value">
+                      {percentileData.isRanked ? `#${percentileData.rank}` : '—'}
+                      <span className="cohort-rank-total"> / {percentileData.cohortSize}</span>
+                    </span>
+                    {percentileData.isRanked && (
+                      <span
+                        className={`cohort-diff-tag ${
+                          percentileData.scoreDiff >= 0 ? 'diff-positive' : 'diff-negative'
+                        }`}
+                      >
+                        <TrendingUpIcon size={12} color={percentileData.scoreDiff >= 0 ? '#10B981' : '#EF4444'} />
+                        <span>
+                          {percentileData.scoreDiff >= 0 ? `+${percentileData.scoreDiff}%` : `${percentileData.scoreDiff}%`} vs median
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Visual Percentile Distribution Scale */}
+              <div className="percentile-distribution-section">
+                <div className="distribution-header-row">
+                  <span className="distribution-title">Cohort Distribution Scale</span>
+                  <span className="distribution-hint">
+                    {percentileData.isRanked
+                      ? `Your Position: ${percentileData.percentile}th Percentile`
+                      : 'Complete a quiz to place on scale'}
+                  </span>
+                </div>
+
+                <div className="percentile-distribution-bar-wrapper">
+                  <div className="percentile-distribution-bar">
+                    <div className="dist-segment dist-segment-foundational">
+                      <span>0–49% Foundational</span>
+                    </div>
+                    <div className="dist-segment dist-segment-proficient">
+                      <span>50–74% Proficient</span>
+                    </div>
+                    <div className="dist-segment dist-segment-advanced">
+                      <span>75–89% Advanced</span>
+                    </div>
+                    <div className="dist-segment dist-segment-elite">
+                      <span>90–100% Top Tier</span>
+                    </div>
+                  </div>
+
+                  {/* Marker Pin */}
+                  {percentileData.isRanked && (
+                    <div
+                      className="percentile-marker-pin"
+                      style={{
+                        left: `${Math.min(96, Math.max(4, percentileData.percentile))}%`
+                      }}
+                    >
+                      <div className="marker-tooltip">
+                        <span>You ({percentileData.percentile}th %ile)</span>
+                      </div>
+                      <div className="marker-arrow" />
+                      <div className="marker-dot" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="distribution-scale-labels">
+                  <span>0%ile (Min)</span>
+                  <span>25%ile</span>
+                  <span className="label-median">50%ile (Median)</span>
+                  <span>75%ile</span>
+                  <span className="label-top">90%ile (Elite)</span>
+                  <span>100%ile</span>
+                </div>
+              </div>
+
+              {/* Key Cohort Benchmark Stats */}
+              <div className="percentile-stats-grid">
+                <div className="pct-stat-card">
+                  <span className="pct-stat-title">Your Average</span>
+                  <span className="pct-stat-val text-primary-stat">{numericAvg.toFixed(1)}%</span>
+                  <span className="pct-stat-note">Across all attempts</span>
+                </div>
+                <div className="pct-stat-card">
+                  <span className="pct-stat-title">Cohort Median</span>
+                  <span className="pct-stat-val text-slate-700">{percentileData.cohortMedian.toFixed(1)}%</span>
+                  <span className="pct-stat-note">50th %ile benchmark</span>
+                </div>
+                <div className="pct-stat-card">
+                  <span className="pct-stat-title">Cohort Size</span>
+                  <span className="pct-stat-val text-slate-700">{percentileData.cohortSize}</span>
+                  <span className="pct-stat-note">Active learners</span>
+                </div>
+                <div className="pct-stat-card">
+                  <span className="pct-stat-title">Evaluated Quizzes</span>
+                  <span className="pct-stat-val text-slate-700">{quizzesTaken}</span>
+                  <span className="pct-stat-note">{quizzesTaken >= 5 ? 'High confidence' : 'Initial sample'}</span>
+                </div>
+              </div>
+
+              {/* Subject Percentile Breakdown */}
+              <div className="subject-standings-section">
+                <h4 className="subject-standings-title">Subject Percentile Breakdown</h4>
+                <div className="subject-standings-list">
+                  {percentileData.subjectStandings.map((subj) => (
+                    <div key={subj.name} className="subject-standing-row">
+                      <div className="subj-standing-info">
+                        <span
+                          className="subj-standing-dot"
+                          style={{ backgroundColor: subj.color }}
+                        />
+                        <span className="subj-standing-name">{subj.name}</span>
+                        <span className="subj-standing-score">{subj.score}%</span>
+                      </div>
+                      <div className="subj-standing-rank">
+                        <span
+                          className={`subj-standing-badge ${
+                            subj.percentile >= 75
+                              ? 'badge-elite'
+                              : subj.percentile >= 50
+                              ? 'badge-proficient'
+                              : subj.percentile > 0
+                              ? 'badge-developing'
+                              : 'badge-unranked'
+                          }`}
+                        >
+                          {subj.percentile > 0 ? `${subj.percentile}th %ile` : 'Unranked'}
+                        </span>
+                        <span className="subj-standing-tier">{subj.tier}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* AI Strategic Recommendation */}
+              <div className="percentile-ai-tip-box">
+                <div className="ai-tip-header">
+                  <SparklesIcon size={16} color="#7C3AED" />
+                  <span className="ai-tip-title">AI Cohort Recommendation</span>
+                </div>
+                <p className="ai-tip-text">
+                  {percentileData.isRanked ? (
+                    <>
+                      You are positioned in the <strong>{percentileData.tier}</strong> bracket.
+                      Scoring 85%+ on your next quiz will boost your standing toward the top tier of all learners.
+                    </>
+                  ) : (
+                    'Complete your first adaptive quiz to establish your baseline cohort standing and unlock personalized recommendations.'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="percentile-modal-footer">
+              <span className="percentile-footer-note">
+                Rankings update in real time after each quiz attempt.
+              </span>
+              <div className="percentile-footer-actions">
+                <button
+                  type="button"
+                  className="percentile-btn-secondary"
+                  onClick={() => setShowPercentileModal(false)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="percentile-btn-primary"
+                  onClick={() => {
+                    setShowPercentileModal(false);
+                    if (onStartQuiz) {
+                      onStartQuiz();
+                    } else if (onRetakeQuiz) {
+                      onRetakeQuiz('Mathematics');
+                    }
+                  }}
+                >
+                  {percentileData.isRanked ? 'Take a Quiz to Level Up' : 'Start Your First Quiz'} ➔
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

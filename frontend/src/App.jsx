@@ -80,6 +80,14 @@ function AppRoutes() {
         element={<Login onLoginSuccess={handleLoginSuccess} />}
       />
       <Route
+        path="/register"
+        element={<Login onLoginSuccess={handleLoginSuccess} initialView="register" />}
+      />
+      <Route
+        path="/otp"
+        element={<Login onLoginSuccess={handleLoginSuccess} initialView="otp" />}
+      />
+      <Route
         path="/reset-password"
         element={<ResetPassword />}
       />

@@ -671,11 +671,11 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     setActiveQuizModal(quiz);
   };
 
-  const handleStartQuizByIdOrTitle = (identifier) => {
+  const handleStartQuizByIdOrTitle = (identifier, allowRetake = false) => {
     const found =
       QUIZ_CATALOG.find((q) => q.id === identifier || q.title.toLowerCase() === identifier.toLowerCase()) ||
       QUIZ_CATALOG[0];
-    if (completedQuizzes.includes(found.id)) {
+    if (completedQuizzes.includes(found.id) && !allowRetake) {
       showToast('Quiz already completed');
       return;
     }
@@ -1184,85 +1184,118 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                   </div>
 
                   <div className="donut-content-row">
-                    <div className="donut-chart-container">
-                      <svg
-                        viewBox="0 0 160 160"
-                        className="donut-svg"
-                      >
-                        <g transform="rotate(-90 80 80)">
-                          {/* Background sector tracks with gaps */}
-                          {donutSegments.map((seg, idx) => (
-                            <circle
-                              key={`track-${idx}`}
-                              cx="80"
-                              cy="80"
-                              r={donutR}
-                              fill="transparent"
-                              stroke="#E2E8F0"
-                              strokeWidth={donutStroke}
-                              strokeDasharray={seg.trackDashArray}
-                              strokeDashoffset={seg.slotOffset}
-                              strokeLinecap="butt"
-                            />
-                          ))}
-
-                          {/* Active colored progress fill arcs */}
-                          {donutSegments.map((seg, idx) => {
-                            if (seg.fillArc <= 0) return null;
-                            const isHovered =
-                              hoveredSubject && hoveredSubject.name === seg.name;
-                            return (
+                    <div className="donut-chart-wrapper">
+                      <div className="donut-chart-container">
+                        <svg
+                          viewBox="0 0 160 160"
+                          className="donut-svg"
+                        >
+                          <g transform="rotate(-90 80 80)">
+                            {/* Background sector tracks with gaps */}
+                            {donutSegments.map((seg, idx) => (
                               <circle
-                                key={`fill-${idx}`}
+                                key={`track-${idx}`}
                                 cx="80"
                                 cy="80"
                                 r={donutR}
                                 fill="transparent"
-                                stroke={seg.color}
-                                strokeWidth={isHovered ? donutStroke + 4 : donutStroke}
-                                strokeDasharray={seg.fillDashArray}
+                                stroke="#E2E8F0"
+                                strokeWidth={donutStroke}
+                                strokeDasharray={seg.trackDashArray}
                                 strokeDashoffset={seg.slotOffset}
                                 strokeLinecap="butt"
-                                style={{
-                                  cursor: 'pointer',
-                                  transition: 'stroke-width 0.2s ease, opacity 0.2s ease',
-                                  opacity: hoveredSubject && !isHovered ? 0.4 : 1
-                                }}
+                              />
+                            ))}
+
+                            {/* Active colored progress fill arcs */}
+                            {donutSegments.map((seg, idx) => {
+                              if (seg.fillArc <= 0) return null;
+                              const isHovered =
+                                hoveredSubject && hoveredSubject.name === seg.name;
+                              return (
+                                <circle
+                                  key={`fill-${idx}`}
+                                  cx="80"
+                                  cy="80"
+                                  r={donutR}
+                                  fill="transparent"
+                                  stroke={seg.color}
+                                  strokeWidth={isHovered ? donutStroke + 4 : donutStroke}
+                                  strokeDasharray={seg.fillDashArray}
+                                  strokeDashoffset={seg.slotOffset}
+                                  strokeLinecap="butt"
+                                  style={{
+                                    cursor: 'pointer',
+                                    transition: 'stroke-width 0.2s ease, opacity 0.2s ease',
+                                    opacity: hoveredSubject && !isHovered ? 0.4 : 1
+                                  }}
+                                  onMouseEnter={() => setHoveredSubject(seg)}
+                                  onMouseLeave={() => setHoveredSubject(null)}
+                                />
+                              );
+                            })}
+
+                            {/* Transparent hover hit-areas covering each sector */}
+                            {donutSegments.map((seg, idx) => (
+                              <circle
+                                key={`hit-${idx}`}
+                                cx="80"
+                                cy="80"
+                                r={donutR}
+                                fill="transparent"
+                                stroke="transparent"
+                                strokeWidth={donutStroke + 8}
+                                strokeDasharray={seg.hitDashArray}
+                                strokeDashoffset={seg.slotOffset}
+                                style={{ cursor: 'pointer' }}
                                 onMouseEnter={() => setHoveredSubject(seg)}
                                 onMouseLeave={() => setHoveredSubject(null)}
-                              />
-                            );
-                          })}
+                                onClick={() => setActiveTab('progress')}
+                              >
+                                <title>{`${seg.name}: ${seg.score}%`}</title>
+                              </circle>
+                            ))}
+                          </g>
+                        </svg>
+                        <div className="donut-center-text">
+                          <span className="donut-percentage">
+                            {hoveredSubject ? `${hoveredSubject.score}%` : `${overallProgress}%`}
+                          </span>
+                        </div>
+                      </div>
 
-                          {/* Transparent hover hit-areas covering each sector */}
-                          {donutSegments.map((seg, idx) => (
-                            <circle
-                              key={`hit-${idx}`}
-                              cx="80"
-                              cy="80"
-                              r={donutR}
-                              fill="transparent"
-                              stroke="transparent"
-                              strokeWidth={donutStroke + 8}
-                              strokeDasharray={seg.hitDashArray}
-                              strokeDashoffset={seg.slotOffset}
-                              style={{ cursor: 'pointer' }}
-                              onMouseEnter={() => setHoveredSubject(seg)}
-                              onMouseLeave={() => setHoveredSubject(null)}
-                              onClick={() => setActiveTab('progress')}
+                      {/* Subject name moved outside of the circle and below it */}
+                      <div className="donut-outside-label">
+                        {hoveredSubject ? (
+                          <div
+                            className="donut-outside-pill"
+                            style={{
+                              borderColor: `${hoveredSubject.color}45`,
+                              backgroundColor: `${hoveredSubject.color}14`
+                            }}
+                          >
+                            <span
+                              className="donut-outside-dot"
+                              style={{ backgroundColor: hoveredSubject.color }}
+                            />
+                            <span
+                              className="donut-outside-name"
+                              title={hoveredSubject.name}
                             >
-                              <title>{`${seg.name}: ${seg.score}%`}</title>
-                            </circle>
-                          ))}
-                        </g>
-                      </svg>
-                      <div className="donut-center-text">
-                        <span className="donut-percentage">
-                          {hoveredSubject ? `${hoveredSubject.score}%` : `${overallProgress}%`}
-                        </span>
-                        <span className="donut-sublabel" title={hoveredSubject ? hoveredSubject.name : 'Overall Progress'}>
-                          {hoveredSubject ? hoveredSubject.name : 'Overall Progress'}
-                        </span>
+                              {hoveredSubject.name}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="donut-outside-pill">
+                            <span className="donut-outside-dot overall" />
+                            <span
+                              className="donut-outside-name"
+                              title="Overall Progress"
+                            >
+                              Overall Progress
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1458,12 +1491,18 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
               quizHistory={quizHistory}
               subjectProgress={subjectProgress}
               onRetakeQuiz={handleStartQuizByIdOrTitle}
+              onStartQuiz={() => setActiveTab('take-quiz')}
             />
           )}
 
           {activeTab === 'learning-path' && (
             <LearningPathView
-              onStartQuizByTopic={(topic) => handleStartQuizByIdOrTitle(topic)}
+              onStartQuizByTopic={(topic) => handleStartQuizByIdOrTitle(topic, true)}
+              completedQuizIds={completedQuizzes}
+              quizHistory={quizHistory}
+              totalQuizzesTaken={totalQuizzesTaken}
+              subjectProgress={subjectProgress}
+              averageScore={averageScore}
             />
           )}
 

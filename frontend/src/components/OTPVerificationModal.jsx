@@ -137,10 +137,19 @@ export const OTPVerificationModal = ({
         setErrorMessage(
           res.error || 'Incorrect verification code. Please check your email and try again.'
         );
-        inputRefs.current[0]?.focus();
+        // Automatically clear OTP input fields when wrong
+        setDigits(['', '', '', '']);
+        setTimeout(() => {
+          inputRefs.current[0]?.focus();
+        }, 10);
       }
     } catch (err) {
       setErrorMessage(err.message || 'Verification failed. Please try again.');
+      // Automatically clear OTP input fields on error
+      setDigits(['', '', '', '']);
+      setTimeout(() => {
+        inputRefs.current[0]?.focus();
+      }, 10);
     } finally {
       setIsVerifying(false);
     }

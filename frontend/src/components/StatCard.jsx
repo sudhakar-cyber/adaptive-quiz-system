@@ -39,7 +39,10 @@ export const StatCard = ({
   title,
   value,
   variant = 'blue', // 'blue', 'green', 'amber', 'purple'
-  icon: CustomIcon
+  icon: CustomIcon,
+  subtitle,
+  onClick,
+  actionHint
 }) => {
   // Select default icon based on variant if not passed
   const getIcon = () => {
@@ -58,15 +61,39 @@ export const StatCard = ({
     }
   };
 
+  const isClickable = typeof onClick === 'function';
+
   return (
-    <div className={`educator-stat-card card-${variant}`}>
+    <div
+      className={`educator-stat-card card-${variant} ${isClickable ? 'clickable-stat-card' : ''}`}
+      onClick={isClickable ? onClick : undefined}
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      title={isClickable ? `Click to view ${title}` : title}
+    >
       <div className="educator-stat-icon-wrap">
         {getIcon()}
       </div>
       <div className="educator-stat-details">
         <span className="educator-stat-title">{title}</span>
         <span className="educator-stat-value">{value}</span>
+        {subtitle && <span className="educator-stat-subtext">{subtitle}</span>}
       </div>
+      {isClickable && (
+        <span className="educator-stat-arrow-hint" aria-hidden="true">
+          {actionHint || 'View →'}
+        </span>
+      )}
     </div>
   );
 };
