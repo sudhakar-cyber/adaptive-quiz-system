@@ -6,8 +6,11 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  confirmPasswordReset,
+  verifyPasswordResetCode,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendEmailVerification
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -35,6 +38,8 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
 
 export {
   app,
@@ -45,8 +50,11 @@ export {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  confirmPasswordReset,
+  verifyPasswordResetCode,
   signOut,
   onAuthStateChanged,
+  sendEmailVerification,
   doc,
   getDoc,
   setDoc,

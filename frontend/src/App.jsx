@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Login } from './pages/Login';
+import { ResetPassword } from './pages/ResetPassword';
 import { EducatorDashboard } from './pages/EducatorDashboard';
 import { Dashboard } from './components/Dashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -77,6 +78,10 @@ function AppRoutes() {
       <Route
         path="/login"
         element={<Login onLoginSuccess={handleLoginSuccess} />}
+      />
+      <Route
+        path="/reset-password"
+        element={<ResetPassword />}
       />
       <Route
         path="/"

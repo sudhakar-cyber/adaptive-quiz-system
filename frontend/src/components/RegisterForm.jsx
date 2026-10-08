@@ -19,6 +19,7 @@ import { sharedDatabase } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
 import { otpService } from '../services/otpService';
 import { OTPVerificationModal } from './OTPVerificationModal';
+import { GoogleEmailVerificationModal } from './GoogleEmailVerificationModal';
 
 const COUNTRIES = [
   'United States',
@@ -95,6 +96,8 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
   const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(60);
   const [otpExpiryMinutes, setOtpExpiryMinutes] = useState(10);
+  const [isGoogleVerifyModalOpen, setIsGoogleVerifyModalOpen] = useState(false);
+  const [googleVerifyEmail, setGoogleVerifyEmail] = useState('');
 
   const showToast = (message) => {
     setSuccessToast(message);
@@ -221,36 +224,66 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
     }
   };
 
-  const handleGoogleSignup = async () => {
+  const handleGoogleSignup = async (e) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setIsLoading(true);
     setErrorMessage('');
     try {
+      // Rule 6: Use selected Google account email, do NOT use email input field
+      // Rule 8 & 9: Handled by reusable authService.loginWithGoogle
       const res = await authService.loginWithGoogle({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        phone: formData.phone,
-        country: formData.country,
         role: 'student'
       });
       setIsLoading(false);
+
       if (res && res.success && res.student) {
+        showToast('Signed in successfully! Redirecting...');
         if (onRegisterSuccess) {
           onRegisterSuccess(res.student, true);
         }
         return;
-      } else if (res && !res.success && res.error) {
-        if (res.error.code !== 'auth/popup-closed-by-user' && res.error.code !== 'auth/cancelled-popup-request') {
-          setErrorMessage(getFriendlyAuthErrorMessage(res.error));
+      }
+
+      if (res && res.requiresVerification) {
+        setGoogleVerifyEmail(res.email || '');
+        setIsGoogleVerifyModalOpen(true);
+        showToast('Verification email sent. Please check your email and verify your account.');
+        setErrorMessage('Verification email sent. Please check your email and verify your account.');
+        return;
+      }
+
+      if (res && !res.success) {
+        if (
+          res.error?.code === 'auth/popup-closed-by-user' ||
+          res.error?.code === 'auth/cancelled-popup-request'
+        ) {
+          showToast('Google Sign-In was cancelled or closed.');
+        } else {
+          setErrorMessage(res.message || getFriendlyAuthErrorMessage(res.error));
         }
       }
     } catch (e) {
       setIsLoading(false);
       console.warn('Firebase Google signup:', e);
-      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+      if (
+        e.code === 'auth/popup-closed-by-user' ||
+        e.code === 'auth/cancelled-popup-request'
+      ) {
+        showToast('Google Sign-In was cancelled or closed.');
+      } else {
         setErrorMessage(getFriendlyAuthErrorMessage(e));
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleEmailVerified = (studentObj, role) => {
+    setIsGoogleVerifyModalOpen(false);
+    showToast('Email verified successfully! Redirecting...');
+    if (onRegisterSuccess) {
+      onRegisterSuccess(studentObj, true);
     }
   };
 
@@ -567,6 +600,7 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
             type="button"
             className="google-signin-button"
             onClick={handleGoogleSignup}
+            disabled={isLoading}
             id="google-signup-btn"
           >
             <GoogleIcon size={19} />
@@ -598,6 +632,13 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
         initialExpiryMinutes={otpExpiryMinutes}
         onVerifySuccess={handleOtpVerified}
         onClose={() => setIsOtpModalOpen(false)}
+      />
+
+      <GoogleEmailVerificationModal
+        isOpen={isGoogleVerifyModalOpen}
+        email={googleVerifyEmail}
+        onVerified={handleGoogleEmailVerified}
+        onClose={() => setIsGoogleVerifyModalOpen(false)}
       />
     </div>
   );

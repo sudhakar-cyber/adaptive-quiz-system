@@ -12,6 +12,8 @@ import {
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
+import { ForgotPasswordModal } from './ForgotPasswordModal';
+import { GoogleEmailVerificationModal } from './GoogleEmailVerificationModal';
 
 export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchToRegister, onLoginSuccess }) => {
   const [username, setUsername] = useState(initialUsername || '');
@@ -21,6 +23,10 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successToast, setSuccessToast] = useState(successNotice || '');
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [isGoogleVerifyModalOpen, setIsGoogleVerifyModalOpen] = useState(false);
+  const [googleVerifyEmail, setGoogleVerifyEmail] = useState('');
 
   React.useEffect(() => {
     if (initialUsername) {
@@ -234,42 +240,85 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (e) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setIsLoading(true);
+    setErrorMessage('');
     try {
       const res = await authService.loginWithGoogle();
       setIsLoading(false);
+
       if (res && res.success && res.student) {
+        showToast('Signed in successfully! Redirecting...');
         if (onLoginSuccess) {
-          onLoginSuccess(res.student.name, 'student', res.student);
+          onLoginSuccess(res.student.name, res.role || 'student', res.student);
         }
         return;
-      } else if (res && !res.success && res.error) {
-        if (res.error.code !== 'auth/popup-closed-by-user' && res.error.code !== 'auth/cancelled-popup-request') {
-          showToast(res.error.message || 'Google Sign-In failed.');
+      }
+
+      if (res && res.requiresVerification) {
+        setGoogleVerifyEmail(res.email || '');
+        setIsGoogleVerifyModalOpen(true);
+        showToast('Verification email sent. Please check your email and verify your account.');
+        setErrorMessage('Verification email sent. Please check your email and verify your account.');
+        return;
+      }
+
+      if (res && !res.success) {
+        if (
+          res.error?.code === 'auth/popup-closed-by-user' ||
+          res.error?.code === 'auth/cancelled-popup-request'
+        ) {
+          showToast('Google Sign-In was cancelled or closed.');
+        } else {
+          setErrorMessage(res.message || 'Google Sign-In failed.');
         }
       }
     } catch (e) {
       setIsLoading(false);
       console.warn('Firebase Google Login popup:', e);
-      if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
-        showToast(e.message || 'Google Sign-In failed.');
+      if (
+        e.code === 'auth/popup-closed-by-user' ||
+        e.code === 'auth/cancelled-popup-request'
+      ) {
+        showToast('Google Sign-In was cancelled or closed.');
+      } else {
+        setErrorMessage(e.message || 'Google Sign-In failed.');
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleForgotPassword = async (e) => {
+  const handleGoogleEmailVerified = (studentObj, role) => {
+    setIsGoogleVerifyModalOpen(false);
+    showToast('Email verified successfully! Redirecting...');
+    if (onLoginSuccess) {
+      onLoginSuccess(studentObj?.name || 'Learner', role || 'student', studentObj);
+    }
+  };
+
+  const handleForgotPassword = (e) => {
     e.preventDefault();
-    if (username.trim() && username.includes('@')) {
-      const res = await authService.sendPasswordReset(username.trim());
-      if (res && res.success) {
-        showToast(`Password reset link sent to ${username.trim()}`);
-        return;
+    const trimmed = username.trim();
+    let initialEmail = '';
+    if (trimmed) {
+      if (trimmed.includes('@')) {
+        initialEmail = trimmed;
+      } else {
+        const resolved = sharedDatabase.resolveUserEmail(trimmed);
+        if (resolved) {
+          initialEmail = resolved;
+        }
       }
     }
-    showToast('Password reset link sent to your registered email.');
+    setForgotPasswordEmail(initialEmail);
+    setIsForgotPasswordOpen(true);
+  };
+
+  const handleResetSuccess = (sentEmail) => {
+    showToast(`Password reset link sent to registered email: ${sentEmail}`);
   };
 
   const handleCreateAccount = (e) => {
@@ -397,13 +446,14 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
               <span className="checkbox-label">Remember me</span>
             </label>
 
-            <a
-              href="#forgot-password"
+            <button
+              type="button"
               className="forgot-password-link"
               onClick={handleForgotPassword}
+              id="forgot-password-link"
             >
               Forgot Password?
-            </a>
+            </button>
           </div>
 
           <button
@@ -435,6 +485,7 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
             type="button"
             className="google-signin-button"
             onClick={handleGoogleLogin}
+            disabled={isLoading}
             id="google-signin-btn"
           >
             <GoogleIcon size={20} />
@@ -459,6 +510,22 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
           </div>
         </form>
       </div>
+
+      {/* Interactive Registered Email Forgot Password Modal */}
+      <ForgotPasswordModal
+        isOpen={isForgotPasswordOpen}
+        onClose={() => setIsForgotPasswordOpen(false)}
+        initialEmail={forgotPasswordEmail}
+        onSuccess={handleResetSuccess}
+      />
+
+      {/* Google Email Verification Modal for unverified Google accounts */}
+      <GoogleEmailVerificationModal
+        isOpen={isGoogleVerifyModalOpen}
+        email={googleVerifyEmail}
+        onVerified={handleGoogleEmailVerified}
+        onClose={() => setIsGoogleVerifyModalOpen(false)}
+      />
     </div>
   );
 };
