@@ -10,7 +10,14 @@ import {
   verifyPasswordResetCode,
   signOut,
   onAuthStateChanged,
-  sendEmailVerification
+  sendEmailVerification,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  linkWithPhoneNumber,
+  PhoneAuthProvider,
+  linkWithCredential,
+  EmailAuthProvider,
+  updateProfile
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -55,6 +62,13 @@ export {
   signOut,
   onAuthStateChanged,
   sendEmailVerification,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  linkWithPhoneNumber,
+  PhoneAuthProvider,
+  linkWithCredential,
+  EmailAuthProvider,
+  updateProfile,
   doc,
   getDoc,
   setDoc,
