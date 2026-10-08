@@ -13,6 +13,7 @@ const EVENT_STUDENTS_UPDATED = 'learnsmart_students_updated';
 const EVENT_STUDENT_NOTIFICATIONS_UPDATED = 'learnsmart_student_notifications_updated';
 const EVENT_ADMIN_UPDATED = 'learnsmart_admin_updated';
 const EVENT_QUIZZES_UPDATED = 'learnsmart_quizzes_updated';
+export const EVENT_SUBMISSIONS_UPDATED = 'learnsmart_submissions_updated';
 
 const DEFAULT_SUBMISSIONS = [];
 
@@ -675,6 +676,11 @@ export const sharedDatabase = {
         };
         const updatedList = [newEntry, ...list];
         localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(updatedList));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: updatedList })
+          );
+        }
       } catch (e) {
         console.warn(e);
       }
@@ -1059,10 +1065,47 @@ export const sharedDatabase = {
   getSubmissions: () => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-      return saved ? JSON.parse(saved) : DEFAULT_SUBMISSIONS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
     } catch {
-      return DEFAULT_SUBMISSIONS;
+      // ignore
     }
+    // Fallback: Aggregate from active students' recentSubmissions
+    const allStudents = loadStoredStudents();
+    const aggregated = [];
+    allStudents.forEach((student) => {
+      if (Array.isArray(student.recentSubmissions) && student.recentSubmissions.length > 0) {
+        student.recentSubmissions.forEach((sub, idx) => {
+          aggregated.push({
+            id: `sub-${student.id}-${idx}`,
+            student: student.name,
+            quizTitle: sub.title,
+            score: sub.score,
+            status: sub.status || 'Completed',
+            date: sub.date || student.lastActive || 'Today'
+          });
+        });
+      }
+    });
+    return aggregated;
+  },
+
+  subscribeSubmissions: (callback) => {
+    const handler = (e) => {
+      if (callback) callback(e.detail || sharedDatabase.getSubmissions());
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener(EVENT_SUBMISSIONS_UPDATED, handler);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(EVENT_SUBMISSIONS_UPDATED, handler);
+      }
+    };
   },
 
   // ==========================================

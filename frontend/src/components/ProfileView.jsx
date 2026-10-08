@@ -16,7 +16,8 @@ import {
   XIcon,
   CameraIcon,
   UploadIcon,
-  TrashIcon
+  TrashIcon,
+  LockIcon
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 
@@ -498,15 +499,24 @@ export const ProfileView = ({
 
                   <div className="form-row-2col">
                     <div className="form-group-field">
-                      <label className="field-label">Email Address *</label>
+                      <div className="field-label-row">
+                        <label className="field-label">Email Address</label>
+                        <span className="field-locked-pill" title="Email Address cannot be modified by student">
+                          <LockIcon size={11} color="#64748B" />
+                          <span>Non-editable</span>
+                        </span>
+                      </div>
                       <input
                         type="email"
-                        className="field-text-input"
+                        className="field-text-input input-field-readonly"
                         value={formData.email}
-                        onChange={(e) => handleInputChange('email', e.target.value)}
+                        readOnly
+                        disabled
+                        tabIndex={-1}
+                        title="Email Address cannot be modified by student."
                         placeholder="student@learnsmart.edu"
-                        required
                       />
+                      <span className="field-hint-text">Institutional account email cannot be modified.</span>
                     </div>
                     <div className="form-group-field">
                       <label className="field-label">Phone Number</label>
@@ -522,14 +532,24 @@ export const ProfileView = ({
 
                   <div className="form-row-2col">
                     <div className="form-group-field">
-                      <label className="field-label">Department / Major</label>
+                      <div className="field-label-row">
+                        <label className="field-label">Department / Major</label>
+                        <span className="field-locked-pill" title="Department / Major cannot be modified by student">
+                          <LockIcon size={11} color="#64748B" />
+                          <span>Non-editable</span>
+                        </span>
+                      </div>
                       <input
                         type="text"
-                        className="field-text-input"
+                        className="field-text-input input-field-readonly"
                         value={formData.major}
-                        onChange={(e) => handleInputChange('major', e.target.value)}
+                        readOnly
+                        disabled
+                        tabIndex={-1}
+                        title="Department / Major cannot be modified by student."
                         placeholder="Computer Science & Engineering"
                       />
+                      <span className="field-hint-text">Department is assigned by your institution or educator.</span>
                     </div>
                     <div className="form-group-field">
                       <label className="field-label">Academic Semester</label>

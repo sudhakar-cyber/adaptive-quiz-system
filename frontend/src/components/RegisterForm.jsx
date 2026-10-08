@@ -75,17 +75,32 @@ const getFriendlyAuthErrorMessage = (err) => {
   return clean;
 };
 
-export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    phone: '',
-    country: 'United States',
-    agreeTerms: false
-  });
+export const RegisterForm = ({
+  onSwitchToLogin,
+  onRegisterSuccess,
+  onProceedToOtp,
+  initialData = null
+}) => {
+  const [formData, setFormData] = useState(() => ({
+    firstName: initialData?.firstName || '',
+    lastName: initialData?.lastName || '',
+    email: initialData?.email || '',
+    password: initialData?.password || '',
+    confirmPassword: initialData?.confirmPassword || '',
+    phone: initialData?.phone || '',
+    country: initialData?.country || 'United States',
+    agreeTerms: initialData?.agreeTerms || false
+  }));
+
+  // Preserve and restore entered values when returning from OTP page
+  React.useEffect(() => {
+    if (initialData) {
+      setFormData((prev) => ({
+        ...prev,
+        ...initialData
+      }));
+    }
+  }, [initialData]);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -171,18 +186,23 @@ export const RegisterForm = ({ onSwitchToLogin, onRegisterSuccess }) => {
     setIsLoading(true);
 
     try {
-      // Step 4 & 5: Take the EXACT email entered and send a REAL verification OTP
+      // Step 4 & 5: Take the EXACT email entered and send a verification OTP
       const res = await otpService.sendOtp(formData.email.trim());
       setIsLoading(false);
 
       if (res && res.success) {
+        if (onProceedToOtp) {
+          // Transition directly to the 4-digit OTP Page!
+          onProceedToOtp(formData, res.fallbackCode || res.demoOtp || '');
+          return;
+        }
+
         setOtpCooldown(res.cooldownSeconds || 60);
         setOtpExpiryMinutes(res.expiresInMinutes || 10);
         showToast(`Verification code sent to ${formData.email.trim()}`);
-        // Step 6: Show an OTP verification screen/modal
         setIsOtpModalOpen(true);
       } else {
-        setErrorMessage(res.error || 'Failed to send verification code. Please try again.');
+        setErrorMessage(res?.error || 'Failed to send verification code. Please try again.');
       }
     } catch (err) {
       setIsLoading(false);

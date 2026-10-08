@@ -5,7 +5,6 @@ import {
   StarIcon,
   TargetIcon,
   XIcon,
-  UserPlusIcon,
   TrashIcon
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
@@ -27,7 +26,6 @@ export const EducatorPerformanceView = ({
   const [openAddModal, setOpenAddModal] = useState(false);
   const [studentToRemove, setStudentToRemove] = useState(null);
   const [studentToReset, setStudentToReset] = useState(null);
-  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [newStudentForm, setNewStudentForm] = useState({
     name: '',
     email: '',
@@ -492,19 +490,6 @@ export const EducatorPerformanceView = ({
     setStudentToRemove(null);
   };
 
-  const handleConfirmDeleteAll = () => {
-    if (onClearAllStudents) {
-      onClearAllStudents();
-    } else {
-      sharedDatabase.clearAllStudents();
-    }
-    setSelectedStudent(null);
-    setShowDeleteAllModal(false);
-    if (showToast) {
-      showToast('All students have been removed from the directory.');
-    }
-  };
-
   const handleConfirmReset = () => {
     if (studentToReset) {
       if (onResetStudent) {
@@ -571,15 +556,6 @@ export const EducatorPerformanceView = ({
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="educator-primary-btn"
-            onClick={() => setOpenAddModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-          >
-            <UserPlusIcon size={16} color="#FFFFFF" />
-            <span>+ Add Student</span>
-          </button>
           <button
             type="button"
             className="educator-secondary-btn"
@@ -650,28 +626,37 @@ export const EducatorPerformanceView = ({
         <h3 className="educator-card-title" style={{ marginBottom: '14px' }}>
           Cohort Mastery Tier Distribution
         </h3>
-        <div style={{ display: 'flex', height: '14px', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px' }}>
-          <div
-            style={{
-              width: `${(topPerformersCount / totalCount) * 100}%`,
-              backgroundColor: '#10B981',
-              title: `Top Performers: ${topPerformersCount}`
-            }}
-          />
-          <div
-            style={{
-              width: `${(onTrackCount / totalCount) * 100}%`,
-              backgroundColor: '#3B82F6',
-              title: `On Track: ${onTrackCount}`
-            }}
-          />
-          <div
-            style={{
-              width: `${(atRiskCount / totalCount) * 100}%`,
-              backgroundColor: '#EF4444',
-              title: `Needs Support: ${atRiskCount}`
-            }}
-          />
+        <div style={{ display: 'flex', height: '14px', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px', backgroundColor: '#F1F5F9' }}>
+          {totalCount > 0 ? (
+            <>
+              <div
+                style={{
+                  width: `${(topPerformersCount / totalCount) * 100}%`,
+                  backgroundColor: '#10B981',
+                  transition: 'width 0.3s ease'
+                }}
+                title={`Top Performers: ${topPerformersCount}`}
+              />
+              <div
+                style={{
+                  width: `${(onTrackCount / totalCount) * 100}%`,
+                  backgroundColor: '#3B82F6',
+                  transition: 'width 0.3s ease'
+                }}
+                title={`On Track: ${onTrackCount}`}
+              />
+              <div
+                style={{
+                  width: `${(atRiskCount / totalCount) * 100}%`,
+                  backgroundColor: '#EF4444',
+                  transition: 'width 0.3s ease'
+                }}
+                title={`Needs Support: ${atRiskCount}`}
+              />
+            </>
+          ) : (
+            <div style={{ width: '100%', backgroundColor: '#E2E8F0' }} title="No enrolled students" />
+          )}
         </div>
         <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '0.84rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -752,17 +737,6 @@ export const EducatorPerformanceView = ({
               Showing active course roster
             </span>
           </div>
-          {students.length > 0 && (
-            <button
-              type="button"
-              className="educator-danger-btn sm"
-              onClick={() => setShowDeleteAllModal(true)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-            >
-              <TrashIcon size={14} color="#DC2626" />
-              <span>Delete All Students</span>
-            </button>
-          )}
         </div>
 
         <div className="educator-table-wrapper">
@@ -892,7 +866,7 @@ export const EducatorPerformanceView = ({
                           No enrolled students in the directory.
                         </span>
                         <span style={{ fontSize: '0.82rem', color: '#94A3B8' }}>
-                          Click "+ Add Student" above to enroll students into the roster.
+                          Enrolled students will appear here automatically.
                         </span>
                       </div>
                     ) : (
@@ -1324,49 +1298,6 @@ export const EducatorPerformanceView = ({
         </div>
       )}
 
-      {/* MODAL: Confirm Delete All Students Modal */}
-      {showDeleteAllModal && (
-        <div className="educator-modal-overlay" onClick={() => setShowDeleteAllModal(false)}>
-          <div
-            className="educator-modal-box"
-            style={{ maxWidth: '440px' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="educator-modal-header">
-              <h3 className="educator-card-title" style={{ margin: 0, color: '#DC2626' }}>
-                Delete All Students from Directory?
-              </h3>
-              <button
-                type="button"
-                className="educator-modal-close-btn"
-                onClick={() => setShowDeleteAllModal(false)}
-              >
-                ✕
-              </button>
-            </div>
-            <p style={{ fontSize: '0.86rem', color: '#475569', lineHeight: 1.5, margin: '14px 0' }}>
-              Are you sure you want to delete <strong>all {students.length} students</strong> from the enrolled students directory?
-              This will clear the entire cohort roster.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
-              <button
-                type="button"
-                className="educator-secondary-btn"
-                onClick={() => setShowDeleteAllModal(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="educator-danger-btn"
-                onClick={handleConfirmDeleteAll}
-              >
-                Confirm Delete All
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

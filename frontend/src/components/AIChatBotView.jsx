@@ -4,7 +4,7 @@ import {
   SendIcon,
   SparklesIcon,
   PlayIcon,
-  StarIcon
+  RotateCcwIcon
 } from './Icons';
 import { QUIZ_CATALOG } from '../data/quizData';
 
@@ -112,14 +112,6 @@ export const AIChatBotView = ({
       {/* Bot Top Header */}
       <header className="ai-bot-header">
         <div className="ai-bot-header-left">
-          <button
-            type="button"
-            className="ai-back-btn"
-            onClick={onBackToDashboard}
-            title="Return to Dashboard"
-          >
-            ← Dashboard
-          </button>
           <div className="ai-avatar-badge">
             <div className="ai-bot-avatar">
               <BotIcon size={24} color="#FFFFFF" />
@@ -143,19 +135,12 @@ export const AIChatBotView = ({
         <div className="ai-bot-header-right">
           <button
             type="button"
-            className="ai-header-action-btn"
-            onClick={onSwitchToAllQuizzes}
-          >
-            <StarIcon size={16} color="currentColor" />
-            <span>Browse All Quizzes</span>
-          </button>
-          <button
-            type="button"
             className="ai-header-clear-btn"
             onClick={handleClearChat}
             title="Clear conversation history"
           >
-            Clear Chat
+            <RotateCcwIcon size={14} color="currentColor" />
+            <span>Clear Chat</span>
           </button>
         </div>
       </header>

@@ -4,8 +4,7 @@ import {
   CheckCircleIcon,
   FlameIcon,
   StarIcon,
-  TrophyIcon,
-  XIcon
+  TrophyIcon
 } from './Icons';
 
 export const NotificationsView = ({
@@ -115,17 +114,6 @@ export const NotificationsView = ({
 
               <div className="notif-item-actions">
                 {item.unread && <span className="unread-dot" title="Unread notification" />}
-                <button
-                  type="button"
-                  className="notif-dismiss-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onDismissNotification) onDismissNotification(item.id);
-                  }}
-                  aria-label="Dismiss notification"
-                >
-                  <XIcon size={14} />
-                </button>
               </div>
             </div>
           ))
