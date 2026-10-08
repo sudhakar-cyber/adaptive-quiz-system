@@ -11,8 +11,8 @@ from config import config
 from app.routes.auth_routes import router as auth_router
 
 app = FastAPI(
-    title="LearnSmart Adaptive Quiz System - Auth & OTP Backend",
-    description="Backend service providing real email OTP generation, secure hashing, and verification.",
+    title="LearnSmart Adaptive Quiz System - Auth Backend",
+    description="Backend service providing authentication and password management utilities.",
     version="1.0.0"
 )
 
@@ -41,7 +41,6 @@ def health():
         "status": "healthy",
         "service": "LearnSmart Auth API",
         "port": config.PORT,
-        "resend_configured": bool(config.RESEND_API_KEY),
         "smtp_configured": bool(config.SMTP_USER and config.SMTP_PASS)
     }
 
