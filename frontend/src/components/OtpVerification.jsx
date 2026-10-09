@@ -1,43 +1,41 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavbarLogo } from './NavbarLogo';
-import { MailIcon, ShieldIcon, CheckIcon } from './Icons';
-import { otpService } from '../services/otpService';
+import { PhoneIcon, ShieldIcon, CheckIcon } from './Icons';
+import { phoneAuthService } from '../services/phoneAuthService';
 
 export const OtpVerification = ({
+  phone = '',
+  country = 'United States',
+  displayPhone = '',
   email = '',
-  initialDemoCode = '',
+  registrationData = null,
   onVerifySuccess,
   onBackToRegister,
   onSwitchToLogin
 }) => {
-  const [digits, setDigits] = useState(['', '', '', '']);
+  // 6-digit OTP state for Firebase Phone Authentication
+  const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successToast, setSuccessToast] = useState('');
   const [cooldown, setCooldown] = useState(60);
   const [expirySeconds, setExpirySeconds] = useState(10 * 60);
-  const [demoCode, setDemoCode] = useState(initialDemoCode || '');
   const [isShaking, setIsShaking] = useState(false);
 
   const inputRefs = useRef([]);
 
-  // Check sessionStorage for demo code fallback if available
-  useEffect(() => {
-    if (!demoCode && email) {
-      try {
-        const raw = sessionStorage.getItem(`learnsmart_otp_${email.trim().toLowerCase()}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed?.code) {
-            setDemoCode(parsed.code);
-          }
-        }
-      } catch {}
-    }
-  }, [email, demoCode]);
+  // Resolve target formatted phone display
+  const targetRawPhone = registrationData?.phone || phone || '';
+  const targetCountry = registrationData?.country || country || 'United States';
+  const targetDisplayPhone =
+    displayPhone ||
+    phoneAuthService.formatPhoneDisplay(
+      phoneAuthService.formatToE164(targetRawPhone, targetCountry)
+    ) ||
+    targetRawPhone;
 
-  // Auto-focus first input on mount
+  // Auto-focus first input box on mount
   useEffect(() => {
     if (inputRefs.current[0]) {
       setTimeout(() => {
@@ -46,7 +44,7 @@ export const OtpVerification = ({
     }
   }, []);
 
-  // Cooldown countdown
+  // 60-second resend cooldown countdown
   useEffect(() => {
     if (cooldown <= 0) return;
     const timer = setInterval(() => {
@@ -55,7 +53,7 @@ export const OtpVerification = ({
     return () => clearInterval(timer);
   }, [cooldown]);
 
-  // Expiration countdown
+  // 10-minute code expiration countdown
   useEffect(() => {
     if (expirySeconds <= 0) return;
     const timer = setInterval(() => {
@@ -68,7 +66,7 @@ export const OtpVerification = ({
     setSuccessToast(message);
     setTimeout(() => {
       setSuccessToast('');
-    }, 4000);
+    }, 4500);
   };
 
   const formatTimer = (totalSeconds) => {
@@ -93,7 +91,7 @@ export const OtpVerification = ({
     if (errorMessage) setErrorMessage('');
 
     // Auto-advance focus to next digit box
-    if (index < 3) {
+    if (index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
   };
@@ -103,39 +101,41 @@ export const OtpVerification = ({
       inputRefs.current[index - 1]?.focus();
     } else if (e.key === 'ArrowLeft' && index > 0) {
       inputRefs.current[index - 1]?.focus();
-    } else if (e.key === 'ArrowRight' && index < 3) {
+    } else if (e.key === 'ArrowRight' && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
   const handlePaste = (e) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
     if (!pasted) return;
 
     const next = [...digits];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       next[i] = pasted[i] || '';
     }
     setDigits(next);
     if (errorMessage) setErrorMessage('');
 
-    const focusIndex = Math.min(pasted.length, 3);
+    const focusIndex = Math.min(pasted.length, 5);
     inputRefs.current[focusIndex]?.focus();
   };
 
   const fullCode = digits.join('');
-  const isComplete = fullCode.length === 4 && digits.every((d) => d !== '');
+  const isComplete = fullCode.length === 6 && digits.every((d) => d !== '');
 
   const handleVerify = async (e) => {
     if (e) e.preventDefault();
+    if (isVerifying) return;
+
     if (!isComplete) {
-      setErrorMessage('Please enter all 4 digits of your verification code.');
+      setErrorMessage('Please enter all 6 digits of your SMS verification code.');
       return;
     }
 
     if (expirySeconds <= 0) {
-      setErrorMessage('This verification code has expired. Please click "Resend Code".');
+      setErrorMessage('This verification code has expired. Please click "Resend OTP".');
       return;
     }
 
@@ -143,18 +143,25 @@ export const OtpVerification = ({
     setErrorMessage('');
 
     try {
-      const res = await otpService.verifyOtp(email, fullCode);
+      const profileToSave = registrationData || {
+        phone: targetRawPhone,
+        country: targetCountry,
+        email
+      };
+
+      const res = await phoneAuthService.verifyOtp(fullCode, profileToSave);
+
       if (res && res.success) {
-        showToast('Verification successful! Creating your account...');
+        showToast('Phone number verified! Account created successfully.');
         if (onVerifySuccess) {
-          onVerifySuccess(res.verificationToken);
+          onVerifySuccess(res.student || res.user);
         }
       } else {
         setErrorMessage(
-          res?.error || 'Incorrect verification code. Please check your email and try again.'
+          res?.error || 'Incorrect verification code. Please check your SMS and try again.'
         );
-        // Automatically clear all OTP input fields when wrong
-        setDigits(['', '', '', '']);
+        // Automatically clear OTP input fields when verification fails
+        setDigits(['', '', '', '', '', '']);
         setIsShaking(true);
         setTimeout(() => setIsShaking(false), 400);
         setTimeout(() => {
@@ -162,9 +169,10 @@ export const OtpVerification = ({
         }, 10);
       }
     } catch (err) {
-      setErrorMessage(err.message || 'Verification failed. Please try again.');
-      // Automatically clear all OTP input fields on error
-      setDigits(['', '', '', '']);
+      setErrorMessage(
+        err.message || 'Verification failed. Please check your code and try again.'
+      );
+      setDigits(['', '', '', '', '', '']);
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 400);
       setTimeout(() => {
@@ -182,21 +190,20 @@ export const OtpVerification = ({
     setErrorMessage('');
 
     try {
-      const res = await otpService.resendOtp(email);
+      const res = await phoneAuthService.resendOtp(targetRawPhone, targetCountry);
       if (res && res.success) {
-        setDigits(['', '', '', '']);
+        setDigits(['', '', '', '', '', '']);
         setCooldown(res.cooldownSeconds || 60);
         setExpirySeconds(10 * 60);
-        if (res.fallbackCode || res.demoOtp) {
-          setDemoCode(res.fallbackCode || res.demoOtp);
-        }
-        showToast(`A new verification code has been sent to ${email}`);
+        showToast(res.message || `A new verification code has been sent to ${targetDisplayPhone}`);
         inputRefs.current[0]?.focus();
       } else {
-        setErrorMessage(res.error || 'Failed to resend code. Please wait a moment.');
+        setErrorMessage(res?.error || 'Failed to resend SMS code. Please wait a moment and try again.');
       }
     } catch (err) {
-      setErrorMessage(err.message || 'Failed to resend verification code.');
+      setErrorMessage(
+        phoneAuthService.getFriendlyPhoneAuthError(err) || 'Failed to resend verification code.'
+      );
     } finally {
       setIsResending(false);
     }
@@ -218,32 +225,26 @@ export const OtpVerification = ({
 
         <div className="otp-modal-header">
           <div className="otp-icon-wrap" aria-hidden="true">
-            <MailIcon size={26} color="#1A6BFF" />
+            <PhoneIcon size={26} color="#1A6BFF" />
           </div>
-          <h2 className="card-heading">Verify Your Email</h2>
+          <h2 className="card-heading">Verify Mobile Number</h2>
           <p className="otp-modal-subheading">
-            Enter the 4-digit verification code sent to
+            Enter the 6-digit SMS verification code sent to
           </p>
           <div className="otp-target-email-pill">
-            <span className="otp-email-text">{email}</span>
+            <span className="otp-email-text">{targetDisplayPhone || 'Your mobile number'}</span>
             {onBackToRegister && (
               <button
                 type="button"
                 className="otp-change-email-btn"
                 onClick={onBackToRegister}
-                title="Change or edit your email"
+                title="Change or edit your mobile number"
               >
                 Change
               </button>
             )}
           </div>
         </div>
-
-        {demoCode && (
-          <div className="otp-demo-hint" role="status">
-            <span>Verification code: <strong>{demoCode}</strong></span>
-          </div>
-        )}
 
         {errorMessage && (
           <div className="card-error otp-error-alert" role="alert">
@@ -252,8 +253,11 @@ export const OtpVerification = ({
         )}
 
         <form onSubmit={handleVerify} className="otp-form" noValidate>
-          <label className="otp-inputs-label">Enter 4-Digit Code</label>
-          <div className={`otp-inputs-row ${isShaking ? 'error-shake' : ''}`} onPaste={handlePaste}>
+          <label className="otp-inputs-label">Enter 6-Digit Code</label>
+          <div
+            className={`otp-inputs-row ${isShaking ? 'error-shake' : ''}`}
+            onPaste={handlePaste}
+          >
             {digits.map((digit, i) => (
               <input
                 key={i}
@@ -261,6 +265,7 @@ export const OtpVerification = ({
                 id={`otp-digit-${i}`}
                 type="text"
                 inputMode="numeric"
+                pattern="[0-9]*"
                 autoComplete="one-time-code"
                 maxLength={1}
                 value={digit}
@@ -278,7 +283,9 @@ export const OtpVerification = ({
           <div className="otp-timer-row">
             <span className="otp-expiry-indicator">
               {expirySeconds > 0 ? (
-                <>Expires in <strong>{formatTimer(expirySeconds)}</strong></>
+                <>
+                  Expires in <strong>{formatTimer(expirySeconds)}</strong>
+                </>
               ) : (
                 <span className="otp-expired-warning">Code expired</span>
               )}
@@ -296,7 +303,7 @@ export const OtpVerification = ({
                   onClick={handleResend}
                   disabled={isResending}
                 >
-                  {isResending ? 'Sending...' : 'Resend Code'}
+                  {isResending ? 'Sending SMS...' : 'Resend OTP'}
                 </button>
               )}
             </div>
@@ -312,16 +319,29 @@ export const OtpVerification = ({
               {isVerifying ? (
                 <span className="btn-loading-content">
                   <span className="btn-spinner" />
-                  <span>Verifying...</span>
+                  <span>Verifying OTP...</span>
                 </span>
               ) : (
                 <span className="btn-normal-content">
                   <CheckIcon size={18} color="#FFFFFF" />
-                  <span>Verify &amp; Create Account</span>
+                  <span>Verify OTP &amp; Create Account</span>
                 </span>
               )}
             </button>
           </div>
+
+          {onBackToRegister && (
+            <div style={{ textAlign: 'center', marginTop: '6px' }}>
+              <button
+                type="button"
+                className="link-button"
+                onClick={onBackToRegister}
+                style={{ fontSize: '0.84rem' }}
+              >
+                Change Mobile Number
+              </button>
+            </div>
+          )}
 
           {onSwitchToLogin && (
             <div className="signup-row" style={{ marginTop: '12px' }}>
@@ -338,7 +358,7 @@ export const OtpVerification = ({
 
           <div className="otp-security-footer">
             <ShieldIcon size={14} color="#64748B" />
-            <span>Official 2-Step Verification • Never share your code</span>
+            <span>Official Firebase SMS Verification • Never share your OTP</span>
           </div>
         </form>
       </div>

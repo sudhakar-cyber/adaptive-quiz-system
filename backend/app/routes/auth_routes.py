@@ -95,3 +95,17 @@ def reset_password_endpoint(req: ResetPasswordRequest):
         )
     return result
 
+class FirebaseTokenRequest(BaseModel):
+    id_token: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+@router.post("/verify-firebase-token")
+def verify_firebase_token_endpoint(req: FirebaseTokenRequest):
+    result = auth_controller.verify_firebase_token(req.id_token, req.phone, req.email)
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Token verification failed.")
+        )
+    return result

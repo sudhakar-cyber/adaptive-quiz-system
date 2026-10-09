@@ -30,7 +30,6 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
 
   const [registeredUser, setRegisteredUser] = useState(null);
   const [pendingRegistration, setPendingRegistration] = useState(null);
-  const [demoOtpCode, setDemoOtpCode] = useState('');
   const [loginNotice, setLoginNotice] = useState('');
 
   // Sync if initialView prop changes
@@ -71,64 +70,13 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
     handleLoginSuccess(userData?.name || 'Student', role, userData);
   };
 
-  const handleProceedToOtp = (formData, fallbackCode = '') => {
-    setPendingRegistration(formData);
-    setDemoOtpCode(fallbackCode || '');
+  const handleProceedToOtp = (formData, phoneInfo = {}) => {
+    setPendingRegistration({
+      ...formData,
+      ...phoneInfo
+    });
     setLoginNotice('');
     setCurrentView('otp');
-  };
-
-  const handleOtpVerifiedAndCreateAccount = async (verificationToken) => {
-    if (!pendingRegistration) {
-      handleLoginSuccess('Student', 'student');
-      return;
-    }
-
-    try {
-      const res = await authService.signupWithFirebase(
-        pendingRegistration.email.trim(),
-        pendingRegistration.password,
-        {
-          firstName: pendingRegistration.firstName.trim(),
-          lastName: pendingRegistration.lastName.trim(),
-          phone: pendingRegistration.phone.trim(),
-          country: pendingRegistration.country,
-          role: 'student',
-          verificationToken
-        }
-      );
-
-      if (res && res.success && res.student) {
-        setRegisteredUser(res.student);
-        handleLoginSuccess(res.student.name || 'Student', 'student', res.student);
-      } else {
-        // Fallback to local sharedDatabase
-        const studentName = `${pendingRegistration.firstName.trim()} ${pendingRegistration.lastName.trim()}`.trim() || 'Student';
-        const fallbackStudent = sharedDatabase.registerStudent({
-          name: studentName,
-          email: pendingRegistration.email.trim(),
-          phone: pendingRegistration.phone.trim(),
-          country: pendingRegistration.country,
-          role: 'student'
-        });
-        authService.loginStudent(fallbackStudent);
-        setRegisteredUser(fallbackStudent);
-        handleLoginSuccess(fallbackStudent.name, 'student', fallbackStudent);
-      }
-    } catch (err) {
-      console.warn('Signup error, using local registration fallback:', err);
-      const studentName = `${pendingRegistration.firstName.trim()} ${pendingRegistration.lastName.trim()}`.trim() || 'Student';
-      const fallbackStudent = sharedDatabase.registerStudent({
-        name: studentName,
-        email: pendingRegistration.email.trim(),
-        phone: pendingRegistration.phone.trim(),
-        country: pendingRegistration.country,
-        role: 'student'
-      });
-      authService.loginStudent(fallbackStudent);
-      setRegisteredUser(fallbackStudent);
-      handleLoginSuccess(fallbackStudent.name, 'student', fallbackStudent);
-    }
   };
 
   const handleOAuthSuccess = (verifiedUser) => {
@@ -201,9 +149,12 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
             )}
             {currentView === 'otp' && (
               <OtpVerification
-                email={pendingRegistration?.email || registeredUser?.email || 'student@learnsmart.edu'}
-                initialDemoCode={demoOtpCode}
-                onVerifySuccess={handleOtpVerifiedAndCreateAccount}
+                phone={pendingRegistration?.phone || ''}
+                country={pendingRegistration?.country || 'United States'}
+                displayPhone={pendingRegistration?.displayPhone || ''}
+                email={pendingRegistration?.email || ''}
+                registrationData={pendingRegistration}
+                onVerifySuccess={handleRegisterSuccess}
                 onBackToRegister={() => setCurrentView('register')}
                 onSwitchToLogin={() => setCurrentView('login')}
               />

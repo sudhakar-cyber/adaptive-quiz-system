@@ -17,7 +17,7 @@ import {
 
 import { sharedDatabase } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
-import { otpService } from '../services/otpService';
+import { phoneAuthService } from '../services/phoneAuthService';
 import { OTPVerificationModal } from './OTPVerificationModal';
 import { GoogleEmailVerificationModal } from './GoogleEmailVerificationModal';
 
@@ -167,8 +167,10 @@ export const RegisterForm = ({
       setErrorMessage('Passwords do not match.');
       return;
     }
-    if (!formData.phone.trim()) {
-      setErrorMessage('Please enter your phone number.');
+    // Validate phone number including country code
+    const formattedPhone = phoneAuthService.formatToE164(formData.phone, formData.country);
+    if (!formData.phone.trim() || !phoneAuthService.isValidE164(formattedPhone)) {
+      setErrorMessage('Please enter a valid mobile number with country code (e.g. +91 98765 43210 or select your country).');
       return;
     }
     if (!formData.agreeTerms) {
@@ -186,61 +188,38 @@ export const RegisterForm = ({
     setIsLoading(true);
 
     try {
-      // Step 4 & 5: Take the EXACT email entered and send a verification OTP
-      const res = await otpService.sendOtp(formData.email.trim());
+      // Send real SMS OTP via Firebase Phone Authentication
+      const res = await phoneAuthService.sendOtp(formData.phone, formData.country);
       setIsLoading(false);
 
       if (res && res.success) {
+        showToast(res.message || `Verification code sent to ${res.displayPhone}`);
         if (onProceedToOtp) {
-          // Transition directly to the 4-digit OTP Page!
-          onProceedToOtp(formData, res.fallbackCode || res.demoOtp || '');
+          // Transition directly to the 6-digit Phone OTP Page!
+          onProceedToOtp(formData, {
+            formattedPhone: res.formattedPhone,
+            displayPhone: res.displayPhone
+          });
           return;
         }
 
         setOtpCooldown(res.cooldownSeconds || 60);
-        setOtpExpiryMinutes(res.expiresInMinutes || 10);
-        showToast(`Verification code sent to ${formData.email.trim()}`);
         setIsOtpModalOpen(true);
       } else {
-        setErrorMessage(res?.error || 'Failed to send verification code. Please try again.');
+        setErrorMessage(res?.error || 'Failed to send SMS verification code. Please try again.');
       }
     } catch (err) {
       setIsLoading(false);
-      setErrorMessage(err.message || 'Failed to request verification code.');
+      setErrorMessage(phoneAuthService.getFriendlyPhoneAuthError(err));
     }
   };
 
-  // Step 8 & 9: ONLY after successful OTP verification:
-  const handleOtpVerified = async (verificationToken) => {
-    setIsLoading(true);
-    setErrorMessage('');
-
-    try {
-      // Create Firebase Auth account and Firestore profile
-      const res = await authService.signupWithFirebase(formData.email.trim(), formData.password, {
-        firstName: formData.firstName.trim(),
-        lastName: formData.lastName.trim(),
-        phone: formData.phone.trim(),
-        country: formData.country,
-        role: 'student',
-        verificationToken
-      });
-
-      setIsLoading(false);
-
-      if (res && res.success && res.student) {
-        setIsOtpModalOpen(false);
-        showToast('Account created successfully! Redirecting...');
-        if (onRegisterSuccess) {
-          onRegisterSuccess(res.student);
-        }
-      } else {
-        const friendlyMsg = getFriendlyAuthErrorMessage(res?.error);
-        setErrorMessage(friendlyMsg);
-      }
-    } catch (err) {
-      setIsLoading(false);
-      setErrorMessage(getFriendlyAuthErrorMessage(err));
+  // ONLY after successful OTP verification:
+  const handleOtpVerified = (verifiedStudent) => {
+    setIsOtpModalOpen(false);
+    showToast('Account created successfully! Redirecting...');
+    if (onRegisterSuccess) {
+      onRegisterSuccess(verifiedStudent);
     }
   };
 
@@ -647,7 +626,11 @@ export const RegisterForm = ({
 
       <OTPVerificationModal
         isOpen={isOtpModalOpen}
+        phone={formData.phone}
+        country={formData.country}
+        displayPhone={phoneAuthService.formatPhoneDisplay(phoneAuthService.formatToE164(formData.phone, formData.country))}
         email={formData.email.trim()}
+        registrationData={formData}
         initialCooldown={otpCooldown}
         initialExpiryMinutes={otpExpiryMinutes}
         onVerifySuccess={handleOtpVerified}
