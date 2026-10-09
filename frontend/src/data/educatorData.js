@@ -439,12 +439,12 @@ export const EDUCATOR_ANALYTICS_DATA = {
 };
 
 export const INITIAL_EDUCATOR_PROFILE = {
-  fullName: 'Educator',
+  fullName: 'Dr. Sarah Jenkins',
   academicTitle: 'Faculty Member',
   department: 'Computer Science',
   institution: 'LearnSmart University',
-  facultyId: '',
-  email: '',
+  facultyId: 'FAC-CS-2025-101',
+  email: 'educator@learnsmart.com',
   phone: '',
   officeLocation: '',
   officeHours: '',
@@ -458,3 +458,4 @@ export const INITIAL_EDUCATOR_PROFILE = {
     educatorRating: '5.0 / 5.0'
   }
 };
+

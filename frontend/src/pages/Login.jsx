@@ -48,9 +48,10 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
       }
       navigate('/admin-dashboard');
     } else if (role === 'educator') {
-      authService.loginEducator();
+      const eduPayload = studentObj || user;
+      authService.loginEducator(eduPayload);
       if (onLoginSuccess) {
-        onLoginSuccess('Educator', 'educator');
+        onLoginSuccess(eduPayload || 'Educator', 'educator');
       }
       navigate('/educator-dashboard');
     } else {

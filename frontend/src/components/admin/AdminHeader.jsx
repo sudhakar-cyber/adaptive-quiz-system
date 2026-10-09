@@ -1,7 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
-const AdminHeader = ({ onMenuToggle, onLogout, onSelectTab, searchQuery = '', onSearchChange }) => {
+const AdminHeader = ({
+  onMenuToggle,
+  onLogout,
+  onSelectTab,
+  searchQuery = '',
+  onSearchChange,
+  unreadCount = 0,
+  adminUser = null
+}) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const adminName = adminUser?.name || adminUser?.fullName || 'Admin';
+  const adminEmail = adminUser?.email || 'admin@learnsmart.edu';
+  const adminRole = adminUser?.title || 'Administrator';
+  const adminInitial = (adminName || 'A').trim()[0]?.toUpperCase() || 'A';
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <header className="adh-bar">
@@ -70,20 +94,22 @@ const AdminHeader = ({ onMenuToggle, onLogout, onSelectTab, searchQuery = '', on
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
-          <span className="adh-bell-badge">5</span>
+          {unreadCount > 0 && (
+            <span className="adh-bell-badge">{unreadCount}</span>
+          )}
         </button>
 
         {/* Admin Profile */}
-        <div className="adh-profile-wrap">
+        <div className="adh-profile-wrap" ref={dropdownRef}>
           <button
             className="adh-profile-btn"
             onClick={() => setDropdownOpen(!dropdownOpen)}
             title="Administrator Profile Menu"
           >
-            <div className="adh-avatar">A</div>
+            <div className="adh-avatar">{adminInitial}</div>
             <div className="adh-profile-info">
-              <span className="adh-profile-name">Admin</span>
-              <span className="adh-profile-role">Administrator</span>
+              <span className="adh-profile-name">{adminName}</span>
+              <span className="adh-profile-role">{adminRole}</span>
             </div>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="14" height="14" className="adh-chevron">
               <polyline points="6 9 12 15 18 9"/>
@@ -92,6 +118,20 @@ const AdminHeader = ({ onMenuToggle, onLogout, onSelectTab, searchQuery = '', on
 
           {dropdownOpen && (
             <div className="adh-dropdown">
+              <div
+                style={{ padding: '8px 16px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer' }}
+                onClick={() => {
+                  setDropdownOpen(false);
+                  if (onSelectTab) onSelectTab('profile');
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0F172A' }}>
+                  {adminName}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                  {adminEmail}
+                </div>
+              </div>
               <button
                 className="adh-dropdown-item"
                 onClick={() => {

@@ -161,17 +161,52 @@ export const authService = {
   // Log in as Educator
   loginEducator: (educatorData = null) => {
     try {
-      const data = JSON.stringify(educatorData || {
-        name: 'Educator',
-        email: 'educator@learnsmart.com',
+      const educatorsList = typeof sharedDatabase.getEducators === 'function'
+        ? sharedDatabase.getEducators()
+        : [];
+      const matched = educatorsList.find((e) => {
+        if (educatorData && typeof educatorData === 'object') {
+          if (educatorData.email && e.email?.toLowerCase() === educatorData.email.toLowerCase()) return true;
+          if (educatorData.name && educatorData.name !== 'Educator' && e.name?.toLowerCase() === educatorData.name.toLowerCase()) return true;
+        }
+        if (typeof educatorData === 'string' && educatorData !== 'Educator') {
+          if (e.name?.toLowerCase() === educatorData.toLowerCase() || e.email?.toLowerCase() === educatorData.toLowerCase()) return true;
+        }
+        return false;
+      }) || educatorsList[0] || null;
+
+      const resolvedEducator = {
+        id: educatorData?.id || matched?.id || 'edu-201',
+        name:
+          (educatorData && typeof educatorData === 'object' && educatorData.name && educatorData.name !== 'Educator'
+            ? educatorData.name
+            : typeof educatorData === 'string' && educatorData !== 'Educator'
+              ? educatorData
+              : null) ||
+          matched?.name ||
+          'Dr. Sarah Jenkins',
+        email:
+          (educatorData && typeof educatorData === 'object' ? educatorData.email : '') ||
+          matched?.email ||
+          'educator@learnsmart.com',
+        educatorId:
+          (educatorData && typeof educatorData === 'object' ? educatorData.educatorId || educatorData.facultyId : '') ||
+          matched?.educatorId ||
+          'FAC-CS-2025-101',
+        department:
+          (educatorData && typeof educatorData === 'object' ? educatorData.department : '') ||
+          matched?.department ||
+          'Computer Science',
         role: 'Educator'
-      });
+      };
+
+      const data = JSON.stringify(resolvedEducator);
       localStorage.setItem('learnsmart_role', 'educator');
       localStorage.setItem('learnsmart_educator', data);
-      localStorage.setItem('learnsmart_user', educatorData?.name || 'Educator');
+      localStorage.setItem('learnsmart_user', resolvedEducator.name);
       sessionStorage.setItem('learnsmart_role', 'educator');
       sessionStorage.setItem('learnsmart_educator', data);
-      sessionStorage.setItem('learnsmart_user', educatorData?.name || 'Educator');
+      sessionStorage.setItem('learnsmart_user', resolvedEducator.name);
     } catch (err) {
       console.error('Failed to set educator session:', err);
     }

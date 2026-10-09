@@ -6,6 +6,7 @@ import {
   EditIcon,
   LogoutIcon,
   CameraIcon,
+  LockIcon,
   XIcon
 } from './Icons';
 
@@ -34,12 +35,12 @@ export const EducatorProfileView = ({
 
   // Edit form state
   const [formData, setFormData] = useState({
-    fullName: profileData.fullName || 'Educator',
+    fullName: profileData.fullName || 'Dr. Sarah Jenkins',
     academicTitle: profileData.academicTitle || 'Faculty Member',
     department: profileData.department || 'Computer Science',
     email: profileData.email || 'educator@learnsmart.com',
     phone: profileData.phone || '',
-    facultyId: profileData.facultyId || '',
+    facultyId: profileData.facultyId || 'FAC-CS-2025-101',
     officeLocation: profileData.officeLocation || '',
     officeHours: profileData.officeHours || '',
     bio: profileData.bio || '',
@@ -55,12 +56,12 @@ export const EducatorProfileView = ({
   const [passwordError, setPasswordError] = useState('');
 
   const educatorInitials = (() => {
-    const name = formData.fullName || profileData.fullName || 'Educator';
+    const name = formData.fullName || profileData.fullName || 'Dr. Sarah Jenkins';
     const cleanName = name.replace(/^(Dr\.|Prof\.|Mr\.|Mrs\.|Ms\.)\s*/i, '').trim();
     const parts = cleanName.split(/\s+/);
     if (parts.length === 1 && parts[0]) return parts[0].slice(0, 2).toUpperCase();
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    return 'ED';
+    return 'SJ';
   })();
 
   const handleAvatarUpload = (e) => {
@@ -108,7 +109,9 @@ export const EducatorProfileView = ({
 
     const updated = {
       ...profileData,
-      ...formData
+      ...formData,
+      email: profileData.email || formData.email,
+      facultyId: profileData.facultyId || formData.facultyId
     };
 
     onUpdateProfile(updated);
@@ -517,24 +520,82 @@ export const EducatorProfileView = ({
                   />
                 </div>
                 <div>
-                  <label className="educator-field-label">Faculty ID</label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label className="educator-field-label" style={{ margin: 0 }}>Faculty ID</label>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.70rem',
+                        fontWeight: 600,
+                        color: '#64748B',
+                        backgroundColor: '#F1F5F9',
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        border: '1px solid #E2E8F0'
+                      }}
+                      title="Faculty ID cannot be modified by educator"
+                    >
+                      <LockIcon size={11} color="#64748B" />
+                      <span>Non-editable</span>
+                    </span>
+                  </div>
                   <input
                     type="text"
                     value={formData.facultyId}
-                    onChange={(e) => setFormData({ ...formData, facultyId: e.target.value })}
+                    readOnly
+                    disabled
+                    tabIndex={-1}
+                    title="Faculty ID cannot be modified by educator."
                     className="educator-text-input"
+                    style={{
+                      backgroundColor: '#F1F5F9',
+                      color: '#64748B',
+                      cursor: 'not-allowed',
+                      borderColor: '#E2E8F0'
+                    }}
                   />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label className="educator-field-label">Email Address</label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label className="educator-field-label" style={{ margin: 0 }}>Email Address</label>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '0.70rem',
+                        fontWeight: 600,
+                        color: '#64748B',
+                        backgroundColor: '#F1F5F9',
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        border: '1px solid #E2E8F0'
+                      }}
+                      title="Email Address cannot be modified by educator"
+                    >
+                      <LockIcon size={11} color="#64748B" />
+                      <span>Non-editable</span>
+                    </span>
+                  </div>
                   <input
                     type="email"
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    readOnly
+                    disabled
+                    tabIndex={-1}
+                    title="Email Address cannot be modified by educator."
                     className="educator-text-input"
+                    style={{
+                      backgroundColor: '#F1F5F9',
+                      color: '#64748B',
+                      cursor: 'not-allowed',
+                      borderColor: '#E2E8F0'
+                    }}
                   />
                 </div>
                 <div>
