@@ -86,7 +86,12 @@ export const EducatorSidebar = ({
         <nav className="educator-sidebar-nav" aria-label="Educator Navigation">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeTab === item.id;
+            const isAnalyticsMatch =
+              item.id === 'Analytics' &&
+              (activeTab === 'Analytics' ||
+                activeTab === 'Assessment & Learning Analytics' ||
+                activeTab === 'Assessment Analytics');
+            const isActive = activeTab === item.id || isAnalyticsMatch;
 
             return (
               <button

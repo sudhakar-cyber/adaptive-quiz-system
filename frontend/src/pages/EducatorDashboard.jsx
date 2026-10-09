@@ -402,8 +402,17 @@ export const EducatorDashboard = ({ onLogout }) => {
           )}
 
           {/* TAB 4: ANALYTICS */}
-          {activeTab === 'Analytics' && (
-            <EducatorAnalyticsView showToast={showToast} />
+          {(activeTab === 'Analytics' ||
+            activeTab === 'Assessment & Learning Analytics' ||
+            activeTab === 'Assessment Analytics') && (
+            <EducatorAnalyticsView
+              quizzes={quizzes}
+              students={students}
+              submissions={submissions}
+              searchQuery={searchQuery}
+              onNavigateToTab={setActiveTab}
+              showToast={showToast}
+            />
           )}
 
           {/* TAB 5: REPORTS */}
