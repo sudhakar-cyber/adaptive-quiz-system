@@ -15,7 +15,8 @@ export const DashboardHeader = ({
   onLogout,
   onOpenNotifications,
   onOpenProfile,
-  educatorName = 'Educator',
+  educatorName = 'Dr. Sarah Jenkins',
+  educatorEmail = 'educator@learnsmart.com',
   educatorRole = 'Educator',
   notificationCount = 0,
   avatarUrl = null,
@@ -199,9 +200,15 @@ export const DashboardHeader = ({
 
           {showProfileMenu && (
             <div className="educator-dropdown-menu">
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid #F1F5F9' }}>
+              <div
+                style={{ padding: '8px 12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer' }}
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  if (onOpenProfile) onOpenProfile();
+                }}
+              >
                 <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0F172A' }}>{educatorName}</div>
-                <div style={{ fontSize: '0.76rem', color: '#64748B' }}>priya.sharma@learnsmart.edu</div>
+                <div style={{ fontSize: '0.76rem', color: '#64748B' }}>{educatorEmail}</div>
               </div>
               <button
                 type="button"

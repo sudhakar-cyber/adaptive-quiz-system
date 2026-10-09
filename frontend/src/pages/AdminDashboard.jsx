@@ -25,7 +25,15 @@ export const AdminDashboard = ({ onLogout }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [toastMessage, setToastMessage] = useState('');
   const mainRef = useRef(null);
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage('');
+    }, 3500);
+  };
 
   useEffect(() => {
     if (mainRef.current) {
@@ -121,31 +129,53 @@ export const AdminDashboard = ({ onLogout }) => {
   };
 
   useEffect(() => {
+    let unsubAdmin = null;
+    let unsubStudents = null;
     try {
       if (typeof sharedDatabase?.subscribeAdmin === 'function') {
-        const unsubscribe = sharedDatabase.subscribeAdmin(() => {
+        unsubAdmin = sharedDatabase.subscribeAdmin(() => {
           refreshData();
         });
-        return () => unsubscribe && unsubscribe();
+      }
+      if (typeof sharedDatabase?.subscribe === 'function') {
+        unsubStudents = sharedDatabase.subscribe(() => {
+          refreshData();
+        });
       }
     } catch (err) {
       console.warn('Admin subscribe error:', err);
     }
+
+    const handleLiveEvents = () => refreshData();
+    window.addEventListener('learnsmart_quizzes_updated', handleLiveEvents);
+    window.addEventListener('learnsmart_submissions_updated', handleLiveEvents);
+    window.addEventListener('storage', handleLiveEvents);
+
+    return () => {
+      if (unsubAdmin) unsubAdmin();
+      if (unsubStudents) unsubStudents();
+      window.removeEventListener('learnsmart_quizzes_updated', handleLiveEvents);
+      window.removeEventListener('learnsmart_submissions_updated', handleLiveEvents);
+      window.removeEventListener('storage', handleLiveEvents);
+    };
   }, []);
 
   const handleToggleUserStatus = (userId, role) => {
     sharedDatabase.toggleUserStatus(userId, role);
     refreshData();
+    showToast('User account status updated.');
   };
 
   const handleDeleteUser = (userId, role) => {
     sharedDatabase.deleteUser(userId, role);
     refreshData();
+    showToast('User removed from platform.');
   };
 
   const handleToggleQuizStatus = (quizId) => {
     if (quizId) {
       sharedDatabase.toggleQuizStatus(quizId);
+      showToast('Quiz status updated.');
     }
     refreshData();
   };
@@ -153,6 +183,7 @@ export const AdminDashboard = ({ onLogout }) => {
   const handleDeleteQuiz = (quizId) => {
     if (quizId) {
       sharedDatabase.deleteQuiz(quizId);
+      showToast('Quiz removed.');
     }
     refreshData();
   };
@@ -174,6 +205,7 @@ export const AdminDashboard = ({ onLogout }) => {
       });
     }
     refreshData();
+    showToast(`New ${newUser.role} "${newUser.name}" added successfully!`);
   };
 
   const handleMarkRead = (id) => {
@@ -186,12 +218,18 @@ export const AdminDashboard = ({ onLogout }) => {
     setNotifications(updated);
   };
 
+  const unreadNotifCount = notifications.filter((n) => n.unread).length;
+  const activeQuizzesCount = quizzes.filter((q) => q.status === 'Active' || !q.status).length;
+  const draftQuizzesCount = Math.max(0, quizzes.length - activeQuizzesCount);
+
   const statCards = [
     {
       id: 'users',
       label: 'Total Users',
-      value: stats.totalUsers !== undefined ? stats.totalUsers : (users.length || '482'),
+      value: users.length || stats.totalUsers || 0,
+      subtitle: `${students.length} Students • ${educators.length} Educators`,
       color: 'blue',
+      onClick: () => setActiveTab('users'),
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -204,8 +242,10 @@ export const AdminDashboard = ({ onLogout }) => {
     {
       id: 'quizzes',
       label: 'Total Quizzes',
-      value: stats.totalQuizzes !== undefined ? stats.totalQuizzes : (quizzes.length || '87'),
+      value: quizzes.length || stats.totalQuizzes || 0,
+      subtitle: `${activeQuizzesCount} Published • ${draftQuizzesCount} Drafts`,
       color: 'green',
+      onClick: () => setActiveTab('quizzes'),
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -219,8 +259,10 @@ export const AdminDashboard = ({ onLogout }) => {
     {
       id: 'active',
       label: 'Active Quizzes',
-      value: stats.activeQuizzes !== undefined ? stats.activeQuizzes : '42',
+      value: activeQuizzesCount,
+      subtitle: 'Live in student catalog',
       color: 'orange',
+      onClick: () => setActiveTab('quizzes'),
       icon: (
         <svg viewBox="0 0 24 24" fill="currentColor">
           <polygon points="5 3 19 12 5 21 5 3"/>
@@ -231,7 +273,9 @@ export const AdminDashboard = ({ onLogout }) => {
       id: 'health',
       label: 'System Health',
       value: stats.systemHealth || 'Online',
+      subtitle: `${stats.serverUptime || '99.98%'} Uptime • ${stats.apiLatency || '42ms'}`,
       color: 'purple',
+      onClick: () => setActiveTab('analytics'),
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="10"/>
@@ -243,6 +287,34 @@ export const AdminDashboard = ({ onLogout }) => {
 
   return (
     <div className="ad-shell">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 9999,
+            background: '#0F172A',
+            color: '#FFFFFF',
+            padding: '12px 18px',
+            borderRadius: '12px',
+            boxShadow: '0 10px 25px rgba(15, 23, 42, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontSize: '0.88rem',
+            fontWeight: 600
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2.5">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Sidebar overlay for mobile */}
       {sidebarOpen && (
         <div className="ad-overlay" onClick={() => setSidebarOpen(false)} />
@@ -258,6 +330,8 @@ export const AdminDashboard = ({ onLogout }) => {
         }}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        unreadCount={unreadNotifCount}
+        adminUser={currentUser}
       />
 
       <div className="ad-body">
@@ -270,11 +344,12 @@ export const AdminDashboard = ({ onLogout }) => {
           }}
           onLogout={onLogout}
           isOpen={sidebarOpen}
+          unreadCount={unreadNotifCount}
         />
 
         {/* Main Content Area */}
         <main ref={mainRef} className="ad-main">
-          {/* Dashboard Tab - Exact reference reproduction */}
+          {/* Dashboard Tab - System Overview */}
           {activeTab === 'dashboard' && (
             <div className="admin-overview-container">
               <div className="ad-page-header">
@@ -293,18 +368,25 @@ export const AdminDashboard = ({ onLogout }) => {
               <div className="ad-charts-row">
                 <div className="ad-chart-card ad-growth-card">
                   <h3 className="ad-card-title">User Growth</h3>
-                  <UserGrowthChart />
+                  <UserGrowthChart users={users} />
                 </div>
                 <div className="ad-chart-card ad-category-card">
                   <h3 className="ad-card-title">Quiz Category Distribution</h3>
-                  <QuizCategoryChart />
+                  <QuizCategoryChart
+                    quizzes={quizzes}
+                    onSelectCategory={() => setActiveTab('quizzes')}
+                  />
                 </div>
               </div>
 
               {/* Bottom Row */}
               <div className="ad-bottom-row">
                 <div className="ad-card ad-recent-card">
-                  <RecentUsers onViewAll={() => setActiveTab('users')} />
+                  <RecentUsers
+                    users={users}
+                    searchQuery={searchQuery}
+                    onViewAll={() => setActiveTab('users')}
+                  />
                 </div>
                 <div className="ad-card ad-actions-card">
                   <QuickActions
@@ -389,4 +471,3 @@ export const AdminDashboard = ({ onLogout }) => {
 };
 
 export default AdminDashboard;
-

@@ -50,12 +50,87 @@ export const EducatorDashboard = ({ onLogout }) => {
   });
 
   const [profileData, setProfileData] = useState(() => {
+    let storedProfile = null;
     try {
       const saved = localStorage.getItem('learnsmart_educator_profile');
-      return saved ? JSON.parse(saved) : INITIAL_EDUCATOR_PROFILE;
+      if (saved) storedProfile = JSON.parse(saved);
     } catch {
-      return INITIAL_EDUCATOR_PROFILE;
+      storedProfile = null;
     }
+
+    let storedAuthEducator = null;
+    try {
+      const rawAuth = localStorage.getItem('learnsmart_educator');
+      if (rawAuth) {
+        if (rawAuth.trim().startsWith('{')) {
+          storedAuthEducator = JSON.parse(rawAuth);
+        } else {
+          storedAuthEducator = { name: rawAuth };
+        }
+      }
+    } catch {
+      storedAuthEducator = null;
+    }
+
+    const educatorsList = typeof sharedDatabase.getEducators === 'function'
+      ? sharedDatabase.getEducators()
+      : [];
+
+    const matchedEducator = educatorsList.find((e) => {
+      if (storedAuthEducator?.email && e.email?.toLowerCase() === storedAuthEducator.email.toLowerCase()) return true;
+      if (storedProfile?.email && e.email?.toLowerCase() === storedProfile.email.toLowerCase()) return true;
+      if (storedAuthEducator?.name && storedAuthEducator.name !== 'Educator' && e.name?.toLowerCase() === storedAuthEducator.name.toLowerCase()) return true;
+      return false;
+    }) || educatorsList[0] || null;
+
+    const base = { ...INITIAL_EDUCATOR_PROFILE, ...(storedProfile || {}) };
+
+    const resolvedName =
+      (base.fullName && base.fullName !== 'Educator' ? base.fullName : null) ||
+      (storedAuthEducator?.name && storedAuthEducator.name !== 'Educator' ? storedAuthEducator.name : null) ||
+      matchedEducator?.name ||
+      (INITIAL_EDUCATOR_PROFILE.fullName && INITIAL_EDUCATOR_PROFILE.fullName !== 'Educator'
+        ? INITIAL_EDUCATOR_PROFILE.fullName
+        : 'Dr. Sarah Jenkins');
+
+    const resolvedEmail =
+      base.email ||
+      storedAuthEducator?.email ||
+      matchedEducator?.email ||
+      INITIAL_EDUCATOR_PROFILE.email ||
+      'educator@learnsmart.com';
+
+    const resolvedFacultyId =
+      base.facultyId ||
+      storedAuthEducator?.educatorId ||
+      storedAuthEducator?.facultyId ||
+      matchedEducator?.educatorId ||
+      matchedEducator?.facultyId ||
+      INITIAL_EDUCATOR_PROFILE.facultyId ||
+      'FAC-CS-2025-101';
+
+    const resolvedDepartment =
+      base.department ||
+      storedAuthEducator?.department ||
+      matchedEducator?.department ||
+      INITIAL_EDUCATOR_PROFILE.department ||
+      'Computer Science & Engineering';
+
+    const finalProfile = {
+      ...base,
+      fullName: resolvedName,
+      email: resolvedEmail,
+      facultyId: resolvedFacultyId,
+      department: resolvedDepartment
+    };
+
+    try {
+      localStorage.setItem('learnsmart_educator_profile', JSON.stringify(finalProfile));
+    } catch {
+      // ignore
+    }
+
+    return finalProfile;
   });
 
   const [avatarImage, setAvatarImage] = useState(() => {
@@ -183,7 +258,40 @@ export const EducatorDashboard = ({ onLogout }) => {
     try {
       localStorage.setItem('learnsmart_educator_profile', JSON.stringify(updated));
       if (updated.fullName) {
-        localStorage.setItem('learnsmart_educator', updated.fullName);
+        const rawAuth = localStorage.getItem('learnsmart_educator');
+        if (rawAuth && rawAuth.trim().startsWith('{')) {
+          const parsed = JSON.parse(rawAuth);
+          localStorage.setItem(
+            'learnsmart_educator',
+            JSON.stringify({
+              ...parsed,
+              name: updated.fullName,
+              email: updated.email || parsed.email,
+              educatorId: updated.facultyId || parsed.educatorId
+            })
+          );
+        } else {
+          localStorage.setItem(
+            'learnsmart_educator',
+            JSON.stringify({
+              name: updated.fullName,
+              email: updated.email,
+              educatorId: updated.facultyId
+            })
+          );
+        }
+      }
+      if (typeof sharedDatabase.updateEducator === 'function') {
+        const educatorsList = sharedDatabase.getEducators();
+        const match = educatorsList.find(
+          (e) => e.email?.toLowerCase() === (updated.email || '').toLowerCase()
+        ) || educatorsList[0];
+        if (match) {
+          sharedDatabase.updateEducator(match.id, {
+            name: updated.fullName,
+            department: updated.department
+          });
+        }
       }
     } catch (err) {
       console.warn(err);
@@ -263,7 +371,8 @@ export const EducatorDashboard = ({ onLogout }) => {
         onLogout={onLogout}
         onOpenNotifications={() => setActiveTab('Notifications')}
         onOpenProfile={() => setActiveTab('Profile')}
-        educatorName={profileData.fullName || 'Educator'}
+        educatorName={profileData.fullName || 'Dr. Sarah Jenkins'}
+        educatorEmail={profileData.email || 'educator@learnsmart.com'}
         educatorRole={profileData.academicTitle ? 'Faculty' : 'Educator'}
         notificationCount={unreadNotifCount}
         avatarUrl={avatarImage}

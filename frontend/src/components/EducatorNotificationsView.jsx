@@ -28,8 +28,7 @@ export const EducatorNotificationsView = ({
 
   // Modal State for Sending Notification
   const [openSendModal, setOpenSendModal] = useState(false);
-  const [searchStudentQuery, setSearchStudentQuery] = useState('');
-  const [studentCohortFilter, setStudentCohortFilter] = useState('all');
+  const [sendToAllStudents, setSendToAllStudents] = useState(true);
   const [notificationTitle, setNotificationTitle] = useState('');
   const [notificationCategory, setNotificationCategory] = useState('announcement');
   const [notificationPriority, setNotificationPriority] = useState('normal');
@@ -43,12 +42,6 @@ export const EducatorNotificationsView = ({
     }
     return sharedDatabase.getStudents();
   }, [students]);
-
-  // Selected Student IDs for Send Notification (default to all students selected for convenience)
-  const [selectedStudentIds, setSelectedStudentIds] = useState(() => {
-    const list = Array.isArray(students) && students.length > 0 ? students : sharedDatabase.getStudents();
-    return list.map((s) => s.id);
-  });
 
   const unreadCount = notifications.filter((n) => n.unread).length;
   const sentCount = notifications.filter((n) => n.category === 'sent').length;
@@ -103,49 +96,6 @@ export const EducatorNotificationsView = ({
     if (showToast) showToast('Selected notifications deleted.');
   };
 
-  // Filtered Students inside Modal
-  const modalFilteredStudents = useMemo(() => {
-    return cohortStudents.filter((student) => {
-      // Cohort status filter
-      if (studentCohortFilter === 'top' && student.status !== 'Top Performer') return false;
-      if (studentCohortFilter === 'ontrack' && student.status !== 'On Track') return false;
-      if (studentCohortFilter === 'support' && student.status !== 'Needs Support') return false;
-
-      // Text search
-      if (!searchStudentQuery.trim()) return true;
-      const q = searchStudentQuery.toLowerCase();
-      const nameMatch = (student.name || '').toLowerCase().includes(q);
-      const emailMatch = (student.email || '').toLowerCase().includes(q);
-      const idMatch = (student.studentId || '').toLowerCase().includes(q);
-      const subjectMatch = (student.topSubject || '').toLowerCase().includes(q);
-      return nameMatch || emailMatch || idMatch || subjectMatch;
-    });
-  }, [cohortStudents, studentCohortFilter, searchStudentQuery]);
-
-  const allFilteredSelected =
-    modalFilteredStudents.length > 0 &&
-    modalFilteredStudents.every((s) => selectedStudentIds.includes(s.id));
-
-  // Toggle selection for a single student in modal
-  const handleToggleStudent = (id) => {
-    setSelectedStudentIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  // Toggle select all visible students in modal
-  const handleToggleSelectAll = () => {
-    if (allFilteredSelected) {
-      // Deselect visible
-      const visibleIds = new Set(modalFilteredStudents.map((s) => s.id));
-      setSelectedStudentIds((prev) => prev.filter((id) => !visibleIds.has(id)));
-    } else {
-      // Select all visible
-      const newSet = new Set([...selectedStudentIds, ...modalFilteredStudents.map((s) => s.id)]);
-      setSelectedStudentIds(Array.from(newSet));
-    }
-  };
-
   // Quick Preset Templates
   const handleApplyPreset = (type) => {
     if (type === 'quiz') {
@@ -183,8 +133,8 @@ export const EducatorNotificationsView = ({
   const handleSendNotification = (e) => {
     if (e) e.preventDefault();
 
-    if (selectedStudentIds.length === 0) {
-      if (showToast) showToast('⚠️ Please select at least one student recipient.');
+    if (!sendToAllStudents) {
+      if (showToast) showToast('⚠️ Please select All Students to send the notification.');
       return;
     }
     if (!notificationTitle.trim()) {
@@ -199,9 +149,7 @@ export const EducatorNotificationsView = ({
     setIsSubmitting(true);
 
     try {
-      const selectedStudents = cohortStudents.filter((s) => selectedStudentIds.includes(s.id));
-      const targetStudentNames = selectedStudents.map((s) => s.name);
-      const isAll = selectedStudentIds.length === cohortStudents.length;
+      const targetStudentNames = cohortStudents.map((s) => s.name);
 
       // Send to shared student notifications
       sharedDatabase.sendStudentNotification({
@@ -209,17 +157,13 @@ export const EducatorNotificationsView = ({
         message: notificationMessage.trim(),
         category: notificationCategory,
         priority: notificationPriority,
-        targetStudentIds: isAll ? 'all' : selectedStudentIds,
+        targetStudentIds: 'all',
         targetStudentNames,
         educatorName
       });
 
       // Record in educator notifications log
-      const recipientSummary = isAll
-        ? `All ${cohortStudents.length} Students`
-        : selectedStudents.length <= 2
-        ? targetStudentNames.join(', ')
-        : `${targetStudentNames[0]} and ${selectedStudents.length - 1} others`;
+      const recipientSummary = 'All Students';
 
       const newEducatorEntry = {
         id: `sent-${Date.now()}`,
@@ -229,18 +173,14 @@ export const EducatorNotificationsView = ({
         timestamp: 'Just now',
         unread: false,
         priority: notificationPriority,
-        recipientCount: selectedStudentIds.length,
+        recipientCount: cohortStudents.length > 0 ? cohortStudents.length : 'All',
         recipients: targetStudentNames
       };
 
       onUpdateNotifications([newEducatorEntry, ...notifications]);
 
       if (showToast) {
-        showToast(
-          `✅ Notification successfully sent to ${selectedStudentIds.length} student${
-            selectedStudentIds.length === 1 ? '' : 's'
-          }!`
-        );
+        showToast('✅ Notification successfully sent to All Students!');
       }
 
       // Reset modal fields & close
@@ -312,10 +252,7 @@ export const EducatorNotificationsView = ({
             className="educator-primary-btn"
             id="send-notification-btn"
             onClick={() => {
-              // Ensure all students selected on open if none selected
-              if (selectedStudentIds.length === 0 && cohortStudents.length > 0) {
-                setSelectedStudentIds(cohortStudents.map((s) => s.id));
-              }
+              setSendToAllStudents(true);
               setOpenSendModal(true);
             }}
             style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -721,219 +658,40 @@ export const EducatorNotificationsView = ({
                 </div>
               </div>
 
-              {/* SECTION: ALL STUDENTS SELECTION PICKER WITH SELECT ALL CHECKBOX */}
+              {/* SECTION: ALL STUDENTS CHECKBOX ONLY */}
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <label className="educator-field-label" style={{ margin: 0 }}>
-                    Select Recipients ({selectedStudentIds.length} of {cohortStudents.length} selected)
-                  </label>
+                <label className="educator-field-label" style={{ marginBottom: '8px', display: 'block' }}>
+                  Select Recipients
+                </label>
 
-                  {/* Select All Checkbox */}
-                  <label
-                    htmlFor="select-all-students-modal-checkbox"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                      backgroundColor: '#F8FAFC',
-                      padding: '4px 10px',
-                      borderRadius: '8px',
-                      border: '1px solid #CBD5E1'
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      id="select-all-students-modal-checkbox"
-                      checked={modalFilteredStudents.length > 0 && allFilteredSelected}
-                      onChange={handleToggleSelectAll}
-                      className="educator-custom-checkbox"
-                    />
-                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#0F172A' }}>
-                      Select All
-                    </span>
-                  </label>
-                </div>
-
-                <div className="educator-student-picker-card">
-                  {/* Toolbar inside Picker: Search & Category Pills */}
-                  <div className="educator-student-picker-header">
-                    <div className="educator-student-picker-search">
-                      <div
-                        style={{
-                          position: 'absolute',
-                          left: '10px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          pointerEvents: 'none'
-                        }}
-                      >
-                        <SearchIcon size={15} color="#94A3B8" />
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Search student by name, ID, or email..."
-                        value={searchStudentQuery}
-                        onChange={(e) => setSearchStudentQuery(e.target.value)}
-                        className="educator-student-picker-search-input"
-                      />
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button
-                        type="button"
-                        className={`educator-time-pill ${studentCohortFilter === 'all' ? 'active' : ''}`}
-                        onClick={() => setStudentCohortFilter('all')}
-                        style={{ fontSize: '0.74rem', padding: '4px 10px' }}
-                      >
-                        All ({cohortStudents.length})
-                      </button>
-                      <button
-                        type="button"
-                        className={`educator-time-pill ${studentCohortFilter === 'top' ? 'active' : ''}`}
-                        onClick={() => setStudentCohortFilter('top')}
-                        style={{ fontSize: '0.74rem', padding: '4px 10px' }}
-                      >
-                        Top Performers
-                      </button>
-                      <button
-                        type="button"
-                        className={`educator-time-pill ${studentCohortFilter === 'ontrack' ? 'active' : ''}`}
-                        onClick={() => setStudentCohortFilter('ontrack')}
-                        style={{ fontSize: '0.74rem', padding: '4px 10px' }}
-                      >
-                        On Track
-                      </button>
-                      <button
-                        type="button"
-                        className={`educator-time-pill ${studentCohortFilter === 'support' ? 'active' : ''}`}
-                        onClick={() => setStudentCohortFilter('support')}
-                        style={{ fontSize: '0.74rem', padding: '4px 10px' }}
-                      >
-                        Needs Support
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Header Row above list with Select All Checkbox */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 14px',
-                      backgroundColor: '#F8FAFC',
-                      borderBottom: '1px solid #E2E8F0',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      color: '#475569'
-                    }}
-                  >
-                    <label
-                      htmlFor="select-all-students-table-checkbox"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        cursor: 'pointer',
-                        margin: 0,
-                        userSelect: 'none'
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        id="select-all-students-table-checkbox"
-                        checked={modalFilteredStudents.length > 0 && allFilteredSelected}
-                        onChange={handleToggleSelectAll}
-                        className="educator-custom-checkbox"
-                      />
-                      <span style={{ fontSize: '0.80rem', fontWeight: 700, color: '#0F172A' }}>
-                        Select All ({modalFilteredStudents.length} Students)
-                      </span>
-                    </label>
-                    <span style={{ fontSize: '0.74rem', color: '#64748B' }}>Course / Status</span>
-                  </div>
-
-                  {/* Scrollable Students List */}
-                  <div className="educator-student-picker-list">
-                    {modalFilteredStudents.length > 0 ? (
-                      modalFilteredStudents.map((student) => {
-                        const isSelected = selectedStudentIds.includes(student.id);
-                        const initials = student.avatarInitials || getInitials(student.name);
-
-                        return (
-                          <div
-                            key={student.id}
-                            className={`educator-student-row ${isSelected ? 'selected' : ''}`}
-                            onClick={() => handleToggleStudent(student.id)}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {}} // handled by parent onClick
-                                className="educator-custom-checkbox"
-                                id={`check-${student.id}`}
-                              />
-
-                              <div className="educator-student-avatar-badge">
-                                {initials}
-                              </div>
-
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <span style={{ fontSize: '0.86rem', fontWeight: 700, color: '#0F172A' }}>
-                                    {student.name}
-                                  </span>
-                                  <span
-                                    style={{
-                                      fontSize: '0.72rem',
-                                      color: '#64748B',
-                                      backgroundColor: '#F1F5F9',
-                                      padding: '1px 6px',
-                                      borderRadius: '4px',
-                                      fontFamily: 'monospace'
-                                    }}
-                                  >
-                                    {student.studentId || 'LS-2024'}
-                                  </span>
-                                </div>
-                                <span style={{ fontSize: '0.76rem', color: '#64748B' }}>
-                                  {student.email}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <span style={{ fontSize: '0.74rem', color: '#94A3B8' }}>
-                                {student.topSubject || 'General'}
-                              </span>
-
-                              <span
-                                className={`educator-status-pill ${
-                                  student.status === 'Top Performer'
-                                    ? 'success'
-                                    : student.status === 'Needs Support'
-                                    ? 'warning'
-                                    : 'info'
-                                }`}
-                              >
-                                {student.status || 'On Track'}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: '0.86rem' }}>
-                        No students found matching your search.
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <label
+                  htmlFor="select-all-students-modal-checkbox"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    backgroundColor: sendToAllStudents ? '#ECFDF5' : '#F8FAFC',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    border: sendToAllStudents ? '1px solid #10B981' : '1px solid #CBD5E1',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    id="select-all-students-modal-checkbox"
+                    checked={sendToAllStudents}
+                    onChange={(e) => setSendToAllStudents(e.target.checked)}
+                    className="educator-custom-checkbox"
+                  />
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0F172A' }}>
+                    All Students
+                  </span>
+                </label>
               </div>
 
               {/* Notification Details Form */}
@@ -1022,17 +780,14 @@ export const EducatorNotificationsView = ({
             {/* Modal Footer */}
             <div className="educator-send-modal-footer">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {selectedStudentIds.length > 0 ? (
+                {sendToAllStudents ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontSize: '0.84rem', fontWeight: 600 }}>
                     <CheckCircleIcon size={16} color="#10B981" />
-                    <span>
-                      Ready to send to {selectedStudentIds.length} of {cohortStudents.length} student
-                      {selectedStudentIds.length === 1 ? '' : 's'}
-                    </span>
+                    <span>Ready to send to All Students</span>
                   </div>
                 ) : (
                   <span style={{ color: '#DC2626', fontSize: '0.84rem', fontWeight: 600 }}>
-                    ⚠️ Please select at least one student
+                    ⚠️ Please select All Students
                   </span>
                 )}
               </div>
@@ -1052,19 +807,19 @@ export const EducatorNotificationsView = ({
                   onClick={handleSendNotification}
                   disabled={
                     isSubmitting ||
-                    selectedStudentIds.length === 0 ||
+                    !sendToAllStudents ||
                     !notificationTitle.trim() ||
                     !notificationMessage.trim()
                   }
                   style={{
                     opacity:
-                      selectedStudentIds.length === 0 ||
+                      !sendToAllStudents ||
                       !notificationTitle.trim() ||
                       !notificationMessage.trim()
                         ? 0.55
                         : 1,
                     cursor:
-                      selectedStudentIds.length === 0 ||
+                      !sendToAllStudents ||
                       !notificationTitle.trim() ||
                       !notificationMessage.trim()
                         ? 'not-allowed'
@@ -1073,9 +828,7 @@ export const EducatorNotificationsView = ({
                 >
                   <SendIcon size={15} color="#FFFFFF" />
                   <span>
-                    {isSubmitting
-                      ? 'Sending...'
-                      : `Send to ${selectedStudentIds.length} Student${selectedStudentIds.length === 1 ? '' : 's'}`}
+                    {isSubmitting ? 'Sending...' : 'Send to All Students'}
                   </span>
                 </button>
               </div>

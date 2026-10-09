@@ -48,7 +48,7 @@ function AppRoutes() {
       authService.loginAdmin();
       navigate('/admin-dashboard');
     } else if (role === 'educator') {
-      authService.loginEducator();
+      authService.loginEducator(user);
       navigate('/educator-dashboard');
     } else {
       authService.loginStudent(user);

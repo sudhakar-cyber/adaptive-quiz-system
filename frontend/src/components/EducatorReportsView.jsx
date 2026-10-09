@@ -1,9 +1,5 @@
 import React, { useState } from 'react';
 import { INITIAL_EDUCATOR_REPORTS } from '../data/educatorData';
-import {
-  TrashIcon,
-  XIcon
-} from './Icons';
 
 export const EducatorReportsView = ({ showToast }) => {
   const [reportsList, setReportsList] = useState(INITIAL_EDUCATOR_REPORTS);
@@ -118,11 +114,6 @@ export const EducatorReportsView = ({ showToast }) => {
       // Trigger actual file download immediately
       handleDownloadReport(newReport);
     }, 800);
-  };
-
-  const handleDeleteReport = (id) => {
-    setReportsList((prev) => prev.filter((r) => r.id !== id));
-    if (showToast) showToast('Report removed from archive.');
   };
 
   return (
@@ -359,14 +350,6 @@ export const EducatorReportsView = ({ showToast }) => {
                         title="Preview Summary"
                       >
                         Preview
-                      </button>
-                      <button
-                        type="button"
-                        className="educator-icon-btn danger"
-                        onClick={() => handleDeleteReport(rep.id)}
-                        title="Delete Report"
-                      >
-                        <TrashIcon size={14} color="#DC2626" />
                       </button>
                     </div>
                   </td>

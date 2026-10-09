@@ -71,7 +71,6 @@ const NAV_ITEMS = [
   {
     id: 'notifications',
     label: 'Notifications',
-    badge: 5,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -91,23 +90,26 @@ const NAV_ITEMS = [
   },
 ];
 
-const AdminSidebar = ({ activeTab, onSelectTab, onLogout, isOpen }) => {
+const AdminSidebar = ({ activeTab, onSelectTab, onLogout, isOpen, unreadCount = 0 }) => {
   return (
     <aside className={`ads-sidebar ${isOpen ? 'ads-open' : ''}`}>
       <nav className="ads-nav">
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.id}
-            className={`ads-nav-item ${activeTab === item.id ? 'ads-active' : ''}`}
-            onClick={() => onSelectTab(item.id)}
-          >
-            <span className="ads-icon">{item.icon}</span>
-            <span className="ads-label">{item.label}</span>
-            {item.badge && (
-              <span className="ads-badge">{item.badge}</span>
-            )}
-          </button>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const badgeVal = item.id === 'notifications' ? unreadCount : item.badge;
+          return (
+            <button
+              key={item.id}
+              className={`ads-nav-item ${activeTab === item.id ? 'ads-active' : ''}`}
+              onClick={() => onSelectTab(item.id)}
+            >
+              <span className="ads-icon">{item.icon}</span>
+              <span className="ads-label">{item.label}</span>
+              {badgeVal > 0 && (
+                <span className="ads-badge">{badgeVal}</span>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       {/* Logout at bottom */}
