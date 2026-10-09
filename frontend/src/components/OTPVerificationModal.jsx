@@ -1,21 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PhoneIcon, ShieldIcon, CheckIcon } from './Icons';
-import { phoneAuthService } from '../services/phoneAuthService';
+import { MailIcon, ShieldIcon, CheckIcon } from './Icons';
+import { otpService } from '../services/otpService';
 
 export const OTPVerificationModal = ({
   isOpen,
-  phone = '',
-  country = 'United States',
-  displayPhone = '',
-  email = '',
-  registrationData = null,
+  email,
   onVerifySuccess,
   onClose,
   initialCooldown = 60,
   initialExpiryMinutes = 10
 }) => {
-  // 6-digit OTP state for Firebase Phone Authentication
-  const [digits, setDigits] = useState(['', '', '', '', '', '']);
+  const [digits, setDigits] = useState(['', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -25,19 +20,10 @@ export const OTPVerificationModal = ({
 
   const inputRefs = useRef([]);
 
-  const targetRawPhone = registrationData?.phone || phone || '';
-  const targetCountry = registrationData?.country || country || 'United States';
-  const targetDisplayPhone =
-    displayPhone ||
-    phoneAuthService.formatPhoneDisplay(
-      phoneAuthService.formatToE164(targetRawPhone, targetCountry)
-    ) ||
-    targetRawPhone;
-
   // Auto-focus first input when modal opens
   useEffect(() => {
     if (isOpen) {
-      setDigits(['', '', '', '', '', '']);
+      setDigits(['', '', '', '']);
       setErrorMessage('');
       setCooldown(initialCooldown);
       setExpirySeconds(initialExpiryMinutes * 60);
@@ -58,7 +44,7 @@ export const OTPVerificationModal = ({
     return () => clearInterval(interval);
   }, [isOpen, cooldown]);
 
-  // OTP expiration timer
+  // Expiration countdown
   useEffect(() => {
     if (!isOpen || expirySeconds <= 0) return;
     const interval = setInterval(() => {
@@ -69,9 +55,9 @@ export const OTPVerificationModal = ({
 
   if (!isOpen) return null;
 
-  const formatTimer = (totalSeconds) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+  const formatTimer = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -91,7 +77,7 @@ export const OTPVerificationModal = ({
     if (errorMessage) setErrorMessage('');
 
     // Auto-advance focus
-    if (index < 5) {
+    if (index < 3) {
       inputRefs.current[index + 1]?.focus();
     }
   };
@@ -101,41 +87,39 @@ export const OTPVerificationModal = ({
       inputRefs.current[index - 1]?.focus();
     } else if (e.key === 'ArrowLeft' && index > 0) {
       inputRefs.current[index - 1]?.focus();
-    } else if (e.key === 'ArrowRight' && index < 5) {
+    } else if (e.key === 'ArrowRight' && index < 3) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
   const handlePaste = (e) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
     if (!pasted) return;
 
     const next = [...digits];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       next[i] = pasted[i] || '';
     }
     setDigits(next);
     if (errorMessage) setErrorMessage('');
 
-    const focusIndex = Math.min(pasted.length, 5);
+    const focusIndex = Math.min(pasted.length, 3);
     inputRefs.current[focusIndex]?.focus();
   };
 
   const fullCode = digits.join('');
-  const isComplete = fullCode.length === 6 && digits.every((d) => d !== '');
+  const isComplete = fullCode.length === 4 && digits.every((d) => d !== '');
 
   const handleVerify = async (e) => {
     if (e) e.preventDefault();
-    if (isVerifying) return;
-
     if (!isComplete) {
-      setErrorMessage('Please enter all 6 digits of your SMS verification code.');
+      setErrorMessage('Please enter all 4 digits of your verification code.');
       return;
     }
 
     if (expirySeconds <= 0) {
-      setErrorMessage('This verification code has expired. Please click "Resend OTP".');
+      setErrorMessage('This verification code has expired. Please click "Resend Code".');
       return;
     }
 
@@ -143,32 +127,26 @@ export const OTPVerificationModal = ({
     setErrorMessage('');
 
     try {
-      const profileToSave = registrationData || {
-        phone: targetRawPhone,
-        country: targetCountry,
-        email
-      };
-
-      const res = await phoneAuthService.verifyOtp(fullCode, profileToSave);
-
+      const res = await otpService.verifyOtp(email, fullCode);
       if (res && res.success) {
-        setSuccessToast('Phone number verified! Account created successfully.');
+        setSuccessToast('Code verified successfully!');
         if (onVerifySuccess) {
-          onVerifySuccess(res.student || res.user);
+          onVerifySuccess(res.verificationToken);
         }
       } else {
         setErrorMessage(
-          res?.error || 'Incorrect verification code. Please check your SMS and try again.'
+          res.error || 'Incorrect verification code. Please check your email and try again.'
         );
         // Automatically clear OTP input fields when wrong
-        setDigits(['', '', '', '', '', '']);
+        setDigits(['', '', '', '']);
         setTimeout(() => {
           inputRefs.current[0]?.focus();
         }, 10);
       }
     } catch (err) {
       setErrorMessage(err.message || 'Verification failed. Please try again.');
-      setDigits(['', '', '', '', '', '']);
+      // Automatically clear OTP input fields on error
+      setDigits(['', '', '', '']);
       setTimeout(() => {
         inputRefs.current[0]?.focus();
       }, 10);
@@ -184,50 +162,43 @@ export const OTPVerificationModal = ({
     setErrorMessage('');
 
     try {
-      const res = await phoneAuthService.resendOtp(targetRawPhone, targetCountry);
+      const res = await otpService.resendOtp(email);
       if (res && res.success) {
-        setDigits(['', '', '', '', '', '']);
+        setDigits(['', '', '', '']);
         setCooldown(60);
         setExpirySeconds(10 * 60);
-        setSuccessToast(res.message || `A new verification code has been sent to ${targetDisplayPhone}`);
+        setSuccessToast(`A new verification code has been sent to ${email}`);
         setTimeout(() => setSuccessToast(''), 4500);
         inputRefs.current[0]?.focus();
       } else {
-        setErrorMessage(res?.error || 'Failed to resend SMS code. Please wait a moment and try again.');
+        setErrorMessage(res.error || 'Failed to resend code. Please wait a moment and try again.');
       }
     } catch (err) {
-      setErrorMessage(
-        phoneAuthService.getFriendlyPhoneAuthError(err) || 'Failed to resend verification code.'
-      );
+      setErrorMessage(err.message || 'Failed to resend verification code.');
     } finally {
       setIsResending(false);
     }
   };
 
   return (
-    <div
-      className="otp-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="otp-title"
-    >
+    <div className="otp-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="otp-title">
       <div className="otp-modal-container">
         <div className="otp-modal-card">
           <div className="otp-modal-header">
             <div className="otp-icon-wrap" aria-hidden="true">
-              <PhoneIcon size={26} color="#1A6BFF" />
+              <MailIcon size={26} color="#1A6BFF" />
             </div>
-            <h2 id="otp-title" className="otp-modal-title">Verify Mobile Number</h2>
+            <h2 id="otp-title" className="otp-modal-title">Verify Your Email</h2>
             <p className="otp-modal-subheading">
-              We have sent a 6-digit SMS verification code to
+              We have sent a 4-digit verification code to
             </p>
             <div className="otp-target-email-pill">
-              <span className="otp-email-text">{targetDisplayPhone}</span>
+              <span className="otp-email-text">{email}</span>
               <button
                 type="button"
                 className="otp-change-email-btn"
                 onClick={onClose}
-                title="Change or edit your mobile number"
+                title="Change or edit your email"
               >
                 Change
               </button>
@@ -248,16 +219,15 @@ export const OTPVerificationModal = ({
           )}
 
           <form onSubmit={handleVerify} className="otp-form" noValidate>
-            <label className="otp-inputs-label">Enter 6-Digit Code</label>
+            <label className="otp-inputs-label">Enter 4-Digit Code</label>
             <div className="otp-inputs-row" onPaste={handlePaste}>
               {digits.map((digit, i) => (
                 <input
                   key={i}
                   ref={(el) => (inputRefs.current[i] = el)}
-                  id={`otp-modal-digit-${i}`}
+                  id={`otp-digit-${i}`}
                   type="text"
                   inputMode="numeric"
-                  pattern="[0-9]*"
                   autoComplete="one-time-code"
                   maxLength={1}
                   value={digit}
@@ -293,7 +263,7 @@ export const OTPVerificationModal = ({
                     onClick={handleResend}
                     disabled={isResending}
                   >
-                    {isResending ? 'Sending...' : 'Resend OTP'}
+                    {isResending ? 'Sending...' : 'Resend Code'}
                   </button>
                 )}
               </div>
@@ -306,12 +276,12 @@ export const OTPVerificationModal = ({
                 onClick={onClose}
                 disabled={isVerifying}
               >
-                Change Number
+                Cancel
               </button>
               <button
                 type="submit"
                 className="submit-button otp-verify-submit-btn"
-                id="modal-verify-otp-submit-btn"
+                id="verify-otp-submit-btn"
                 disabled={!isComplete || isVerifying}
               >
                 {isVerifying ? (
@@ -322,7 +292,7 @@ export const OTPVerificationModal = ({
                 ) : (
                   <span className="btn-normal-content">
                     <CheckIcon size={18} color="#FFFFFF" />
-                    <span>Verify OTP &amp; Create Account</span>
+                    <span>Verify &amp; Create Account</span>
                   </span>
                 )}
               </button>
@@ -330,7 +300,7 @@ export const OTPVerificationModal = ({
 
             <div className="otp-security-footer">
               <ShieldIcon size={14} color="#64748B" />
-              <span>Official Firebase SMS Verification • Never share your OTP</span>
+              <span>Official 2-Step Verification • Never share your code</span>
             </div>
           </form>
         </div>
