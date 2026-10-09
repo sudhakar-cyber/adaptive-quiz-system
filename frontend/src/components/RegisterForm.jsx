@@ -18,15 +18,14 @@ import {
 import { sharedDatabase } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
 import { phoneAuthService } from '../services/phoneAuthService';
-import { OTPVerificationModal } from './OTPVerificationModal';
 import { GoogleEmailVerificationModal } from './GoogleEmailVerificationModal';
 
 const COUNTRIES = [
+  'India',
   'United States',
   'United Kingdom',
   'Canada',
   'Australia',
-  'India',
   'Germany',
   'France',
   'Singapore',
@@ -42,22 +41,22 @@ const getFriendlyAuthErrorMessage = (err) => {
   const message = err.message || (typeof err === 'string' ? err : '');
 
   if (code === 'auth/email-already-in-use' || message.includes('email-already-in-use')) {
-    return 'This email is already registered. Please log in instead or use another email.';
+    return '[auth/email-already-in-use] This email is already registered. Please log in instead or use another email.';
   }
   if (code === 'auth/invalid-email' || message.includes('invalid-email')) {
-    return 'Invalid email address format. Please enter a valid email.';
+    return '[auth/invalid-email] Invalid email address format. Please enter a valid email.';
   }
   if (code === 'auth/weak-password' || message.includes('weak-password')) {
-    return 'Password is too weak. Please use at least 6 characters.';
+    return '[auth/weak-password] Password is too weak. Please use at least 6 characters.';
   }
   if (code === 'auth/operation-not-allowed' || message.includes('operation-not-allowed')) {
-    return 'Email/Password sign-up is not enabled in Firebase Console.';
+    return '[auth/operation-not-allowed] Email/Password registration is currently not allowed. Please verify Firebase project configuration.';
   }
   if (code === 'auth/network-request-failed' || message.includes('network-request-failed')) {
-    return 'Network error. Please check your internet connection.';
+    return '[auth/network-request-failed] Network error. Please check your internet connection.';
   }
   if (code === 'auth/too-many-requests' || message.includes('too-many-requests')) {
-    return 'Too many attempts. Please try again later.';
+    return '[auth/too-many-requests] Too many attempts. Please try again later.';
   }
   if (code === 'auth/popup-closed-by-user' || message.includes('popup-closed-by-user')) {
     return 'Google Sign-In was cancelled.';
@@ -72,7 +71,7 @@ const getFriendlyAuthErrorMessage = (err) => {
   if (!clean || clean.toLowerCase() === 'error') {
     return code ? `Authentication failed (${code}).` : 'Registration failed. Please check your details.';
   }
-  return clean;
+  return code ? `[${code}] ${clean}` : clean;
 };
 
 export const RegisterForm = ({
@@ -88,7 +87,7 @@ export const RegisterForm = ({
     password: initialData?.password || '',
     confirmPassword: initialData?.confirmPassword || '',
     phone: initialData?.phone || '',
-    country: initialData?.country || 'United States',
+    country: initialData?.country || 'India',
     agreeTerms: initialData?.agreeTerms || false
   }));
 
@@ -108,9 +107,6 @@ export const RegisterForm = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [successToast, setSuccessToast] = useState('');
 
-  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
-  const [otpCooldown, setOtpCooldown] = useState(60);
-  const [otpExpiryMinutes, setOtpExpiryMinutes] = useState(10);
   const [isGoogleVerifyModalOpen, setIsGoogleVerifyModalOpen] = useState(false);
   const [googleVerifyEmail, setGoogleVerifyEmail] = useState('');
 
@@ -134,7 +130,7 @@ export const RegisterForm = ({
     e.preventDefault();
     setErrorMessage('');
 
-    // Step 3: Validate all fields first
+    // Step 3: Validate all required fields
     if (!formData.firstName.trim()) {
       setErrorMessage('Please enter your first name.');
       return;
@@ -167,12 +163,22 @@ export const RegisterForm = ({
       setErrorMessage('Passwords do not match.');
       return;
     }
-    // Validate phone number including country code
-    const formattedPhone = phoneAuthService.formatToE164(formData.phone, formData.country);
-    if (!formData.phone.trim() || !phoneAuthService.isValidE164(formattedPhone)) {
-      setErrorMessage('Please enter a valid mobile number with country code (e.g. +91 98765 43210 or select your country).');
+    if (!formData.country) {
+      setErrorMessage('Please select your country.');
       return;
     }
+    if (!formData.phone.trim()) {
+      setErrorMessage('Please enter your phone number.');
+      return;
+    }
+
+    // Convert entered Indian phone number to E.164 format (+91 followed by valid number)
+    const formattedPhone = phoneAuthService.formatToE164(formData.phone, formData.country);
+    if (!phoneAuthService.isValidE164(formattedPhone)) {
+      setErrorMessage('Please enter a valid 10-digit mobile number (e.g. 9876543210 or +91 98765 43210).');
+      return;
+    }
+
     if (!formData.agreeTerms) {
       setErrorMessage('Please agree to the Terms and Conditions to proceed.');
       return;
@@ -188,25 +194,19 @@ export const RegisterForm = ({
     setIsLoading(true);
 
     try {
-      // Send real SMS OTP via Firebase Phone Authentication
-      const res = await phoneAuthService.sendOtp(formData.phone, formData.country);
+      // Send real SMS OTP using Firebase Phone Authentication
+      const res = await phoneAuthService.sendPhoneOtp(formData.phone, formData.country);
       setIsLoading(false);
 
       if (res && res.success) {
-        showToast(res.message || `Verification code sent to ${res.displayPhone}`);
+        showToast(res.message || `Verification code sent via SMS to ${res.maskedPhone}`);
         if (onProceedToOtp) {
-          // Transition directly to the 6-digit Phone OTP Page!
-          onProceedToOtp(formData, {
-            formattedPhone: res.formattedPhone,
-            displayPhone: res.displayPhone
-          });
+          // Transition directly to the OTP verification screen
+          onProceedToOtp(formData, res.maskedPhone || formattedPhone);
           return;
         }
-
-        setOtpCooldown(res.cooldownSeconds || 60);
-        setIsOtpModalOpen(true);
       } else {
-        setErrorMessage(res?.error || 'Failed to send SMS verification code. Please try again.');
+        setErrorMessage(res?.error || 'Failed to send verification SMS. Please try again.');
       }
     } catch (err) {
       setIsLoading(false);
@@ -215,11 +215,25 @@ export const RegisterForm = ({
   };
 
   // ONLY after successful OTP verification:
-  const handleOtpVerified = (verifiedStudent) => {
-    setIsOtpModalOpen(false);
-    showToast('Account created successfully! Redirecting...');
-    if (onRegisterSuccess) {
-      onRegisterSuccess(verifiedStudent);
+  const handleOtpVerified = async (otpCode) => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const res = await phoneAuthService.verifyPhoneOtp(otpCode, formData);
+      setIsLoading(false);
+
+      if (res && res.success && res.student) {
+        showToast('Account created successfully! Redirecting...');
+        if (onRegisterSuccess) {
+          onRegisterSuccess(res.student);
+        }
+      } else {
+        setErrorMessage(res?.error || 'Verification failed. Please try again.');
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setErrorMessage(phoneAuthService.getFriendlyPhoneAuthError(err));
     }
   };
 
@@ -526,7 +540,7 @@ export const RegisterForm = ({
                   name="phone"
                   type="tel"
                   className="form-input"
-                  placeholder="+1 (555) 000-0000"
+                  placeholder="+91 98765 43210"
                   value={formData.phone}
                   onChange={handleChange}
                   autoComplete="tel"
@@ -624,18 +638,6 @@ export const RegisterForm = ({
         </form>
       </div>
 
-      <OTPVerificationModal
-        isOpen={isOtpModalOpen}
-        phone={formData.phone}
-        country={formData.country}
-        displayPhone={phoneAuthService.formatPhoneDisplay(phoneAuthService.formatToE164(formData.phone, formData.country))}
-        email={formData.email.trim()}
-        registrationData={formData}
-        initialCooldown={otpCooldown}
-        initialExpiryMinutes={otpExpiryMinutes}
-        onVerifySuccess={handleOtpVerified}
-        onClose={() => setIsOtpModalOpen(false)}
-      />
 
       <GoogleEmailVerificationModal
         isOpen={isGoogleVerifyModalOpen}

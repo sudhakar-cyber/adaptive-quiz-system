@@ -322,7 +322,9 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
   };
 
   const handleCreateAccount = (e) => {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     if (onSwitchToRegister) {
       onSwitchToRegister();
     }
@@ -494,13 +496,14 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
 
           <div className="signup-row">
             <span className="signup-text">New to LearnSmart? </span>
-            <a
-              href="#create-account"
-              className="signup-link"
+            <button
+              type="button"
+              className="signup-link link-button"
               onClick={handleCreateAccount}
+              id="create-account-btn"
             >
               Create an account
-            </a>
+            </button>
           </div>
 
 

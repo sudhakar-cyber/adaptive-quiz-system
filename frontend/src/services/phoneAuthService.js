@@ -3,7 +3,6 @@ import {
   db,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  linkWithPhoneNumber,
   linkWithCredential,
   EmailAuthProvider,
   updateProfile,
@@ -15,11 +14,11 @@ import { sharedDatabase } from './sharedDatabase.js';
 import { authService } from './authService.js';
 
 export const COUNTRY_DIAL_CODES = {
+  'India': '+91',
   'United States': '+1',
   'Canada': '+1',
   'United Kingdom': '+44',
   'Australia': '+61',
-  'India': '+91',
   'Germany': '+49',
   'France': '+33',
   'Singapore': '+65',
@@ -29,150 +28,228 @@ export const COUNTRY_DIAL_CODES = {
   'Other': '+1'
 };
 
-// Module-level storage for current verification session
+// Module-level storage for the active Firebase ConfirmationResult
 let currentConfirmationResult = null;
 let currentFormattedPhone = '';
 
 /**
- * Format and normalize input phone number into E.164 international standard (+[country][national]).
- * Example: '9876543210' + 'India' -> '+919876543210'
- * Example: '+91 98765 43210' -> '+919876543210'
+ * Normalizes an Indian phone number into E.164 format (+91 followed by the 10-digit mobile number).
+ * Handles:
+ *  - 10 digits: '9876543210' -> '+919876543210'
+ *  - Trunk prefix '0': '09876543210' -> '+919876543210'
+ *  - Country prefix '91': '919876543210' -> '+919876543210'
+ *  - International prefix '0091': '00919876543210' -> '+919876543210'
+ *  - Existing E.164: '+919876543210' or '+91 98765 43210' -> '+919876543210'
  */
-export function formatToE164(rawPhone, country = 'United States') {
+export function formatIndianPhoneToE164(rawPhone) {
   if (!rawPhone || typeof rawPhone !== 'string') return '';
   const trimmed = rawPhone.trim();
 
-  // If already starts with '+', keep '+' and strip non-digit characters
-  if (trimmed.startsWith('+')) {
-    const cleaned = '+' + trimmed.slice(1).replace(/\D/g, '');
-    return cleaned;
+  // Extract all numeric digits
+  let digits = trimmed.replace(/\D/g, '');
+
+  // Strip international call prefix '0091'
+  if (digits.startsWith('0091') && digits.length === 14) {
+    digits = digits.slice(4);
+  }
+  // Strip '91' country code if 12 digits total
+  else if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  }
+  // Strip trunk prefix '0' if 11 digits total
+  else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
   }
 
-  // User didn't type '+', look up dial code for selected country
-  const dialCode = COUNTRY_DIAL_CODES[country] || '+1';
-  // Strip leading zero often used in domestic trunk dialling (e.g. 09876543210 -> 9876543210)
-  let digitsOnly = trimmed.replace(/\D/g, '');
-  if (digitsOnly.startsWith('0')) {
-    digitsOnly = digitsOnly.slice(1);
+  // A valid Indian mobile number has exactly 10 digits
+  if (digits.length === 10) {
+    return `+91${digits}`;
   }
 
-  return `${dialCode}${digitsOnly}`;
+  return '';
 }
 
 /**
- * Validate whether a phone number matches E.164 format (+ followed by 7 to 15 digits).
+ * Format raw phone number into E.164 international standard (+[country][national]).
+ * Automatically ensures Indian phone numbers are converted to '+91' followed by the 10-digit number.
+ */
+export function formatToE164(rawPhone, country = 'India') {
+  if (!rawPhone || typeof rawPhone !== 'string') return '';
+  const trimmed = rawPhone.trim();
+
+  // Check if this is an Indian number
+  const indianE164 = formatIndianPhoneToE164(trimmed);
+
+  // If country is India, prioritize Indian E.164 format
+  if (country === 'India' && indianE164) {
+    return indianE164;
+  }
+
+  // If number begins with +91 or was detected as a valid Indian mobile number
+  if (trimmed.startsWith('+91') && indianE164) {
+    return indianE164;
+  }
+
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  if (indianE164 && (country === 'India' || /^[6-9]\d{9}$/.test(digitsOnly) || /^91[6-9]\d{9}$/.test(digitsOnly))) {
+    return indianE164;
+  }
+
+  // If explicitly starts with '+'
+  if (trimmed.startsWith('+')) {
+    return '+' + trimmed.slice(1).replace(/\D/g, '');
+  }
+
+  // Fallback with country dial code
+  const dialCode = COUNTRY_DIAL_CODES[country] || '+91';
+  let cleanDigits = digitsOnly;
+  if (cleanDigits.startsWith('0')) {
+    cleanDigits = cleanDigits.slice(1);
+  }
+
+  return `${dialCode}${cleanDigits}`;
+}
+
+/**
+ * Validates whether a phone number matches E.164 (+ followed by 7 to 15 digits).
  */
 export function isValidE164(phone) {
   if (!phone || typeof phone !== 'string') return false;
-  // E.164 format: '+' followed by 7 to 15 digits
   const e164Regex = /^\+[1-9]\d{6,14}$/;
   return e164Regex.test(phone);
 }
 
 /**
- * Formats an E.164 phone number nicely for human display.
- * Example: '+919876543210' -> '+91 98765 43210'
+ * Masks phone number for secure display on the OTP screen.
+ * Example: '+919876543210' -> '+91 ****** 3210'
  */
-export function formatPhoneDisplay(phone) {
+export function maskPhoneNumber(phone) {
   if (!phone || typeof phone !== 'string') return '';
-  const clean = phone.trim();
+  const trimmed = phone.trim();
 
-  // India: +91 XXXXX XXXXX
-  if (clean.startsWith('+91') && clean.length === 13) {
-    return `+91 ${clean.slice(3, 8)} ${clean.slice(8)}`;
+  if (trimmed.startsWith('+')) {
+    const digitsOnly = trimmed.slice(1);
+    if (digitsOnly.length <= 6) return trimmed;
+    // Determine country code length (+1 = 2, +91 = 3, etc.)
+    const codeLength = trimmed.startsWith('+1') ? 2 : 3;
+    const code = trimmed.slice(0, codeLength);
+    const suffix = trimmed.slice(-4);
+    const maskLen = Math.max(4, trimmed.length - codeLength - 4);
+    return `${code} ${'*'.repeat(maskLen)} ${suffix}`;
   }
 
-  // US/Canada: +1 (XXX) XXX-XXXX
-  if (clean.startsWith('+1') && clean.length === 12) {
-    return `+1 (${clean.slice(2, 5)}) ${clean.slice(5, 8)}-${clean.slice(8)}`;
+  if (trimmed.length > 6) {
+    const suffix = trimmed.slice(-4);
+    return `******${suffix}`;
   }
 
-  // UK: +44 XXXX XXXXXX
-  if (clean.startsWith('+44') && clean.length >= 12) {
-    return `+44 ${clean.slice(3, 7)} ${clean.slice(7)}`;
-  }
-
-  // Generic fallback: group in chunks
-  if (clean.startsWith('+')) {
-    const codeMatch = clean.match(/^\+(\d{1,3})(\d+)$/);
-    if (codeMatch) {
-      const [, code, rest] = codeMatch;
-      const mid = Math.floor(rest.length / 2);
-      return `+${code} ${rest.slice(0, mid)} ${rest.slice(mid)}`;
-    }
-  }
-
-  return clean;
+  return trimmed;
 }
 
 /**
- * Translates Firebase Auth error codes into clear, user-friendly messages.
+ * Extracts the Firebase error code (e.g. 'auth/operation-not-allowed').
+ */
+export function extractFirebaseErrorCode(err) {
+  if (!err) return '';
+  if (typeof err === 'string') {
+    const match = err.match(/auth\/[a-z0-9-]+/i);
+    return match ? match[0] : '';
+  }
+  if (err.code && typeof err.code === 'string') {
+    return err.code;
+  }
+  if (err.message && typeof err.message === 'string') {
+    const match = err.message.match(/auth\/[a-z0-9-]+/i);
+    return match ? match[0] : '';
+  }
+  return '';
+}
+
+/**
+ * Translates Firebase Auth error codes into clear, user-friendly messages
+ * while preserving and displaying the actual Firebase error code.
  */
 export function getFriendlyPhoneAuthError(err) {
   if (!err) return 'An unexpected error occurred. Please try again.';
-  const code = err.code || (typeof err === 'string' ? err : '');
-  const message = err.message || (typeof err === 'string' ? err : '');
 
-  if (code === 'auth/invalid-phone-number' || message.includes('invalid-phone-number')) {
-    return 'Invalid phone number format. Please ensure the country code and digits are correct.';
-  }
-  if (code === 'auth/missing-phone-number' || message.includes('missing-phone-number')) {
-    return 'Please enter your mobile phone number.';
-  }
-  if (code === 'auth/quota-exceeded' || message.includes('quota-exceeded')) {
-    return 'SMS quota exceeded for today. Please wait a while or try again later.';
-  }
-  if (
-    code === 'auth/captcha-check-failed' ||
-    code === 'auth/missing-recaptcha-token' ||
-    message.includes('captcha-check-failed') ||
-    message.includes('recaptcha')
-  ) {
-    return 'Security verification (reCAPTCHA) failed. Please try again.';
-  }
-  if (code === 'auth/too-many-requests' || message.includes('too-many-requests')) {
-    return 'Too many requests. Please wait a few moments before trying again.';
-  }
-  if (
-    code === 'auth/invalid-verification-code' ||
-    code === 'auth/invalid-verification-id' ||
-    message.includes('invalid-verification-code')
-  ) {
-    return 'Incorrect verification code. Please check your SMS and try again.';
-  }
-  if (code === 'auth/code-expired' || message.includes('code-expired')) {
-    return 'This verification code has expired. Please click "Resend OTP".';
-  }
-  if (code === 'auth/session-expired' || message.includes('session-expired')) {
-    return 'Verification session expired. Please request a new verification code.';
-  }
-  if (
-    code === 'auth/credential-already-in-use' ||
-    code === 'auth/phone-number-already-exists' ||
-    message.includes('credential-already-in-use')
-  ) {
-    return 'This phone number is already registered or associated with another account.';
-  }
-  if (code === 'auth/provider-already-linked' || message.includes('provider-already-linked')) {
-    return 'This account is already linked to a phone number.';
-  }
-  if (code === 'auth/network-request-failed' || message.includes('network-request-failed')) {
-    return 'Network connection error. Please check your internet connection.';
-  }
-  if (code === 'auth/invalid-app-credential' || message.includes('invalid-app-credential')) {
-    return 'Firebase app verification failed. Please refresh the page and try again.';
-  }
-  if (code === 'auth/operation-not-allowed' || message.includes('operation-not-allowed')) {
-    return 'Phone Authentication is not enabled in Firebase Console. Please enable the Phone provider in Firebase Console > Authentication > Sign-in method.';
+  const code = extractFirebaseErrorCode(err);
+  const rawMessage = (err && typeof err === 'object' && err.message) ? err.message : (typeof err === 'string' ? err : '');
+
+  let friendly = '';
+
+  switch (code) {
+    case 'auth/operation-not-allowed': {
+      if (rawMessage.toLowerCase().includes('region')) {
+        friendly = 'SMS unable to be sent until this region is enabled in Firebase Console (Authentication > Settings > SMS Region Policy).';
+      } else if (rawMessage.toLowerCase().includes('billing')) {
+        friendly = 'Cloud Billing is not enabled for project adaptive-quiz-system-957ee. Phone Authentication requires linking a Google Cloud Billing account (Blaze plan) in Firebase Console.';
+      } else {
+        friendly = 'Phone authentication is not allowed. In Firebase Console: 1) Verify project adaptive-quiz-system-957ee is on the Blaze (Pay-as-you-go) plan with Cloud Billing enabled (required by Firebase for Phone SMS since Sept 2024), and 2) Ensure Authentication > Settings > SMS Region Policy allows your country.';
+      }
+      break;
+    }
+    case 'auth/billing-not-enabled':
+      friendly = 'Cloud Billing is not enabled for project adaptive-quiz-system-957ee. Phone Authentication requires linking a Google Cloud Billing account (Blaze plan) in Firebase Console.';
+      break;
+    case 'auth/invalid-phone-number':
+      friendly = 'Invalid phone number format. Please ensure country code (+91) and a valid 10-digit mobile number are entered.';
+      break;
+    case 'auth/missing-phone-number':
+      friendly = 'Please enter your phone number.';
+      break;
+    case 'auth/quota-exceeded':
+      friendly = 'SMS quota has been exceeded for this project. Please wait a while or try again later.';
+      break;
+    case 'auth/captcha-check-failed':
+    case 'auth/missing-recaptcha-token':
+      friendly = 'Security verification (reCAPTCHA) failed. Please refresh the page and try again.';
+      break;
+    case 'auth/too-many-requests':
+      friendly = 'Too many requests. Please wait a few moments before trying again.';
+      break;
+    case 'auth/invalid-verification-code':
+      friendly = 'Incorrect verification code. Please check your SMS and try again.';
+      break;
+    case 'auth/code-expired':
+      friendly = 'This verification code has expired. Please click "Resend OTP".';
+      break;
+    case 'auth/session-expired':
+    case 'auth/invalid-verification-id':
+      friendly = 'Verification session has expired. Please click "Resend OTP".';
+      break;
+    case 'auth/credential-already-in-use':
+    case 'auth/phone-number-already-exists':
+      friendly = 'This phone number is already registered or associated with another account.';
+      break;
+    case 'auth/network-request-failed':
+      friendly = 'Network connection error. Please check your internet connection.';
+      break;
+    case 'auth/app-not-authorized':
+      friendly = 'This domain is not authorized in Firebase Console (Authentication > Settings > Authorized domains).';
+      break;
+    case 'auth/invalid-app-credential':
+      friendly = 'Firebase app verification failed. Please refresh the page and try again.';
+      break;
+    case 'auth/internal-error':
+      friendly = 'Internal Firebase authentication error occurred. Please try again.';
+      break;
+    default: {
+      let clean = rawMessage.replace(/^Firebase:\s*/i, '').trim();
+      clean = clean.replace(/^Error\s*\((auth\/[^)]+)\):?/i, '$1:').trim();
+      friendly = clean || 'Phone authentication failed. Please try again.';
+    }
   }
 
-  let clean = message.replace(/^Firebase:\s*/i, '').trim();
-  clean = clean.replace(/^Error\s*\((auth\/[^)]+)\):?/i, '$1:').trim();
-  return clean || 'Phone authentication failed. Please try again.';
+  // Display both the actual Firebase error code and the user-friendly message
+  if (code) {
+    return `[${code}] ${friendly}`;
+  }
+
+  return friendly || 'Phone authentication failed. Please try again.';
 }
 
 /**
- * Clean up existing reCAPTCHA instance to allow fresh verification.
+ * Clean up existing invisible reCAPTCHA instance.
  */
 export function clearRecaptcha() {
   if (typeof window !== 'undefined') {
@@ -220,10 +297,20 @@ export function getRecaptchaVerifier(containerId = 'recaptcha-container') {
 }
 
 export const phoneAuthService = {
+  formatToE164,
+  formatIndianPhoneToE164,
+  isValidE164,
+  maskPhoneNumber,
+  extractFirebaseErrorCode,
+  getFriendlyPhoneAuthError,
+  clearRecaptcha,
+  getRecaptchaVerifier,
+  COUNTRY_DIAL_CODES,
+
   /**
-   * Send a real SMS OTP via Firebase Phone Authentication.
+   * Request a real SMS OTP using Firebase Phone Authentication.
    */
-  sendOtp: async (rawPhone, country = 'United States') => {
+  sendPhoneOtp: async (rawPhone, country = 'India') => {
     try {
       if (!rawPhone || !rawPhone.trim()) {
         return { success: false, error: 'Please enter your phone number.' };
@@ -233,70 +320,57 @@ export const phoneAuthService = {
       if (!isValidE164(formatted)) {
         return {
           success: false,
-          error: 'Please enter a valid mobile number with country code (e.g. +91 98765 43210 or select your country).'
+          error: 'Please enter a valid 10-digit mobile number (e.g. 9876543210 or +91 98765 43210).'
         };
       }
 
+      const masked = maskPhoneNumber(formatted);
+      currentFormattedPhone = formatted;
+
       const verifier = getRecaptchaVerifier('recaptcha-container');
       if (!verifier) {
-        return { success: false, error: 'Failed to initialize security verification (reCAPTCHA).' };
+        return { success: false, error: 'Could not initialize reCAPTCHA verifier. Please refresh the page.' };
       }
 
-      // For registration, initiate Firebase Phone Authentication
-      let confirmationResult = null;
-      if (auth.currentUser && !auth.currentUser.isAnonymous) {
-        try {
-          confirmationResult = await linkWithPhoneNumber(auth.currentUser, formatted, verifier);
-        } catch (linkErr) {
-          if (linkErr.code === 'auth/provider-already-linked') {
-            confirmationResult = await signInWithPhoneNumber(auth, formatted, verifier);
-          } else {
-            throw linkErr;
-          }
-        }
-      } else {
-        confirmationResult = await signInWithPhoneNumber(auth, formatted, verifier);
-      }
-
+      const confirmationResult = await signInWithPhoneNumber(auth, formatted, verifier);
       currentConfirmationResult = confirmationResult;
-      currentFormattedPhone = formatted;
-      const display = formatPhoneDisplay(formatted);
 
       return {
         success: true,
         formattedPhone: formatted,
-        displayPhone: display,
+        maskedPhone: masked,
         cooldownSeconds: 60,
-        message: `Verification code sent to ${display}`
+        message: `Verification code sent via SMS to ${masked}`
       };
     } catch (err) {
-      console.warn('Firebase send phone OTP error:', err);
+      console.warn('Firebase signInWithPhoneNumber error:', err);
       clearRecaptcha();
       return {
         success: false,
-        error: getFriendlyPhoneAuthError(err)
+        error: getFriendlyPhoneAuthError(err),
+        errorCode: extractFirebaseErrorCode(err)
       };
     }
   },
 
   /**
-   * Resend phone OTP using Firebase Phone Authentication.
+   * Resend SMS OTP using Firebase Phone Authentication.
    */
-  resendOtp: async (rawPhone, country = 'United States') => {
-    return await phoneAuthService.sendOtp(rawPhone, country);
+  resendPhoneOtp: async (rawPhone, country = 'India') => {
+    return await phoneAuthService.sendPhoneOtp(rawPhone, country);
   },
 
   /**
-   * Verify the 6-digit OTP code entered by the user.
+   * Verify the 6-digit SMS OTP using Firebase confirmationResult.
    * Only after successful OTP verification:
-   *  - Confirms OTP with Firebase ConfirmationResult
-   *  - Extracts verified Firebase user and verified phone number
-   *  - Links email and password if provided
-   *  - Creates/updates Firestore profile with verified UID, phone, and metadata
-   *  - Registers student in sharedDatabase
-   *  - Establishes authenticated local session
+   * 1. Creates/updates Firebase user profile (displayName).
+   * 2. Links email/password credentials to the Firebase user.
+   * 3. Creates Firestore document at users/{firebaseUID} with:
+   *    firstName, lastName, email, phoneNumber, country, role: "student", createdAt, updatedAt.
+   *    (Never stores passwords or OTPs in Firestore).
+   * 4. Establishes active student session and logs in.
    */
-  verifyOtp: async (otpCode, profileDetails = {}) => {
+  verifyPhoneOtp: async (otpCode, registrationData = {}) => {
     try {
       const cleanOtp = (otpCode || '').replace(/\D/g, '').trim();
       if (!cleanOtp || cleanOtp.length !== 6) {
@@ -309,89 +383,74 @@ export const phoneAuthService = {
       if (!currentConfirmationResult) {
         return {
           success: false,
-          error: 'No active verification session found. Please request a new verification code.'
+          error: 'Verification session expired. Please click "Resend OTP".'
         };
       }
 
-      // 1. Verify SMS OTP using Firebase ConfirmationResult
+      // Verify OTP with Firebase
       const userCredential = await currentConfirmationResult.confirm(cleanOtp);
       const user = userCredential.user;
 
       if (!user || !user.uid) {
         return {
           success: false,
-          error: 'Firebase verification failed. No user record returned.'
+          error: 'Firebase verification failed to authenticate user.'
         };
       }
 
-      // 2. Extract verified phone directly from authenticated user
-      const verifiedPhone = user.phoneNumber || currentFormattedPhone || profileDetails.phone || '';
-      const firstName = (profileDetails.firstName || '').trim();
-      const lastName = (profileDetails.lastName || '').trim();
+      const verifiedPhone = user.phoneNumber || currentFormattedPhone || formatToE164(registrationData.phone, registrationData.country || 'India') || '';
+      const firstName = (registrationData.firstName || '').trim();
+      const lastName = (registrationData.lastName || '').trim();
       const fullName = `${firstName} ${lastName}`.trim() || user.displayName || 'Student';
-      const email = (profileDetails.email || user.email || '').trim().toLowerCase();
-      const country = profileDetails.country || 'United States';
+      const email = (registrationData.email || user.email || '').trim().toLowerCase();
+      const country = registrationData.country || 'India';
 
-      // 3. Account Linking: Link Email & Password if provided
-      if (email && profileDetails.password) {
+      // 1. Link Email & Password credential if provided (allowing email/password login too)
+      if (email && registrationData.password) {
         try {
-          const emailCred = EmailAuthProvider.credential(email, profileDetails.password);
+          const emailCred = EmailAuthProvider.credential(email, registrationData.password);
           await linkWithCredential(user, emailCred);
         } catch (linkErr) {
-          console.warn('Email credential linking notice:', linkErr?.code || linkErr?.message);
+          console.warn('Notice linking email/password credential:', linkErr?.code || linkErr?.message);
         }
       }
 
-      // 4. Update Firebase Auth displayName
+      // 2. Update Firebase Auth displayName
       try {
         await updateProfile(user, { displayName: fullName });
-      } catch (e) {
-        console.warn('updateProfile notice:', e);
+      } catch (profErr) {
+        console.warn('Notice updating profile displayName:', profErr);
       }
 
-      // 5. Get Firebase ID token
-      let idToken = '';
+      // 3. Create / update Firestore user document at users/{firebaseUID}
+      // ONLY specified fields: firstName, lastName, email, phoneNumber, country, role: "student", createdAt, updatedAt
+      // NEVER store passwords or OTPs!
       try {
-        idToken = await user.getIdToken();
-      } catch (e) {
-        console.warn('getIdToken notice:', e);
-      }
-
-      // 6. Create/update Firestore user profile (NEVER store password in Firestore!)
-      const userDocRef = doc(db, 'users', user.uid);
-      const profileData = {
-        uid: user.uid,
-        firstName,
-        lastName,
-        displayName: fullName,
-        name: fullName,
-        email,
-        phoneNumber: verifiedPhone,
-        phone: verifiedPhone,
-        country,
-        role: 'student',
-        authProvider: 'phone',
-        phoneVerified: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        lastLoginAt: serverTimestamp()
-      };
-
-      try {
-        await authService.safeFirestoreOp(setDoc(userDocRef, profileData, { merge: true }), 2500);
+        const userDocRef = doc(db, 'users', user.uid);
+        const firestoreData = {
+          firstName,
+          lastName,
+          email,
+          phoneNumber: verifiedPhone,
+          country,
+          role: 'student',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await authService.safeFirestoreOp(setDoc(userDocRef, firestoreData, { merge: true }), 2500);
       } catch (fsErr) {
-        console.warn('Firestore profile write notice:', fsErr);
+        console.warn('Firestore profile creation warning:', fsErr);
       }
 
-      // 7. Update local student session (NEVER store password in sharedDatabase!)
+      // 4. Update student profile in sharedDatabase & local storage
       const studentPayload = {
+        uid: user.uid,
         name: fullName,
         firstName,
         lastName,
         email,
         phone: verifiedPhone,
         country,
-        uid: user.uid,
         role: 'student',
         authProvider: 'phone'
       };
@@ -401,6 +460,7 @@ export const phoneAuthService = {
 
       // Clean up session and verifiers
       currentConfirmationResult = null;
+      currentFormattedPhone = '';
       clearRecaptcha();
 
       return {
@@ -408,21 +468,18 @@ export const phoneAuthService = {
         user,
         student: activeStudent,
         role: 'student',
-        idToken,
         message: 'Phone number verified successfully!'
       };
     } catch (err) {
-      console.warn('Firebase verify phone OTP error:', err);
+      console.warn('Firebase verifyPhoneOtp error:', err);
       return {
         success: false,
-        error: getFriendlyPhoneAuthError(err)
+        error: getFriendlyPhoneAuthError(err),
+        errorCode: extractFirebaseErrorCode(err)
       };
     }
   },
 
-  /**
-   * Reset the current verification session state.
-   */
   resetSession: () => {
     currentConfirmationResult = null;
     currentFormattedPhone = '';

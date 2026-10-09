@@ -1350,8 +1350,8 @@ html, body {
 .otp-inputs-row {
   display: flex;
   justify-content: center;
-  gap: clamp(6px, 1.2vw, 10px);
-  margin-bottom: 18px;
+  gap: clamp(6px, 1.4vw, 10px);
+  margin-bottom: 20px;
 }
 
 .otp-inputs-row.error-shake {
@@ -1359,12 +1359,12 @@ html, body {
 }
 
 .otp-digit-box {
-  width: clamp(40px, 5.5vw, 48px);
+  width: clamp(40px, 5.2vw, 48px);
   height: clamp(48px, 6.5vh, 56px);
   border: 1.5px solid #CBD5E1;
   border-radius: 12px;
   background: #FFFFFF;
-  font-size: 1.45rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: var(--brand-navy, #0F172A);
   text-align: center;

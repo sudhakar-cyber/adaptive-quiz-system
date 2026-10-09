@@ -29,15 +29,35 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
   });
 
   const [registeredUser, setRegisteredUser] = useState(null);
-  const [pendingRegistration, setPendingRegistration] = useState(null);
+  const [pendingRegistration, setPendingRegistration] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('learnsmart_pending_reg');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
   const [loginNotice, setLoginNotice] = useState('');
 
-  // Sync if initialView prop changes
+  // Sync if initialView prop or route pathname changes
   useEffect(() => {
-    if (initialView && ['login', 'register', 'otp', 'oauth'].includes(initialView)) {
+    if (location.pathname === '/register') {
+      setCurrentView('register');
+    } else if (location.pathname === '/otp') {
+      setCurrentView('otp');
+    } else if (location.pathname === '/login' || location.pathname === '/') {
+      const params = new URLSearchParams(location.search);
+      const urlView = params.get('view');
+      if (urlView && ['login', 'register', 'otp', 'oauth'].includes(urlView)) {
+        setCurrentView(urlView);
+      } else if (!initialView || initialView === 'login') {
+        setCurrentView('login');
+      } else {
+        setCurrentView(initialView);
+      }
+    } else if (initialView && ['login', 'register', 'otp', 'oauth'].includes(initialView)) {
       setCurrentView(initialView);
     }
-  }, [initialView]);
+  }, [initialView, location.pathname, location.search]);
 
   const handleLoginSuccess = (user, role = 'student', studentObj = null) => {
     if (role === 'admin') {
@@ -66,17 +86,83 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
   const handleRegisterSuccess = (userData) => {
     setRegisteredUser(userData);
     setLoginNotice('');
+    try {
+      sessionStorage.removeItem('learnsmart_pending_reg');
+    } catch {}
     const role = userData?.role || 'student';
     handleLoginSuccess(userData?.name || 'Student', role, userData);
   };
 
-  const handleProceedToOtp = (formData, phoneInfo = {}) => {
-    setPendingRegistration({
+  const handleProceedToOtp = (formData, maskedPhone = '') => {
+    const combined = {
       ...formData,
-      ...phoneInfo
-    });
+      maskedPhone
+    };
+    setPendingRegistration(combined);
+    try {
+      sessionStorage.setItem('learnsmart_pending_reg', JSON.stringify(combined));
+    } catch {}
     setLoginNotice('');
     setCurrentView('otp');
+    try {
+      navigate('/otp');
+    } catch {}
+  };
+
+  const handleOtpVerifiedAndCreateAccount = async (verificationToken) => {
+    if (!pendingRegistration) {
+      handleLoginSuccess('Student', 'student');
+      return;
+    }
+
+    try {
+      const res = await authService.signupWithFirebase(
+        pendingRegistration.email.trim(),
+        pendingRegistration.password,
+        {
+          firstName: pendingRegistration.firstName.trim(),
+          lastName: pendingRegistration.lastName.trim(),
+          phone: pendingRegistration.phone.trim(),
+          country: pendingRegistration.country,
+          role: 'student',
+          verificationToken
+        }
+      );
+
+      if (res && res.success && res.student) {
+        setRegisteredUser(res.student);
+        try { sessionStorage.removeItem('learnsmart_pending_reg'); } catch {}
+        handleLoginSuccess(res.student.name || 'Student', 'student', res.student);
+      } else {
+        // Fallback to local sharedDatabase
+        const studentName = `${pendingRegistration.firstName.trim()} ${pendingRegistration.lastName.trim()}`.trim() || 'Student';
+        const fallbackStudent = sharedDatabase.registerStudent({
+          name: studentName,
+          email: pendingRegistration.email.trim(),
+          phone: pendingRegistration.phone.trim(),
+          country: pendingRegistration.country,
+          role: 'student'
+        });
+        authService.loginStudent(fallbackStudent);
+        setRegisteredUser(fallbackStudent);
+        try { sessionStorage.removeItem('learnsmart_pending_reg'); } catch {}
+        handleLoginSuccess(fallbackStudent.name, 'student', fallbackStudent);
+      }
+    } catch (err) {
+      console.warn('Signup error, using local registration fallback:', err);
+      const studentName = `${pendingRegistration.firstName.trim()} ${pendingRegistration.lastName.trim()}`.trim() || 'Student';
+      const fallbackStudent = sharedDatabase.registerStudent({
+        name: studentName,
+        email: pendingRegistration.email.trim(),
+        phone: pendingRegistration.phone.trim(),
+        country: pendingRegistration.country,
+        role: 'student'
+      });
+      authService.loginStudent(fallbackStudent);
+      setRegisteredUser(fallbackStudent);
+      try { sessionStorage.removeItem('learnsmart_pending_reg'); } catch {}
+      handleLoginSuccess(fallbackStudent.name, 'student', fallbackStudent);
+    }
   };
 
   const handleOAuthSuccess = (verifiedUser) => {
@@ -135,6 +221,9 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
                 onSwitchToRegister={() => {
                   setLoginNotice('');
                   setCurrentView('register');
+                  try {
+                    navigate('/register');
+                  } catch {}
                 }}
                 onLoginSuccess={handleLoginSuccess}
               />
@@ -142,7 +231,12 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
             {currentView === 'register' && (
               <RegisterForm
                 initialData={pendingRegistration}
-                onSwitchToLogin={() => setCurrentView('login')}
+                onSwitchToLogin={() => {
+                  setCurrentView('login');
+                  try {
+                    navigate('/login');
+                  } catch {}
+                }}
                 onRegisterSuccess={handleRegisterSuccess}
                 onProceedToOtp={handleProceedToOtp}
               />
@@ -150,21 +244,40 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
             {currentView === 'otp' && (
               <OtpVerification
                 phone={pendingRegistration?.phone || ''}
-                country={pendingRegistration?.country || 'United States'}
-                displayPhone={pendingRegistration?.displayPhone || ''}
-                email={pendingRegistration?.email || ''}
+                country={pendingRegistration?.country || 'India'}
+                displayPhone={pendingRegistration?.maskedPhone || ''}
                 registrationData={pendingRegistration}
                 onVerifySuccess={handleRegisterSuccess}
-                onBackToRegister={() => setCurrentView('register')}
-                onSwitchToLogin={() => setCurrentView('login')}
+                onBackToRegister={() => {
+                  setCurrentView('register');
+                  try {
+                    navigate('/register');
+                  } catch {}
+                }}
+                onSwitchToLogin={() => {
+                  setCurrentView('login');
+                  try {
+                    navigate('/login');
+                  } catch {}
+                }}
               />
             )}
             {currentView === 'oauth' && (
               <OAuthVerification
                 registeredUser={registeredUser}
                 onOAuthSuccess={handleOAuthSuccess}
-                onBackToRegister={() => setCurrentView('register')}
-                onSwitchToLogin={() => setCurrentView('login')}
+                onBackToRegister={() => {
+                  setCurrentView('register');
+                  try {
+                    navigate('/register');
+                  } catch {}
+                }}
+                onSwitchToLogin={() => {
+                  setCurrentView('login');
+                  try {
+                    navigate('/login');
+                  } catch {}
+                }}
               />
             )}
           </div>
