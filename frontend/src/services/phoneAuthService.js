@@ -60,7 +60,7 @@ export function formatToE164(rawPhone, country = 'United States') {
 }
 
 /**
- * Validate whether a phone number matches E.164 format.
+ * Validate whether a phone number matches E.164 format (+ followed by 7 to 15 digits).
  */
 export function isValidE164(phone) {
   if (!phone || typeof phone !== 'string') return false;
@@ -117,7 +117,7 @@ export function getFriendlyPhoneAuthError(err) {
     return 'Invalid phone number format. Please ensure the country code and digits are correct.';
   }
   if (code === 'auth/missing-phone-number' || message.includes('missing-phone-number')) {
-    return 'Please enter your phone number.';
+    return 'Please enter your mobile phone number.';
   }
   if (code === 'auth/quota-exceeded' || message.includes('quota-exceeded')) {
     return 'SMS quota exceeded for today. Please wait a while or try again later.';
@@ -162,6 +162,9 @@ export function getFriendlyPhoneAuthError(err) {
   if (code === 'auth/invalid-app-credential' || message.includes('invalid-app-credential')) {
     return 'Firebase app verification failed. Please refresh the page and try again.';
   }
+  if (code === 'auth/operation-not-allowed' || message.includes('operation-not-allowed')) {
+    return 'Phone Authentication is not enabled in Firebase Console. Please enable the Phone provider in Firebase Console > Authentication > Sign-in method.';
+  }
 
   let clean = message.replace(/^Firebase:\s*/i, '').trim();
   clean = clean.replace(/^Error\s*\((auth\/[^)]+)\):?/i, '$1:').trim();
@@ -172,13 +175,19 @@ export function getFriendlyPhoneAuthError(err) {
  * Clean up existing reCAPTCHA instance to allow fresh verification.
  */
 export function clearRecaptcha() {
-  if (typeof window !== 'undefined' && window.recaptchaVerifier) {
-    try {
-      window.recaptchaVerifier.clear();
-    } catch (e) {
-      console.warn('Notice clearing recaptcha:', e);
+  if (typeof window !== 'undefined') {
+    if (window.recaptchaVerifier) {
+      try {
+        window.recaptchaVerifier.clear();
+      } catch (e) {
+        console.warn('Notice clearing recaptcha:', e);
+      }
+      window.recaptchaVerifier = null;
     }
-    window.recaptchaVerifier = null;
+    const container = document.getElementById('recaptcha-container');
+    if (container) {
+      container.innerHTML = '';
+    }
   }
 }
 
@@ -188,16 +197,14 @@ export function clearRecaptcha() {
 export function getRecaptchaVerifier(containerId = 'recaptcha-container') {
   if (typeof window === 'undefined') return null;
 
-  // Make sure the target DOM element exists
+  clearRecaptcha();
+
   let el = document.getElementById(containerId);
   if (!el) {
     el = document.createElement('div');
     el.id = containerId;
     document.body.appendChild(el);
   }
-
-  // Clear any existing verifier instance
-  clearRecaptcha();
 
   window.recaptchaVerifier = new RecaptchaVerifier(auth, el, {
     size: 'invisible',
@@ -215,7 +222,6 @@ export function getRecaptchaVerifier(containerId = 'recaptcha-container') {
 export const phoneAuthService = {
   /**
    * Send a real SMS OTP via Firebase Phone Authentication.
-   * Handles account linking if an existing user is already signed in (e.g. Google user).
    */
   sendOtp: async (rawPhone, country = 'United States') => {
     try {
@@ -227,7 +233,7 @@ export const phoneAuthService = {
       if (!isValidE164(formatted)) {
         return {
           success: false,
-          error: 'Please enter a valid phone number with country code (e.g. +91 98765 43210 or select your country).'
+          error: 'Please enter a valid mobile number with country code (e.g. +91 98765 43210 or select your country).'
         };
       }
 
@@ -236,13 +242,12 @@ export const phoneAuthService = {
         return { success: false, error: 'Failed to initialize security verification (reCAPTCHA).' };
       }
 
-      // If user already authenticated with Google or another provider, link phone instead of creating duplicate account
+      // For registration, initiate Firebase Phone Authentication
       let confirmationResult = null;
-      if (auth.currentUser) {
+      if (auth.currentUser && !auth.currentUser.isAnonymous) {
         try {
           confirmationResult = await linkWithPhoneNumber(auth.currentUser, formatted, verifier);
         } catch (linkErr) {
-          // If already linked with this phone, signInWithPhoneNumber fallback
           if (linkErr.code === 'auth/provider-already-linked') {
             confirmationResult = await signInWithPhoneNumber(auth, formatted, verifier);
           } else {
@@ -275,20 +280,21 @@ export const phoneAuthService = {
   },
 
   /**
-   * Resend phone OTP using Firebase's supported flow.
+   * Resend phone OTP using Firebase Phone Authentication.
    */
   resendOtp: async (rawPhone, country = 'United States') => {
-    // Re-triggering sendOtp clears the previous reCAPTCHA token and requests a fresh SMS from Firebase
     return await phoneAuthService.sendOtp(rawPhone, country);
   },
 
   /**
    * Verify the 6-digit OTP code entered by the user.
    * Only after successful OTP verification:
-   *  - Creates/links the Firebase user
-   *  - Updates/creates Firestore profile (stores UID, names, email, phone, country, role = 'student')
-   *  - Never stores passwords in Firestore
-   *  - Establishes local active session
+   *  - Confirms OTP with Firebase ConfirmationResult
+   *  - Extracts verified Firebase user and verified phone number
+   *  - Links email and password if provided
+   *  - Creates/updates Firestore profile with verified UID, phone, and metadata
+   *  - Registers student in sharedDatabase
+   *  - Establishes authenticated local session
    */
   verifyOtp: async (otpCode, profileDetails = {}) => {
     try {
@@ -307,7 +313,7 @@ export const phoneAuthService = {
         };
       }
 
-      // 1. Verify SMS OTP using Firebase
+      // 1. Verify SMS OTP using Firebase ConfirmationResult
       const userCredential = await currentConfirmationResult.confirm(cleanOtp);
       const user = userCredential.user;
 
@@ -318,6 +324,7 @@ export const phoneAuthService = {
         };
       }
 
+      // 2. Extract verified phone directly from authenticated user
       const verifiedPhone = user.phoneNumber || currentFormattedPhone || profileDetails.phone || '';
       const firstName = (profileDetails.firstName || '').trim();
       const lastName = (profileDetails.lastName || '').trim();
@@ -325,25 +332,32 @@ export const phoneAuthService = {
       const email = (profileDetails.email || user.email || '').trim().toLowerCase();
       const country = profileDetails.country || 'United States';
 
-      // 2. Account Linking: Link Email & Password if provided and user not already linked
+      // 3. Account Linking: Link Email & Password if provided
       if (email && profileDetails.password) {
         try {
           const emailCred = EmailAuthProvider.credential(email, profileDetails.password);
           await linkWithCredential(user, emailCred);
         } catch (linkErr) {
-          // If already linked or email in use, keep moving smoothly
           console.warn('Email credential linking notice:', linkErr?.code || linkErr?.message);
         }
       }
 
-      // 3. Update Firebase Auth displayName
+      // 4. Update Firebase Auth displayName
       try {
         await updateProfile(user, { displayName: fullName });
       } catch (e) {
         console.warn('updateProfile notice:', e);
       }
 
-      // 4. Create/update Firestore user profile (NEVER store password!)
+      // 5. Get Firebase ID token
+      let idToken = '';
+      try {
+        idToken = await user.getIdToken();
+      } catch (e) {
+        console.warn('getIdToken notice:', e);
+      }
+
+      // 6. Create/update Firestore user profile (NEVER store password in Firestore!)
       const userDocRef = doc(db, 'users', user.uid);
       const profileData = {
         uid: user.uid,
@@ -369,7 +383,7 @@ export const phoneAuthService = {
         console.warn('Firestore profile write notice:', fsErr);
       }
 
-      // 5. Update local student session (NEVER store password in sharedDatabase!)
+      // 7. Update local student session (NEVER store password in sharedDatabase!)
       const studentPayload = {
         name: fullName,
         firstName,
@@ -385,7 +399,7 @@ export const phoneAuthService = {
       const activeStudent = sharedDatabase.registerStudent(studentPayload);
       authService.loginStudent(activeStudent);
 
-      // Clean up session
+      // Clean up session and verifiers
       currentConfirmationResult = null;
       clearRecaptcha();
 
@@ -394,6 +408,7 @@ export const phoneAuthService = {
         user,
         student: activeStudent,
         role: 'student',
+        idToken,
         message: 'Phone number verified successfully!'
       };
     } catch (err) {
