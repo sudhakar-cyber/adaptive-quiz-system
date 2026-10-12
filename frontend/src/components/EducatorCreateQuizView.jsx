@@ -151,6 +151,8 @@ export const EducatorCreateQuizView = ({
       diffBg: diffColors[formData.difficulty]?.bg || '#FFEDD5',
       diffColor: diffColors[formData.difficulty]?.color || '#C2410C',
       status: finalStatus,
+      isRecommended: finalStatus === 'Active',
+      recommendationReason: 'Newly Published Assessment • Assigned by Educator',
       questionsCount: formData.questions.length,
       duration: formData.duration || '15 mins',
       submissionsCount: 0,

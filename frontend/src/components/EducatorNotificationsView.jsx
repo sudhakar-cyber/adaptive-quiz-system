@@ -23,9 +23,6 @@ export const EducatorNotificationsView = ({
 }) => {
   const [filter, setFilter] = useState('all');
 
-  // Selected Notification IDs on the main page for batch actions
-  const [selectedNotifIds, setSelectedNotifIds] = useState([]);
-
   // Modal State for Sending Notification
   const [openSendModal, setOpenSendModal] = useState(false);
   const [sendToAllStudents, setSendToAllStudents] = useState(true);
@@ -54,47 +51,6 @@ export const EducatorNotificationsView = ({
     if (filter === 'sent') return item.category === 'sent';
     return true;
   });
-
-  // Main Page: Select All Notifications logic
-  const allNotificationsSelected =
-    filteredNotifications.length > 0 &&
-    filteredNotifications.every((n) => selectedNotifIds.includes(n.id));
-
-  const handleToggleSelectAllNotifications = () => {
-    if (allNotificationsSelected) {
-      const visibleSet = new Set(filteredNotifications.map((n) => n.id));
-      setSelectedNotifIds((prev) => prev.filter((id) => !visibleSet.has(id)));
-    } else {
-      const newSet = new Set([...selectedNotifIds, ...filteredNotifications.map((n) => n.id)]);
-      setSelectedNotifIds(Array.from(newSet));
-    }
-  };
-
-  const handleToggleNotification = (id) => {
-    setSelectedNotifIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleMarkSelectedRead = () => {
-    if (selectedNotifIds.length === 0) return;
-    const selectedSet = new Set(selectedNotifIds);
-    const updated = notifications.map((n) =>
-      selectedSet.has(n.id) ? { ...n, unread: false } : n
-    );
-    onUpdateNotifications(updated);
-    setSelectedNotifIds([]);
-    if (showToast) showToast('Selected notifications marked as read.');
-  };
-
-  const handleDeleteSelected = () => {
-    if (selectedNotifIds.length === 0) return;
-    const selectedSet = new Set(selectedNotifIds);
-    const updated = notifications.filter((n) => !selectedSet.has(n.id));
-    onUpdateNotifications(updated);
-    setSelectedNotifIds([]);
-    if (showToast) showToast('Selected notifications deleted.');
-  };
 
   // Quick Preset Templates
   const handleApplyPreset = (type) => {
@@ -203,25 +159,12 @@ export const EducatorNotificationsView = ({
     if (showToast) showToast('All educator notifications marked as read.');
   };
 
-  const handleClearAll = () => {
-    onUpdateNotifications([]);
-    setSelectedNotifIds([]);
-    if (showToast) showToast('All notifications cleared.');
-  };
-
   const handleMarkAsRead = (id) => {
     const updated = notifications.map((n) =>
       n.id === id ? { ...n, unread: false } : n
     );
     onUpdateNotifications(updated);
     if (showToast) showToast('Notification marked as read.');
-  };
-
-  const handleDismiss = (id) => {
-    const updated = notifications.filter((n) => n.id !== id);
-    onUpdateNotifications(updated);
-    setSelectedNotifIds((prev) => prev.filter((item) => item !== id));
-    if (showToast) showToast('Notification dismissed.');
   };
 
   const handleActionClick = (notif) => {
@@ -261,29 +204,15 @@ export const EducatorNotificationsView = ({
             <span>Send Notification</span>
           </button>
 
-          {unreadCount > 0 && (
-            <button
-              type="button"
-              className="educator-secondary-btn"
-              onClick={handleMarkAllRead}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <CheckCircleIcon size={16} color="#10B981" />
-              <span>Mark All as Read</span>
-            </button>
-          )}
-
-          {notifications.length > 0 && (
-            <button
-              type="button"
-              className="educator-secondary-btn"
-              onClick={handleClearAll}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <TrashIcon size={14} color="#64748B" />
-              <span>Clear All</span>
-            </button>
-          )}
+          <button
+            type="button"
+            className="educator-secondary-btn"
+            onClick={handleMarkAllRead}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <CheckCircleIcon size={16} color="#10B981" />
+            <span>Mark All as Read</span>
+          </button>
         </div>
       </div>
 
@@ -335,81 +264,10 @@ export const EducatorNotificationsView = ({
         </div>
       </div>
 
-      {/* Select All Checkbox Toolbar on Educator Notifications Page */}
-      {filteredNotifications.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 16px',
-            backgroundColor: '#FFFFFF',
-            borderRadius: '12px',
-            border: '1px solid #E2E8F0',
-            marginBottom: '12px',
-            flexWrap: 'wrap',
-            gap: '10px'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <label
-              htmlFor="select-all-notifications-checkbox"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                cursor: 'pointer',
-                userSelect: 'none',
-                margin: 0
-              }}
-            >
-              <input
-                type="checkbox"
-                id="select-all-notifications-checkbox"
-                checked={allNotificationsSelected}
-                onChange={handleToggleSelectAllNotifications}
-                className="educator-custom-checkbox"
-              />
-              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0F172A' }}>
-                Select All
-              </span>
-            </label>
-
-            {selectedNotifIds.length > 0 && (
-              <span style={{ fontSize: '0.80rem', color: '#10B981', fontWeight: 600 }}>
-                ({selectedNotifIds.length} of {filteredNotifications.length} selected)
-              </span>
-            )}
-          </div>
-
-          {selectedNotifIds.length > 0 && (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button
-                type="button"
-                className="educator-secondary-btn sm"
-                onClick={handleMarkSelectedRead}
-              >
-                Mark Selected as Read
-              </button>
-              <button
-                type="button"
-                className="educator-secondary-btn sm"
-                style={{ color: '#DC2626', borderColor: '#FECACA' }}
-                onClick={handleDeleteSelected}
-              >
-                Delete Selected ({selectedNotifIds.length})
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Notifications List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {filteredNotifications.length > 0 ? (
           filteredNotifications.map((notif) => {
-            const isSelected = selectedNotifIds.includes(notif.id);
-
             return (
               <div
                 key={notif.id}
@@ -421,9 +279,7 @@ export const EducatorNotificationsView = ({
                     : notif.unread
                     ? '4px solid #10B981'
                     : '1px solid #E2E8F0',
-                  backgroundColor: isSelected
-                    ? '#F0FDF4'
-                    : notif.unread
+                  backgroundColor: notif.unread
                     ? '#FFFFFF'
                     : '#FAFAFC',
                   display: 'flex',
@@ -434,17 +290,6 @@ export const EducatorNotificationsView = ({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', flex: 1 }}>
-                  {/* Checkbox for selecting notification */}
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => handleToggleNotification(notif.id)}
-                    className="educator-custom-checkbox"
-                    style={{ marginTop: '10px' }}
-                    title="Select notification"
-                    aria-label={`Select notification ${notif.title}`}
-                  />
-
                   <div
                     style={{
                       width: '40px',
@@ -528,13 +373,15 @@ export const EducatorNotificationsView = ({
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="educator-secondary-btn sm"
-                    onClick={() => handleActionClick(notif)}
-                  >
-                    {notif.category === 'sent' ? 'View Cohort' : 'View Details'}
-                  </button>
+                  {notif.category !== 'sent' && (
+                    <button
+                      type="button"
+                      className="educator-secondary-btn sm"
+                      onClick={() => handleActionClick(notif)}
+                    >
+                      View Details
+                    </button>
+                  )}
                   {notif.unread && (
                     <button
                       type="button"
@@ -544,14 +391,6 @@ export const EducatorNotificationsView = ({
                       Mark Read
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="educator-icon-btn danger"
-                    onClick={() => handleDismiss(notif.id)}
-                    title="Dismiss notification"
-                  >
-                    <TrashIcon size={14} color="#DC2626" />
-                  </button>
                 </div>
               </div>
             );

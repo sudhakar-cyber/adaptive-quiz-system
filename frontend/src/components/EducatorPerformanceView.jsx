@@ -9,6 +9,106 @@ import {
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 
+// Helper to build list of all subjects with student mastery info
+const getAvailableSubjects = (targetStudent, allStudents = []) => {
+  const map = new Map();
+
+  // Core canonical subjects
+  const core = [
+    { name: 'Programming', categoryNote: 'Python, Modern JavaScript & Code Syntax' },
+    { name: 'Data Structures & Algorithms', categoryNote: 'Stacks, Trees, Graphs & Complexity' },
+    { name: 'Cyber Security', categoryNote: 'OWASP, Network Security & Defense' },
+    { name: 'Mathematics', categoryNote: 'Discrete Math, Logic & Combinatorics' }
+  ];
+
+  core.forEach((c) => {
+    map.set(c.name.toLowerCase(), {
+      name: c.name,
+      categoryNote: c.categoryNote,
+      score: null
+    });
+  });
+
+  // Include categories from published quizzes
+  try {
+    const published = sharedDatabase.getPublishedQuizzes ? sharedDatabase.getPublishedQuizzes() : [];
+    published.forEach((q) => {
+      if (q && q.category) {
+        const cat = q.category.trim();
+        let normalized = cat;
+        if (cat.toLowerCase() === 'dsa') normalized = 'Data Structures & Algorithms';
+        if (cat.toLowerCase() === 'python' || cat.toLowerCase() === 'javascript') normalized = 'Programming';
+        if (cat.toLowerCase() === 'web security') normalized = 'Cyber Security';
+
+        const key = normalized.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, {
+            name: normalized,
+            categoryNote: q.title || 'Curriculum Quiz Module',
+            score: null
+          });
+        }
+      }
+    });
+  } catch (err) {
+    console.warn(err);
+  }
+
+  // If a specific student is target, attach their mastery score
+  if (targetStudent && targetStudent.id !== 'all') {
+    if (Array.isArray(targetStudent.subjectMastery)) {
+      targetStudent.subjectMastery.forEach((item) => {
+        if (!item || !item.subject) return;
+        const sName = item.subject.trim();
+        const lower = sName.toLowerCase();
+
+        let matchedKey = null;
+        for (const key of map.keys()) {
+          if (
+            key === lower ||
+            (key.includes('program') && (lower.includes('python') || lower.includes('program') || lower.includes('code'))) ||
+            (key.includes('data structure') && (lower.includes('data structure') || lower.includes('dsa') || lower.includes('algorithm'))) ||
+            (key.includes('security') && (lower.includes('security') || lower.includes('cyber'))) ||
+            (key.includes('math') && lower.includes('math'))
+          ) {
+            matchedKey = key;
+            break;
+          }
+        }
+
+        if (matchedKey) {
+          const prev = map.get(matchedKey);
+          map.set(matchedKey, {
+            ...prev,
+            score: item.score !== undefined ? item.score : 0
+          });
+        } else {
+          map.set(lower, {
+            name: sName,
+            categoryNote: 'Student Registered Subject',
+            score: item.score !== undefined ? item.score : 0
+          });
+        }
+      });
+    }
+
+    if (Array.isArray(targetStudent.recentSubmissions)) {
+      targetStudent.recentSubmissions.forEach((sub) => {
+        const cat = sub.category || '';
+        if (cat && !map.has(cat.toLowerCase())) {
+          map.set(cat.toLowerCase(), {
+            name: cat,
+            categoryNote: sub.title || 'Attempted Assessment',
+            score: sub.score || null
+          });
+        }
+      });
+    }
+  }
+
+  return Array.from(map.values());
+};
+
 export const EducatorPerformanceView = ({
   students = [],
   showToast,
@@ -26,6 +126,7 @@ export const EducatorPerformanceView = ({
   const [openAddModal, setOpenAddModal] = useState(false);
   const [studentToRemove, setStudentToRemove] = useState(null);
   const [studentToReset, setStudentToReset] = useState(null);
+  const [selectedSubjectsToReset, setSelectedSubjectsToReset] = useState([]);
   const [newStudentForm, setNewStudentForm] = useState({
     name: '',
     email: '',
@@ -490,30 +591,134 @@ export const EducatorPerformanceView = ({
     setStudentToRemove(null);
   };
 
-  const handleConfirmReset = () => {
-    if (studentToReset) {
-      if (onResetStudent) {
-        onResetStudent(studentToReset.id);
+  // Available subjects for the reset modal
+  const availableSubjectsToReset = React.useMemo(() => {
+    if (!studentToReset) return [];
+    return getAvailableSubjects(studentToReset, students);
+  }, [studentToReset, students]);
+
+  // Open the reset modal and select all subjects by default
+  const handleOpenResetModal = (studentObj = null) => {
+    const target =
+      studentObj ||
+      (students.length > 0 ? students[0] : { id: 'all', name: 'All Enrolled Students (Cohort)' });
+    const available = getAvailableSubjects(target, students);
+    setStudentToReset(target);
+    setSelectedSubjectsToReset(available.map((s) => s.name));
+  };
+
+  const isAllSubjectsChecked =
+    availableSubjectsToReset.length > 0 &&
+    selectedSubjectsToReset.length === availableSubjectsToReset.length;
+
+  const handleToggleAllSubjects = () => {
+    if (isAllSubjectsChecked) {
+      setSelectedSubjectsToReset([]);
+    } else {
+      setSelectedSubjectsToReset(availableSubjectsToReset.map((s) => s.name));
+    }
+  };
+
+  const handleToggleSubject = (subName) => {
+    setSelectedSubjectsToReset((prev) => {
+      if (prev.includes(subName)) {
+        return prev.filter((s) => s !== subName);
       } else {
-        sharedDatabase.resetStudent(studentToReset.id);
+        return [...prev, subName];
       }
-      if (selectedStudent && selectedStudent.id === studentToReset.id) {
-        setSelectedStudent((prev) => ({
-          ...prev,
-          quizzesCompleted: 0,
-          avgScore: 0,
-          highestScore: 0,
-          status: 'On Track',
-          statusVariant: 'info',
-          lastActive: 'Reset just now',
-          recentSubmissions: [],
-          subjectMastery: (prev.subjectMastery || []).map((m) => ({ ...m, score: 0 }))
-        }));
+    });
+  };
+
+  const handleConfirmReset = () => {
+    if (!studentToReset || selectedSubjectsToReset.length === 0) return;
+    const isCohort = studentToReset.id === 'all';
+    const isAll = selectedSubjectsToReset.length === availableSubjectsToReset.length;
+    const subjectsArg = isAll ? 'all' : selectedSubjectsToReset;
+
+    if (isCohort) {
+      if (typeof sharedDatabase.resetAllStudents === 'function') {
+        sharedDatabase.resetAllStudents(subjectsArg);
+      }
+      if (onResetStudent) {
+        onResetStudent('all', subjectsArg);
       }
       if (showToast) {
-        showToast(`Performance progress for ${studentToReset.name} has been reset.`);
+        showToast(
+          isAll
+            ? 'All performance records for the cohort have been reset for all subjects.'
+            : `Cohort performance records reset for ${selectedSubjectsToReset.length} subject(s).`
+        );
+      }
+    } else {
+      if (onResetStudent) {
+        onResetStudent(studentToReset.id, subjectsArg);
+      } else {
+        sharedDatabase.resetStudent(studentToReset.id, subjectsArg);
+      }
+
+      if (selectedStudent && selectedStudent.id === studentToReset.id) {
+        if (isAll) {
+          setSelectedStudent((prev) => ({
+            ...prev,
+            quizzesCompleted: 0,
+            avgScore: 0,
+            highestScore: 0,
+            status: 'On Track',
+            statusVariant: 'info',
+            lastActive: 'Reset just now',
+            recentSubmissions: [],
+            subjectMastery: (prev.subjectMastery || []).map((m) => ({ ...m, score: 0 }))
+          }));
+        } else {
+          setSelectedStudent((prev) => {
+            const matchesReset = (s) => {
+              if (!s) return false;
+              const low = s.toLowerCase();
+              return selectedSubjectsToReset.some((r) => {
+                const rlow = r.toLowerCase();
+                return rlow === low || rlow.includes(low) || low.includes(rlow);
+              });
+            };
+
+            const updatedMastery = (prev.subjectMastery || []).map((m) => {
+              if (matchesReset(m.subject)) {
+                return { ...m, score: 0 };
+              }
+              return m;
+            });
+
+            const remainingSubmissions = (prev.recentSubmissions || []).filter((sub) => {
+              const cat = sub.category || sub.title || '';
+              return !matchesReset(cat);
+            });
+
+            const scores = remainingSubmissions.map((s) => s.score || 0);
+            const count = remainingSubmissions.length;
+            const avg = count > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / count) : 0;
+
+            return {
+              ...prev,
+              quizzesCompleted: count,
+              avgScore: avg,
+              highestScore: count > 0 ? Math.max(...scores) : 0,
+              status: avg >= 85 ? 'Top Performer' : avg >= 70 ? 'On Track' : avg > 0 ? 'Needs Support' : 'On Track',
+              recentSubmissions: remainingSubmissions,
+              subjectMastery: updatedMastery,
+              lastActive: 'Reset just now'
+            };
+          });
+        }
+      }
+
+      if (showToast) {
+        showToast(
+          isAll
+            ? `Performance records for ${studentToReset.name} have been reset for all subjects.`
+            : `Performance records for ${studentToReset.name} reset for ${selectedSubjectsToReset.length} subject(s).`
+        );
       }
     }
+
     setStudentToReset(null);
   };
 
@@ -556,6 +761,19 @@ export const EducatorPerformanceView = ({
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="educator-reset-btn"
+            onClick={() => handleOpenResetModal(null)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            title="Reset Student Performance by Subjects"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            <span>Reset Student Performance</span>
+          </button>
           <button
             type="button"
             className="educator-secondary-btn"
@@ -844,7 +1062,7 @@ export const EducatorPerformanceView = ({
                         <button
                           type="button"
                           className="educator-reset-btn sm"
-                          onClick={() => setStudentToReset(student)}
+                          onClick={() => handleOpenResetModal(student)}
                           title={`Reset ${student.name}'s performance records`}
                         >
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -936,7 +1154,7 @@ export const EducatorPerformanceView = ({
                 <button
                   type="button"
                   className="educator-reset-btn sm"
-                  onClick={() => setStudentToReset(selectedStudent)}
+                  onClick={() => handleOpenResetModal(selectedStudent)}
                   title="Reset Student Performance"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1009,6 +1227,7 @@ export const EducatorPerformanceView = ({
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {selectedStudent.recentSubmissions &&
+                selectedStudent.recentSubmissions.length > 0 ? (
                   selectedStudent.recentSubmissions.map((sub, idx) => (
                     <div
                       key={idx}
@@ -1029,7 +1248,22 @@ export const EducatorPerformanceView = ({
                       </div>
                       <div style={{ fontWeight: 700, color: '#0F172A' }}>{sub.score}</div>
                     </div>
-                  ))}
+                  ))
+                ) : (
+                  <div
+                    style={{
+                      padding: '12px',
+                      background: '#F8FAFC',
+                      borderRadius: '8px',
+                      border: '1px dashed #CBD5E1',
+                      fontSize: '0.80rem',
+                      color: '#94A3B8',
+                      textAlign: 'center'
+                    }}
+                  >
+                    No recent quiz attempts recorded. Performance records are reset.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1254,18 +1488,43 @@ export const EducatorPerformanceView = ({
         </div>
       )}
 
-      {/* MODAL: Confirm Reset Performance Modal */}
+      {/* MODAL: Confirm Reset Performance Modal with All Subjects Checkbox */}
       {studentToReset && (
         <div className="educator-modal-overlay" onClick={() => setStudentToReset(null)}>
           <div
-            className="educator-modal-box"
-            style={{ maxWidth: '440px' }}
+            className="educator-reset-modal-box"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="educator-modal-header">
-              <h3 className="educator-card-title" style={{ margin: 0, color: '#EA580C' }}>
-                Reset Student Performance?
-              </h3>
+            {/* Modal Header */}
+            <div className="educator-modal-header" style={{ marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    backgroundColor: '#FFF7ED',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#EA580C',
+                    flexShrink: 0
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="educator-card-title" style={{ margin: 0, color: '#0F172A', fontSize: '1.08rem' }}>
+                    Reset Student Performance
+                  </h3>
+                  <span style={{ fontSize: '0.78rem', color: '#64748B' }}>
+                    Select subjects to reset quiz progress, mastery scores, and unlock retakes
+                  </span>
+                </div>
+              </div>
               <button
                 type="button"
                 className="educator-modal-close-btn"
@@ -1274,11 +1533,164 @@ export const EducatorPerformanceView = ({
                 ✕
               </button>
             </div>
-            <p style={{ fontSize: '0.86rem', color: '#475569', lineHeight: 1.5, margin: '14px 0' }}>
-              Are you sure you want to reset all quiz progress and performance records for <strong>{studentToReset.name}</strong> ({studentToReset.email})?
-              Their average score, completed quizzes, and recent submissions will be reset to initial state.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+
+            <div className="educator-reset-modal-content">
+              {/* Target Student Input Field (Not clickable & No options) */}
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>
+                  Target Student
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={
+                    studentToReset
+                      ? `${studentToReset.name}${
+                          studentToReset.email
+                            ? ` (${studentToReset.email})`
+                            : studentToReset.studentId
+                            ? ` (${studentToReset.studentId})`
+                            : ''
+                        }`
+                      : ''
+                  }
+                  className="educator-select-input"
+                  style={{
+                    width: '100%',
+                    fontSize: '0.86rem',
+                    padding: '9px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: '#F1F5F9',
+                    color: '#334155',
+                    fontWeight: 600,
+                    border: '1px solid #CBD5E1',
+                    cursor: 'not-allowed',
+                    pointerEvents: 'none',
+                    userSelect: 'none'
+                  }}
+                />
+              </div>
+
+              {/* Master Checkbox: All Subjects */}
+              <div
+                className="educator-reset-all-bar"
+                onClick={handleToggleAllSubjects}
+                title="Toggle all subjects"
+              >
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none', margin: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    className="educator-custom-checkbox"
+                    checked={isAllSubjectsChecked}
+                    onChange={handleToggleAllSubjects}
+                  />
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0F172A' }}>
+                      All Subjects
+                    </span>
+                    <div style={{ fontSize: '0.74rem', color: '#64748B', fontWeight: 500 }}>
+                      Select all curriculum subjects for reset
+                    </div>
+                  </div>
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      padding: '3px 9px',
+                      borderRadius: '12px',
+                      backgroundColor: isAllSubjectsChecked ? '#EA580C' : '#E2E8F0',
+                      color: isAllSubjectsChecked ? '#FFFFFF' : '#475569'
+                    }}
+                  >
+                    {selectedSubjectsToReset.length}/{availableSubjectsToReset.length} Selected
+                  </span>
+                </div>
+              </div>
+
+              {/* Subjects Checkbox List Header & Quick Actions */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px', marginBottom: '-4px' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Available Subjects ({availableSubjectsToReset.length})
+                </span>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    style={{ background: 'none', border: 'none', color: '#2563EB', fontSize: '0.76rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                    onClick={() => setSelectedSubjectsToReset(availableSubjectsToReset.map((s) => s.name))}
+                  >
+                    Select All
+                  </button>
+                  <span style={{ color: '#CBD5E1', fontSize: '0.76rem' }}>•</span>
+                  <button
+                    type="button"
+                    style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.76rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                    onClick={() => setSelectedSubjectsToReset([])}
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              {/* Individual Subject Checkboxes Grid */}
+              <div className="educator-reset-subjects-grid">
+                {availableSubjectsToReset.map((sub) => {
+                  const isChecked = selectedSubjectsToReset.includes(sub.name);
+                  return (
+                    <div
+                      key={sub.name}
+                      className={`educator-reset-subject-card ${isChecked ? 'selected' : ''}`}
+                      onClick={() => handleToggleSubject(sub.name)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <input
+                          type="checkbox"
+                          className="educator-custom-checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            handleToggleSubject(sub.name);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.86rem', color: '#1E293B' }}>
+                            {sub.name}
+                          </div>
+                          <div style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                            {sub.categoryNote || 'Academic Curriculum Module'}
+                          </div>
+                        </div>
+                      </div>
+                      {sub.score !== undefined && sub.score !== null && (
+                        <span
+                          style={{
+                            fontSize: '0.76rem',
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: '12px',
+                            backgroundColor:
+                              sub.score >= 85 ? '#ECFDF5' : sub.score >= 70 ? '#EFF6FF' : sub.score > 0 ? '#FEF2F2' : '#F1F5F9',
+                            color:
+                              sub.score >= 85 ? '#065F46' : sub.score >= 70 ? '#1D4ED8' : sub.score > 0 ? '#DC2626' : '#64748B'
+                          }}
+                        >
+                          {sub.score > 0 ? `${sub.score}%` : '0%'}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #E2E8F0' }}>
               <button
                 type="button"
                 className="educator-secondary-btn"
@@ -1289,9 +1701,24 @@ export const EducatorPerformanceView = ({
               <button
                 type="button"
                 className="educator-reset-confirm-btn"
+                disabled={selectedSubjectsToReset.length === 0}
+                style={{
+                  opacity: selectedSubjectsToReset.length === 0 ? 0.5 : 1,
+                  cursor: selectedSubjectsToReset.length === 0 ? 'not-allowed' : 'pointer'
+                }}
                 onClick={handleConfirmReset}
               >
-                Confirm Reset
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+                <span>
+                  {selectedSubjectsToReset.length === 0
+                    ? 'Select Subjects'
+                    : selectedSubjectsToReset.length === availableSubjectsToReset.length
+                    ? 'Confirm Reset All'
+                    : `Confirm Reset (${selectedSubjectsToReset.length} Subject${selectedSubjectsToReset.length === 1 ? '' : 's'})`}
+                </span>
               </button>
             </div>
           </div>

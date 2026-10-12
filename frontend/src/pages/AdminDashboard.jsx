@@ -97,23 +97,64 @@ export const AdminDashboard = ({ onLogout }) => {
     }
   });
 
-  const currentUser = (() => {
+  const [adminProfile, setAdminProfile] = useState(() => {
     try {
-      return authService.getCurrentUser() || {
-        name: 'Admin',
+      const saved = localStorage.getItem('learnsmart_admin_profile');
+      if (saved) return JSON.parse(saved);
+      const authAdmin = authService.getCurrentUser();
+      return {
+        name: authAdmin?.name || 'Admin',
+        fullName: authAdmin?.fullName || authAdmin?.name || 'Alex Vance',
+        email: authAdmin?.email || 'admin@learnsmart.edu',
         role: 'Administrator',
-        email: 'admin@learnsmart.edu',
-        title: 'Administrator'
+        title: authAdmin?.title || 'Senior Platform Administrator',
+        department: 'Platform Operations & Infrastructure',
+        phone: '+1 (555) 019-2834',
+        location: 'Tech Wing - Server Room 4B',
+        bio: 'Oversees the LearnSmart adaptive quiz platform, managing system configurations, educator permissions, student cohorts, and telemetry benchmarks.',
+        twoFactorEnabled: true,
+        accessLevel: 'Super Administrator (Tier 1)',
+        joinedDate: 'January 2024',
+        lastLogin: 'Just now',
+        avatarImage: localStorage.getItem('learnsmart_admin_avatar') || null
       };
     } catch {
       return {
         name: 'Admin',
-        role: 'Administrator',
+        fullName: 'Alex Vance',
         email: 'admin@learnsmart.edu',
-        title: 'Administrator'
+        role: 'Administrator',
+        title: 'Senior Platform Administrator',
+        department: 'Platform Operations & Infrastructure',
+        phone: '+1 (555) 019-2834',
+        location: 'Tech Wing - Server Room 4B',
+        bio: 'Oversees the LearnSmart adaptive quiz platform, managing system configurations, educator permissions, student cohorts, and telemetry benchmarks.',
+        twoFactorEnabled: true,
+        accessLevel: 'Super Administrator (Tier 1)',
+        joinedDate: 'January 2024',
+        lastLogin: 'Just now',
+        avatarImage: null
       };
     }
-  })();
+  });
+
+  const handleUpdateAdminProfile = (updatedProfile) => {
+    setAdminProfile(updatedProfile);
+    try {
+      localStorage.setItem('learnsmart_admin_profile', JSON.stringify(updatedProfile));
+      if (updatedProfile.avatarImage) {
+        localStorage.setItem('learnsmart_admin_avatar', updatedProfile.avatarImage);
+      } else {
+        localStorage.removeItem('learnsmart_admin_avatar');
+      }
+      authService.loginAdmin({
+        ...updatedProfile,
+        name: updatedProfile.fullName || updatedProfile.name || 'Admin'
+      });
+    } catch (e) {
+      console.warn(e);
+    }
+  };
 
   const refreshData = () => {
     try {
@@ -147,13 +188,21 @@ export const AdminDashboard = ({ onLogout }) => {
     }
 
     const handleLiveEvents = () => refreshData();
+    window.addEventListener('learnsmart_students_updated', handleLiveEvents);
+    window.addEventListener('learnsmart_admin_updated', handleLiveEvents);
     window.addEventListener('learnsmart_quizzes_updated', handleLiveEvents);
     window.addEventListener('learnsmart_submissions_updated', handleLiveEvents);
     window.addEventListener('storage', handleLiveEvents);
 
+    if (typeof sharedDatabase?.syncStudentsFromFirestore === 'function') {
+      sharedDatabase.syncStudentsFromFirestore(true).catch(() => {});
+    }
+
     return () => {
       if (unsubAdmin) unsubAdmin();
       if (unsubStudents) unsubStudents();
+      window.removeEventListener('learnsmart_students_updated', handleLiveEvents);
+      window.removeEventListener('learnsmart_admin_updated', handleLiveEvents);
       window.removeEventListener('learnsmart_quizzes_updated', handleLiveEvents);
       window.removeEventListener('learnsmart_submissions_updated', handleLiveEvents);
       window.removeEventListener('storage', handleLiveEvents);
@@ -169,13 +218,25 @@ export const AdminDashboard = ({ onLogout }) => {
   const handleDeleteUser = (userId, role) => {
     sharedDatabase.deleteUser(userId, role);
     refreshData();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('learnsmart_submissions_updated', {
+          detail: sharedDatabase.getSubmissions()
+        })
+      );
+      window.dispatchEvent(new Event('storage'));
+    }
     showToast('User removed from platform.');
   };
 
   const handleToggleQuizStatus = (quizId) => {
     if (quizId) {
-      sharedDatabase.toggleQuizStatus(quizId);
-      showToast('Quiz status updated.');
+      const updated = sharedDatabase.toggleQuizStatus(quizId);
+      if (updated) {
+        showToast(`Quiz "${updated.title}" status changed to ${updated.status}.`);
+      } else {
+        showToast('Quiz status updated.');
+      }
     }
     refreshData();
   };
@@ -183,9 +244,31 @@ export const AdminDashboard = ({ onLogout }) => {
   const handleDeleteQuiz = (quizId) => {
     if (quizId) {
       sharedDatabase.deleteQuiz(quizId);
-      showToast('Quiz removed.');
+      showToast('Quiz removed from curriculum.');
     }
     refreshData();
+  };
+
+  const handleUpdateQuizzes = (updatedQuizzes) => {
+    if (Array.isArray(updatedQuizzes)) {
+      setQuizzes(updatedQuizzes);
+      sharedDatabase.persistQuizzes(updatedQuizzes);
+      refreshData();
+    }
+  };
+
+  const handleSaveQuiz = (quizData, isEdit = false) => {
+    if (isEdit) {
+      const updated = sharedDatabase.updateQuiz(quizData.id, quizData);
+      refreshData();
+      showToast(`Quiz "${quizData.title}" updated successfully!`);
+      return updated;
+    } else {
+      const created = sharedDatabase.addQuiz(quizData);
+      refreshData();
+      showToast(`Quiz "${created.title}" published successfully!`);
+      return created;
+    }
   };
 
   const handleUserAdded = (newUser) => {
@@ -200,7 +283,7 @@ export const AdminDashboard = ({ onLogout }) => {
       sharedDatabase.registerStudent({
         name: newUser.name,
         email: newUser.email,
-        studentId: newUser.customId || `LS-2025-${Math.floor(Math.random() * 900) + 100}`,
+        studentId: newUser.customId || sharedDatabase.generateUniqueStudentId(),
         major: newUser.department || 'Computer Science'
       });
     }
@@ -331,7 +414,7 @@ export const AdminDashboard = ({ onLogout }) => {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         unreadCount={unreadNotifCount}
-        adminUser={currentUser}
+        adminUser={adminProfile}
       />
 
       <div className="ad-body">
@@ -414,6 +497,10 @@ export const AdminDashboard = ({ onLogout }) => {
               quizzes={quizzes}
               onToggleStatus={handleToggleQuizStatus}
               onDeleteQuiz={handleDeleteQuiz}
+              onUpdateQuizzes={handleUpdateQuizzes}
+              onSaveQuiz={handleSaveQuiz}
+              showToast={showToast}
+              externalSearch={searchQuery}
             />
           )}
 
@@ -448,13 +535,17 @@ export const AdminDashboard = ({ onLogout }) => {
               notifications={notifications}
               onMarkRead={handleMarkRead}
               onMarkAllRead={handleMarkAllRead}
+              showToast={showToast}
+              onRefresh={refreshData}
             />
           )}
 
           {/* Profile Tab */}
           {activeTab === 'profile' && (
             <AdminProfileView
-              adminUser={currentUser}
+              adminUser={adminProfile}
+              onUpdateProfile={handleUpdateAdminProfile}
+              showToast={showToast}
             />
           )}
         </main>

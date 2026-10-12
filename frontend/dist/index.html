@@ -15,8 +15,19 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="/assets/index-BkyRFFqU.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Ccsv_OpB.css">
+    <script>
+      (function() {
+        try {
+          var t = localStorage.getItem('learnsmart_theme');
+          if (t === 'dark' || t === 'light') {
+            document.documentElement.setAttribute('data-theme', t);
+            if (t === 'dark') document.documentElement.classList.add('dark-theme');
+          }
+        } catch(e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-CrRmkEcr.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DiGZQFp5.css">
   </head>
   <body>
     <div id="root"></div>

@@ -431,10 +431,10 @@ export const ProgressView = ({
             <div className="weekly-goal-box">
               <div className="goal-text-row">
                 <span className="goal-title">Weekly Goal: 4 Quizzes</span>
-                <span className="goal-stat">{isReset ? '0 of 4 Done' : '3 of 4 Done'}</span>
+                <span className="goal-stat">{isReset ? '0 of 4 Done' : `${Math.min(4, quizzesTaken)} of 4 Done`}</span>
               </div>
               <div className="goal-progress-track">
-                <div className="goal-progress-fill" style={{ width: isReset ? '0%' : '75%' }} />
+                <div className="goal-progress-fill" style={{ width: isReset ? '0%' : `${Math.min(100, Math.round((quizzesTaken / 4) * 100))}%` }} />
               </div>
             </div>
           </div>
@@ -444,7 +444,7 @@ export const ProgressView = ({
       <div className="progress-section-card history-card">
         <div className="section-card-header">
           <h3 className="section-card-title">Recent Quiz Activity History</h3>
-          <span className="section-badge-info">Last 4 Quizzes</span>
+          <span className="section-badge-info">{quizHistory.length > 0 ? `${quizHistory.length} Quizzes` : 'No Activity'}</span>
         </div>
 
         <div className="history-table-wrapper">

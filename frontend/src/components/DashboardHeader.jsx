@@ -5,7 +5,8 @@ import {
   SearchIcon,
   ChevronDownIcon,
   UserIcon,
-  LogoutIcon
+  LogoutIcon,
+  SettingsIcon
 } from './Icons';
 
 export const DashboardHeader = ({
@@ -15,6 +16,7 @@ export const DashboardHeader = ({
   onLogout,
   onOpenNotifications,
   onOpenProfile,
+  onOpenSettings,
   educatorName = 'Dr. Sarah Jenkins',
   educatorEmail = 'educator@learnsmart.com',
   educatorRole = 'Educator',
@@ -108,7 +110,7 @@ export const DashboardHeader = ({
             aria-label="Notifications"
             title="Notifications"
           >
-            <BellIcon size={20} color="#1E293B" />
+            <BellIcon size={20} color="currentColor" />
             {notificationCount > 0 && (
               <span className="educator-notif-badge">{notificationCount}</span>
             )}
@@ -116,7 +118,7 @@ export const DashboardHeader = ({
 
           {showNotifMenu && (
             <div className="educator-dropdown-menu" style={{ width: '300px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', fontWeight: 700, fontSize: '0.88rem', color: '#0F172A', borderBottom: '1px solid #F1F5F9' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', fontWeight: 700, fontSize: '0.88rem', color: 'inherit', borderBottom: '1px solid var(--border-light, #F1F5F9)' }}>
                 <span>Notifications ({notificationCount})</span>
                 {onOpenNotifications && (
                   <button
@@ -138,18 +140,17 @@ export const DashboardHeader = ({
                       key={notif.id}
                       style={{
                         padding: '10px 12px',
-                        borderBottom: '1px solid #F8FAFC',
+                        borderBottom: '1px solid var(--border-light, #F8FAFC)',
                         fontSize: '0.82rem',
-                        cursor: 'pointer',
-                        backgroundColor: notif.unread ? '#F0FDF4' : 'transparent'
+                        cursor: 'pointer'
                       }}
                       onClick={() => {
                         setShowNotifMenu(false);
                         if (onOpenNotifications) onOpenNotifications();
                       }}
                     >
-                      <p style={{ margin: 0, fontWeight: 600, color: '#1E293B' }}>{notif.title}</p>
-                      <span style={{ fontSize: '0.74rem', color: '#64748B' }}>{notif.timestamp}</span>
+                      <p style={{ margin: 0, fontWeight: 600, color: 'inherit' }}>{notif.title}</p>
+                      <span style={{ fontSize: '0.74rem', color: '#94A3B8' }}>{notif.timestamp}</span>
                     </div>
                   ))
                 ) : (
@@ -201,14 +202,14 @@ export const DashboardHeader = ({
           {showProfileMenu && (
             <div className="educator-dropdown-menu">
               <div
-                style={{ padding: '8px 12px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer' }}
+                style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-light, #F1F5F9)', cursor: 'pointer' }}
                 onClick={() => {
                   setShowProfileMenu(false);
                   if (onOpenProfile) onOpenProfile();
                 }}
               >
-                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0F172A' }}>{educatorName}</div>
-                <div style={{ fontSize: '0.76rem', color: '#64748B' }}>{educatorEmail}</div>
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'inherit' }}>{educatorName}</div>
+                <div style={{ fontSize: '0.76rem', color: '#94A3B8' }}>{educatorEmail}</div>
               </div>
               <button
                 type="button"
@@ -220,6 +221,17 @@ export const DashboardHeader = ({
               >
                 <UserIcon size={16} color="#64748B" />
                 <span>My Profile</span>
+              </button>
+              <button
+                type="button"
+                className="educator-dropdown-item"
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  if (onOpenSettings) onOpenSettings();
+                }}
+              >
+                <SettingsIcon size={16} color="#64748B" />
+                <span>Settings</span>
               </button>
               <div className="educator-dropdown-divider" />
               <button

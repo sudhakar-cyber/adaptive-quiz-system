@@ -452,6 +452,7 @@ export const phoneAuthService = {
         phone: verifiedPhone,
         country,
         role: 'student',
+        password: registrationData.password || '',
         authProvider: 'phone'
       };
 

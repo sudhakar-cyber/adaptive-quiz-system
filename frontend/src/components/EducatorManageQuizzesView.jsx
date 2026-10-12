@@ -240,6 +240,8 @@ export const EducatorManageQuizzesView = ({
         diffBg: formData.difficulty === 'Easy' ? '#D1FAE5' : formData.difficulty === 'Medium' ? '#FFEDD5' : '#FEE2E2',
         diffColor: formData.difficulty === 'Easy' ? '#047857' : formData.difficulty === 'Medium' ? '#C2410C' : '#B91C1C',
         status: formData.status,
+        isRecommended: formData.status === 'Active',
+        recommendationReason: 'Newly Published Assessment • Assigned by Educator',
         questionsCount: formData.questions.length,
         duration: formData.duration,
         submissionsCount: 0,

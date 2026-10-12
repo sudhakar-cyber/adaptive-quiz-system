@@ -8,8 +8,10 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminRoute, EducatorRoute, StudentRoute, PublicAuthRoute } from './routes/ProtectedRoute';
 import { authService } from './services/authService';
 import { auth, onAuthStateChanged } from './config/firebase';
+import { useTheme } from './components/ThemeToggle';
 
 function AppRoutes() {
+  useTheme();
   const navigate = useNavigate();
   const [studentUser, setStudentUser] = useState(() => {
     try {
@@ -34,6 +36,11 @@ function AppRoutes() {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user?.displayName && user.displayName.trim()) {
         setStudentUser(user.displayName.trim());
+      } else if (!user) {
+        const storedRole = localStorage.getItem('learnsmart_role');
+        if (!storedRole) {
+          setStudentUser(null);
+        }
       }
     });
     window.addEventListener('storage', handleStorageChange);
