@@ -20,9 +20,10 @@ import {
   ChevronDownIcon,
   CheckCircleIcon,
   FlameIcon,
-  BotIcon
+  BotIcon,
+  SettingsIcon
 } from './Icons';
-import { QUIZ_CATALOG, INITIAL_NOTIFICATIONS, INITIAL_HISTORY } from '../data/quizData';
+import { INITIAL_NOTIFICATIONS, INITIAL_HISTORY } from '../data/quizData';
 import { QuizModal } from './QuizModal';
 import { TakeQuizView } from './TakeQuizView';
 import { AIChatBotView } from './AIChatBotView';
@@ -30,6 +31,7 @@ import { ProgressView } from './ProgressView';
 import { LearningPathView } from './LearningPathView';
 import { NotificationsView, NotificationsDropdown } from './NotificationsView';
 import { ProfileView, ProfileDropdownMenu } from './ProfileView';
+import { StudentSettingsView } from './StudentSettingsView';
 import { sharedDatabase } from '../services/sharedDatabase';
 import { auth, onAuthStateChanged } from '../config/firebase';
 
@@ -44,6 +46,28 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [startEditProfile, setStartEditProfile] = useState(false);
+
+  // Dynamic quizzes catalog synchronized with Educator & Admin published quizzes
+  const [quizzesList, setQuizzesList] = useState(() => sharedDatabase.getPublishedQuizzes());
+
+  useEffect(() => {
+    const handleQuizzesUpdate = () => {
+      setQuizzesList(sharedDatabase.getPublishedQuizzes());
+    };
+
+    window.addEventListener('learnsmart_quizzes_updated', handleQuizzesUpdate);
+    const handleStorageChange = (e) => {
+      if (!e.key || e.key === 'learnsmart_educator_quizzes') {
+        handleQuizzesUpdate();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('learnsmart_quizzes_updated', handleQuizzesUpdate);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   // Authenticated Firebase user state
   const [firebaseUser, setFirebaseUser] = useState(() => auth.currentUser);
@@ -107,12 +131,29 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     }
   });
   const [totalQuizzesTaken, setTotalQuizzesTaken] = useState(() => {
-    return currentStudent?.quizzesCompleted !== undefined ? currentStudent.quizzesCompleted : 0;
+    if (currentStudent?.quizzesCompleted !== undefined) return currentStudent.quizzesCompleted;
+    try {
+      const savedHistory = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || 'null');
+      if (Array.isArray(savedHistory)) return savedHistory.length;
+    } catch {}
+    return currentStudent?.quizzesCompleted === 0 ? 0 : 4;
   });
   const [averageScore, setAverageScore] = useState(() => {
-    return currentStudent?.avgScore !== undefined ? currentStudent.avgScore : 85.4;
+    if (currentStudent?.avgScore !== undefined) return currentStudent.avgScore;
+    try {
+      const savedHistory = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || 'null');
+      if (Array.isArray(savedHistory) && savedHistory.length > 0) {
+        const sum = savedHistory.reduce((acc, q) => acc + (Number(q.score) || 0), 0);
+        return Math.round((sum / savedHistory.length) * 10) / 10;
+      }
+    } catch {}
+    return currentStudent?.quizzesCompleted === 0 ? 0 : 81.0;
   });
   const [streakDays, setStreakDays] = useState(() => {
+    try {
+      const stored = localStorage.getItem('learnsmart_student_streak');
+      if (stored !== null) return parseInt(stored, 10) || 0;
+    } catch {}
     return currentStudent?.quizzesCompleted === 0 ? 0 : 7;
   });
   const [notifications, setNotifications] = useState(() => {
@@ -146,27 +187,16 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     }
   }, [username]);
 
-  // Synchronize student data in real-time when educator resets or modifies student
+  // Synchronize student data in real-time when student metrics change
   useEffect(() => {
     const handleStudentSync = () => {
       const profile = sharedDatabase.getStudentByUsername(currentUsername || username);
       if (profile) {
-        setTotalQuizzesTaken(profile.quizzesCompleted ?? 0);
-        setAverageScore(profile.avgScore ?? 0);
-
-        if (profile.quizzesCompleted === 0) {
-          setCompletedQuizzes([]);
-          setQuizHistory([]);
-          setStreakDays(0);
-          setActiveQuizModal(null);
-          try {
-            localStorage.removeItem('learnsmart_completed_quizzes');
-            localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
-            localStorage.removeItem('learnsmart_active_quiz_attempt');
-            localStorage.removeItem('learnsmart_student_quiz_history');
-          } catch (e) {
-            console.warn(e);
-          }
+        if (typeof profile.quizzesCompleted === 'number' && profile.quizzesCompleted > 0) {
+          setTotalQuizzesTaken(profile.quizzesCompleted);
+        }
+        if (typeof profile.avgScore === 'number' && profile.avgScore > 0) {
+          setAverageScore(profile.avgScore);
         }
       }
     };
@@ -372,44 +402,229 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
 
-  const isZeroQuizzes = totalQuizzesTaken === 0;
+  const isZeroQuizzes = totalQuizzesTaken === 0 && quizHistory.length === 0;
 
-  const weekPerformanceData = isZeroQuizzes
-    ? [
-        { day: 'Mon', score: 0, avg: 0 },
-        { day: 'Tue', score: 0, avg: 0 },
-        { day: 'Wed', score: 0, avg: 0 },
-        { day: 'Thu', score: 0, avg: 0 },
-        { day: 'Fri', score: 0, avg: 0 },
-        { day: 'Sat', score: 0, avg: 0 },
-        { day: 'Sun', score: 0, avg: 0 }
-      ]
-    : [
-        { day: 'Mon', score: 32, avg: 22 },
-        { day: 'Tue', score: 45, avg: 28 },
-        { day: 'Wed', score: 54, avg: 35 },
-        { day: 'Thu', score: 58, avg: 42 },
-        { day: 'Fri', score: 68, avg: 50 },
-        { day: 'Sat', score: 76, avg: 58 },
-        { day: 'Sun', score: 86, avg: 64 }
-      ];
+  // Real-time cohort benchmark average
+  const cohortAverage = React.useMemo(() => {
+    try {
+      const students = sharedDatabase.getStudents();
+      if (students && students.length > 0) {
+        const valid = students.filter((s) => (s.avgScore || 0) > 0);
+        if (valid.length > 0) {
+          const sum = valid.reduce((acc, s) => acc + (s.avgScore || 0), 0);
+          return Math.round(sum / valid.length);
+        }
+      }
+    } catch {}
+    return 70;
+  }, []);
 
-  const monthPerformanceData = isZeroQuizzes
-    ? [
-        { day: 'W1', score: 0, avg: 0 },
-        { day: 'W2', score: 0, avg: 0 },
-        { day: 'W3', score: 0, avg: 0 },
-        { day: 'W4', score: 0, avg: 0 }
-      ]
-    : [
-        { day: 'W1', score: 62, avg: 48 },
-        { day: 'W2', score: 71, avg: 55 },
-        { day: 'W3', score: 80, avg: 61 },
-        { day: 'W4', score: 88, avg: 68 }
-      ];
+  // Parse quiz attempt dates and scores robustly
+  const parseAttempt = React.useCallback((item, index = 0) => {
+    const score = typeof item.score === 'number' ? item.score : parseFloat(item.score) || 0;
+    let date = null;
+
+    if (item.timestamp) {
+      date = new Date(item.timestamp);
+    } else if (item.createdAt) {
+      date = new Date(item.createdAt);
+    } else if (item.date) {
+      const dStr = String(item.date).toLowerCase();
+      if (dStr.includes('today') || dStr.includes('just now')) {
+        date = new Date();
+      } else if (dStr.includes('yesterday')) {
+        const d = new Date();
+        d.setDate(d.getDate() - 1);
+        date = d;
+      } else {
+        const parsed = new Date(item.date);
+        if (!isNaN(parsed.getTime())) {
+          date = parsed;
+        }
+      }
+    }
+
+    if (!date || isNaN(date.getTime())) {
+      const d = new Date();
+      d.setDate(d.getDate() - index);
+      date = d;
+    }
+
+    return {
+      ...item,
+      score,
+      parsedDate: date
+    };
+  }, []);
+
+  // Dynamically tracked Week performance data (Mon to Sun)
+  const weekPerformanceData = React.useMemo(() => {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    if (isZeroQuizzes || quizHistory.length === 0) {
+      return days.map((day) => ({ day, score: 0, avg: 0 }));
+    }
+
+    const baseAvg = cohortAverage || 70;
+    const dayClassAvgs = [
+      Math.max(20, baseAvg - 6),
+      Math.max(20, baseAvg - 4),
+      Math.max(20, baseAvg - 2),
+      baseAvg,
+      Math.min(95, baseAvg + 1),
+      Math.min(95, baseAvg + 2),
+      Math.min(95, baseAvg + 3)
+    ];
+
+    const attempts = [...quizHistory]
+      .map((item, idx) => parseAttempt(item, idx))
+      .sort((a, b) => a.parsedDate.getTime() - b.parsedDate.getTime());
+
+    const attemptsByDay = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
+    attempts.forEach((att) => {
+      const dayOfWeek = (att.parsedDate.getDay() + 6) % 7; // 0=Mon, ..., 6=Sun
+      attemptsByDay[dayOfWeek].push(att.score);
+    });
+
+    const activeDaysCount = Object.values(attemptsByDay).filter((arr) => arr.length > 0).length;
+
+    if (activeDaysCount >= 3) {
+      let lastKnownScore = null;
+      const scores = [];
+      const firstActiveKey = Object.keys(attemptsByDay).find((k) => attemptsByDay[k].length > 0);
+      const initialScore =
+        firstActiveKey !== undefined
+          ? Math.round(
+              attemptsByDay[firstActiveKey].reduce((a, b) => a + b, 0) /
+                attemptsByDay[firstActiveKey].length
+            )
+          : attempts[0].score;
+
+      for (let i = 0; i < 7; i++) {
+        if (attemptsByDay[i].length > 0) {
+          const dayAvg = Math.round(
+            attemptsByDay[i].reduce((a, b) => a + b, 0) / attemptsByDay[i].length
+          );
+          lastKnownScore = dayAvg;
+          scores.push(dayAvg);
+        } else {
+          scores.push(lastKnownScore !== null ? lastKnownScore : initialScore);
+        }
+      }
+      return days.map((day, i) => ({ day, score: scores[i], avg: dayClassAvgs[i] }));
+    }
+
+    const allScores = attempts.map((a) => a.score);
+    if (allScores.length === 1) {
+      return days.map((day, i) => ({ day, score: allScores[0], avg: dayClassAvgs[i] }));
+    }
+
+    return days.map((day, i) => {
+      const idx = Math.min(allScores.length - 1, Math.round((i / 6) * (allScores.length - 1)));
+      return { day, score: allScores[idx], avg: dayClassAvgs[i] };
+    });
+  }, [isZeroQuizzes, quizHistory, cohortAverage, parseAttempt]);
+
+  // Dynamically tracked Month performance data (W1 to W4)
+  const monthPerformanceData = React.useMemo(() => {
+    const weeks = ['W1', 'W2', 'W3', 'W4'];
+    if (isZeroQuizzes || quizHistory.length === 0) {
+      return weeks.map((day) => ({ day, score: 0, avg: 0 }));
+    }
+
+    const baseAvg = cohortAverage || 70;
+    const weekClassAvgs = [
+      Math.max(20, baseAvg - 5),
+      Math.max(20, baseAvg - 2),
+      Math.min(95, baseAvg + 1),
+      Math.min(95, baseAvg + 3)
+    ];
+
+    const attempts = [...quizHistory]
+      .map((item, idx) => parseAttempt(item, idx))
+      .sort((a, b) => a.parsedDate.getTime() - b.parsedDate.getTime());
+
+    const allScores = attempts.map((a) => a.score);
+    if (allScores.length === 1) {
+      return weeks.map((w, i) => ({
+        day: w,
+        score: allScores[0],
+        avg: weekClassAvgs[i]
+      }));
+    }
+
+    const weekBuckets = { 0: [], 1: [], 2: [], 3: [] };
+    attempts.forEach((att) => {
+      const dayOfMonth = att.parsedDate.getDate();
+      const weekIdx = Math.min(3, Math.floor((dayOfMonth - 1) / 7));
+      weekBuckets[weekIdx].push(att.score);
+    });
+
+    const activeWeekCount = Object.values(weekBuckets).filter((arr) => arr.length > 0).length;
+
+    if (activeWeekCount >= 2) {
+      let lastKnown = null;
+      const firstActive = Object.keys(weekBuckets).find((k) => weekBuckets[k].length > 0);
+      const initialScore =
+        firstActive !== undefined
+          ? Math.round(
+              weekBuckets[firstActive].reduce((a, b) => a + b, 0) /
+                weekBuckets[firstActive].length
+            )
+          : allScores[0];
+
+      return weeks.map((w, i) => {
+        if (weekBuckets[i].length > 0) {
+          const wAvg = Math.round(
+            weekBuckets[i].reduce((a, b) => a + b, 0) / weekBuckets[i].length
+          );
+          lastKnown = wAvg;
+          return { day: w, score: wAvg, avg: weekClassAvgs[i] };
+        }
+        return {
+          day: w,
+          score: lastKnown !== null ? lastKnown : initialScore,
+          avg: weekClassAvgs[i]
+        };
+      });
+    }
+
+    return weeks.map((w, i) => {
+      const idx = Math.min(allScores.length - 1, Math.round((i / 3) * (allScores.length - 1)));
+      return {
+        day: w,
+        score: allScores[idx],
+        avg: weekClassAvgs[i]
+      };
+    });
+  }, [isZeroQuizzes, quizHistory, cohortAverage, parseAttempt]);
 
   const activePerformanceData =
     performanceTimeframe === 'week' ? weekPerformanceData : monthPerformanceData;
+
+  // Real-time Peak and Average score calculation for the selected timeframe & history
+  const performanceStats = React.useMemo(() => {
+    if (isZeroQuizzes || quizHistory.length === 0) {
+      return { peak: '0%', avg: '0%' };
+    }
+
+    const activeScores = activePerformanceData.map((d) => d.score).filter((s) => s > 0);
+    const allHistoryScores = quizHistory
+      .map((q) => (typeof q.score === 'number' ? q.score : parseFloat(q.score) || 0))
+      .filter((s) => s > 0);
+
+    const scoresToUse = activeScores.length > 0 ? activeScores : allHistoryScores;
+    if (scoresToUse.length === 0) {
+      return { peak: '0%', avg: '0%' };
+    }
+
+    const peak = Math.max(...scoresToUse);
+    const avg = Math.round(scoresToUse.reduce((a, b) => a + b, 0) / scoresToUse.length);
+
+    return {
+      peak: `${peak}%`,
+      avg: `${avg}%`
+    };
+  }, [isZeroQuizzes, quizHistory, activePerformanceData]);
 
   const SUBJECT_CONFIGS = [
     {
@@ -555,8 +770,8 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   });
 
   const recommendedQuizzesList = (() => {
-    const list = QUIZ_CATALOG.filter((q) => q.isRecommended);
-    const pool = list.length > 0 ? list : QUIZ_CATALOG;
+    const list = quizzesList.filter((q) => q.isRecommended);
+    const pool = list.length > 0 ? list : quizzesList;
     if (!searchQuery.trim()) return pool.slice(0, 3);
     const query = searchQuery.toLowerCase();
     return pool.filter((q) =>
@@ -582,20 +797,37 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       });
     }
 
-    setTotalQuizzesTaken((prev) => prev + 1);
+    const nextTotal = totalQuizzesTaken + 1;
+    setTotalQuizzesTaken(nextTotal);
 
     setAverageScore((prev) => {
-      const newAvg = (prev * totalQuizzesTaken + score) / (totalQuizzesTaken + 1);
+      if (totalQuizzesTaken === 0 || !prev) {
+        return score;
+      }
+      const newAvg = (prev * totalQuizzesTaken + score) / nextTotal;
       return Math.round(newAvg * 10) / 10;
     });
 
+    setStreakDays((prev) => {
+      const nextStreak = prev > 0 ? prev : 1;
+      try {
+        localStorage.setItem('learnsmart_student_streak', String(nextStreak));
+      } catch (e) {
+        console.warn(e);
+      }
+      return nextStreak;
+    });
+
+    const now = Date.now();
     const newHistoryItem = {
-      id: Date.now(),
+      id: now,
+      timestamp: now,
+      createdAt: new Date(now).toISOString(),
       title: quizTitle,
       category,
       score,
       status: score >= 80 ? 'Mastered' : score >= 70 ? 'Passed' : 'Needs Review',
-      date: 'Just now'
+      date: 'Today, ' + new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
     setQuizHistory((prev) => {
       const updated = [newHistoryItem, ...prev];
@@ -673,8 +905,9 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
   const handleStartQuizByIdOrTitle = (identifier, allowRetake = false) => {
     const found =
-      QUIZ_CATALOG.find((q) => q.id === identifier || q.title.toLowerCase() === identifier.toLowerCase()) ||
-      QUIZ_CATALOG[0];
+      quizzesList.find((q) => q.id === identifier || q.title.toLowerCase() === identifier.toLowerCase()) ||
+      quizzesList[0];
+    if (!found) return;
     if (completedQuizzes.includes(found.id) && !allowRetake) {
       showToast('Quiz already completed');
       return;
@@ -897,6 +1130,17 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
               <UserIcon size={19} color="currentColor" />
               <span>Profile</span>
             </button>
+
+            <button
+              type="button"
+              className={`sidebar-nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('settings');
+              }}
+            >
+              <SettingsIcon size={19} color="currentColor" />
+              <span>Settings</span>
+            </button>
           </nav>
 
           <div className="sidebar-bottom">
@@ -928,7 +1172,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                   <button
                     type="button"
                     className="greeting-quick-quiz-btn"
-                    onClick={() => handleStartQuiz(QUIZ_CATALOG[0])}
+                    onClick={() => handleStartQuiz(quizzesList[0])}
                   >
                     <PlayIcon size={16} />
                     <span>Quick Quiz</span>
@@ -947,7 +1191,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                       <div className="stat-value">{totalQuizzesTaken}</div>
                       <div className="stat-trend trend-green">
                         <TrendingUpIcon size={12} color="#10B981" />
-                        <span>12% from last month</span>
+                        <span>{isZeroQuizzes ? 'Ready to start' : 'Active learner'}</span>
                       </div>
                     </div>
                   </div>
@@ -960,10 +1204,10 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                     </div>
                     <div className="stat-details">
                       <span className="stat-title">Average Score</span>
-                      <div className="stat-value">{averageScore}%</div>
+                      <div className="stat-value">{isZeroQuizzes ? '0%' : `${averageScore}%`}</div>
                       <div className="stat-trend trend-green">
                         <TrendingUpIcon size={12} color="#10B981" />
-                        <span>8% from last month</span>
+                        <span>{isZeroQuizzes ? 'No quizzes yet' : 'Real-time tracked'}</span>
                       </div>
                     </div>
                   </div>
@@ -977,7 +1221,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                     <div className="stat-details">
                       <span className="stat-title">Learning Streak</span>
                       <div className="stat-value">{streakDays} Days</div>
-                      <div className="stat-streak-msg">Keep it up! 🔥</div>
+                      <div className="stat-streak-msg">{streakDays > 0 ? 'Keep it up! 🔥' : 'Start your streak! 🔥'}</div>
                     </div>
                   </div>
                 </div>
@@ -995,7 +1239,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                     </div>
                     <div className="stat-details">
                       <span className="stat-title">Recommended Quizzes</span>
-                      <div className="stat-value">{QUIZ_CATALOG.filter((q) => q.isRecommended).length}</div>
+                      <div className="stat-value">{quizzesList.filter((q) => q.isRecommended).length || quizzesList.length}</div>
                       <button
                         type="button"
                         className="stat-action-link"
@@ -1020,14 +1264,20 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                         <button
                           type="button"
                           className={`time-pill ${performanceTimeframe === 'week' ? 'active' : ''}`}
-                          onClick={() => setPerformanceTimeframe('week')}
+                          onClick={() => {
+                            setPerformanceTimeframe('week');
+                            setHoveredPoint(null);
+                          }}
                         >
                           Week
                         </button>
                         <button
                           type="button"
                           className={`time-pill ${performanceTimeframe === 'month' ? 'active' : ''}`}
-                          onClick={() => setPerformanceTimeframe('month')}
+                          onClick={() => {
+                            setPerformanceTimeframe('month');
+                            setHoveredPoint(null);
+                          }}
                         >
                           Month
                         </button>
@@ -1036,7 +1286,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
                     <div className="performance-header-meta-row">
                       <span className="panel-subtitle-stat">
-                        Peak: {isZeroQuizzes ? '0%' : '86%'} • Avg: {isZeroQuizzes ? '0%' : '64%'}
+                        Peak: {performanceStats.peak} • Avg: {performanceStats.avg}
                       </span>
                       <div className="chart-legend">
                         <span className="legend-item">
@@ -1157,7 +1407,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                       ))}
                     </svg>
 
-                    {hoveredPoint !== null && (
+                    {hoveredPoint !== null && activePerformanceData[hoveredPoint] && (
                       <div
                         className="chart-tooltip"
                         style={{
@@ -1350,7 +1600,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                       onClick={() => setActiveTab('recommended')}
                       title="View all recommended quizzes"
                     >
-                      View All ({QUIZ_CATALOG.filter((q) => q.isRecommended).length}) →
+                      View All ({quizzesList.filter((q) => q.isRecommended).length || quizzesList.length}) →
                     </button>
                   </div>
 
@@ -1463,7 +1713,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
           {activeTab === 'take-quiz' && (
             <TakeQuizView
-              quizzes={QUIZ_CATALOG}
+              quizzes={quizzesList}
               onStartQuiz={handleStartQuiz}
               externalSearch={searchQuery}
               completedQuizIds={completedQuizzes}
@@ -1475,7 +1725,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
           {activeTab === 'recommended' && (
             <AIChatBotView
               username={displayName}
-              quizzes={QUIZ_CATALOG}
+              quizzes={quizzesList}
               onStartQuiz={handleStartQuiz}
               onBackToDashboard={() => setActiveTab('dashboard')}
               onSwitchToAllQuizzes={() => setActiveTab('take-quiz')}
@@ -1560,6 +1810,10 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
               }}
               onLogout={onLogout}
             />
+          )}
+
+          {activeTab === 'settings' && (
+            <StudentSettingsView showToast={showToast} />
           )}
         </main>
       </div>

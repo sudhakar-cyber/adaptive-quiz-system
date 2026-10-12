@@ -80,6 +80,13 @@ export const QuizModal = ({
   selectedAnswersRef.current = selectedAnswers;
   const timeLeftRef = useRef(timeLeft);
   timeLeftRef.current = timeLeft;
+  const modalCardRef = useRef(null);
+
+  useEffect(() => {
+    if (modalCardRef.current) {
+      modalCardRef.current.scrollTop = 0;
+    }
+  }, [quizPhase]);
 
   // Helper to continuously save active quiz attempt to storage
   const saveActiveAttempt = (idx, answers, time) => {
@@ -154,45 +161,62 @@ export const QuizModal = ({
 
   // Submission handler once student fills all compulsory feedback fields
   const handleCompleteFeedbackAndUnlockResults = (feedbackPayload) => {
-    // Calculate result using test answers
-    const answers = selectedAnswersRef.current;
-    const correctCount = quiz.questions.reduce((acc, q, idx) => {
-      return answers[idx] === q.correctIndex ? acc + 1 : acc;
-    }, 0);
-    const totalQuestions = quiz.questions.length;
-    const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
-
-    // Save feedback into shared database
     try {
-      sharedDatabase.saveQuizFeedback({
-        ...feedbackPayload,
-        score: `${scorePercentage}%`,
-        correctCount,
-        totalQuestions
-      });
-    } catch (e) {
-      console.warn('Failed to save quiz feedback:', e);
-    }
+      // Calculate result using test answers
+      const answers = selectedAnswersRef.current || selectedAnswers || {};
+      const questions = (quiz && Array.isArray(quiz.questions)) ? quiz.questions : [];
+      const totalQuestions = questions.length || 1;
+      const correctCount = questions.reduce((acc, q, idx) => {
+        return answers[idx] === q.correctIndex ? acc + 1 : acc;
+      }, 0);
+      const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
 
-    setSubmittedFeedback(feedbackPayload);
-    setIsSubmitted(true);
-    setQuizPhase('results');
+      // Save feedback into shared database
+      try {
+        sharedDatabase.saveQuizFeedback({
+          ...feedbackPayload,
+          score: `${scorePercentage}%`,
+          correctCount,
+          totalQuestions
+        });
+      } catch (e) {
+        console.warn('Failed to save quiz feedback:', e);
+      }
 
-    // Notify parent component to update stats and history
-    if (onComplete) {
-      onComplete({
-        quizId: quiz.id,
-        quizTitle: quiz.title,
-        category: quiz.category,
-        score: scorePercentage,
-        correctCount,
-        totalQuestions,
-        feedback: feedbackPayload
-      });
-    }
+      setSubmittedFeedback(feedbackPayload);
+      setIsSubmitted(true);
+      setQuizPhase('results');
 
-    if (showToast) {
-      showToast('🌟 Feedback submitted! Test results are now unlocked.');
+      // Scroll modal card to top so results are instantly visible
+      if (modalCardRef.current) {
+        modalCardRef.current.scrollTop = 0;
+      }
+
+      // Notify parent component to update stats and history safely
+      if (onComplete) {
+        try {
+          onComplete({
+            quizId: quiz?.id || feedbackPayload?.quizId,
+            quizTitle: quiz?.title || feedbackPayload?.quizTitle,
+            category: quiz?.category || feedbackPayload?.quizCategory || 'General',
+            score: scorePercentage,
+            correctCount,
+            totalQuestions,
+            feedback: feedbackPayload
+          });
+        } catch (parentErr) {
+          console.warn('Failed to run onComplete handler:', parentErr);
+        }
+      }
+
+      if (showToast) {
+        showToast('🌟 Feedback submitted! Test results are now unlocked.');
+      }
+    } catch (err) {
+      console.error('Failed to complete feedback and unlock results:', err);
+      setSubmittedFeedback(feedbackPayload);
+      setIsSubmitted(true);
+      setQuizPhase('results');
     }
   };
 
@@ -265,7 +289,7 @@ export const QuizModal = ({
         e.stopPropagation();
       }}
     >
-      <div className="quiz-modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className="quiz-modal-card" ref={modalCardRef} onClick={(e) => e.stopPropagation()}>
         {/* Header: Note that Close / Exit button is deliberately omitted during active test & feedback */}
         <div className="quiz-modal-header">
           <div className="quiz-header-meta">

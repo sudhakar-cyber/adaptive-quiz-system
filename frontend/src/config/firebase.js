@@ -20,6 +20,8 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  collection,
+  getDocs,
   doc,
   getDoc,
   setDoc,
@@ -67,6 +69,8 @@ export {
   linkWithCredential,
   EmailAuthProvider,
   updateProfile,
+  collection,
+  getDocs,
   doc,
   getDoc,
   setDoc,

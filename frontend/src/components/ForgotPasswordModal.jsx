@@ -14,8 +14,6 @@ export const ForgotPasswordModal = ({
   const [isSuccess, setIsSuccess] = useState(false);
   const [sentEmail, setSentEmail] = useState('');
   const [cooldown, setCooldown] = useState(0);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [availableResetLink, setAvailableResetLink] = useState('');
 
   const inputRef = useRef(null);
 
@@ -26,8 +24,6 @@ export const ForgotPasswordModal = ({
       setErrorMessage('');
       setIsSuccess(false);
       setSentEmail('');
-      setCopiedLink(false);
-      setAvailableResetLink('');
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
@@ -79,9 +75,6 @@ export const ForgotPasswordModal = ({
         setIsSuccess(true);
         setSentEmail(res.email || clean);
         setCooldown(60);
-        if (res.resetLink) {
-          setAvailableResetLink(res.resetLink);
-        }
         if (onSuccess) {
           onSuccess(res.email || clean);
         }
@@ -98,13 +91,6 @@ export const ForgotPasswordModal = ({
   const handleResend = async () => {
     if (cooldown > 0 || isLoading) return;
     await handleSubmit();
-  };
-
-  const handleCopyLink = () => {
-    if (!availableResetLink) return;
-    navigator.clipboard.writeText(availableResetLink);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   return (
@@ -253,56 +239,37 @@ export const ForgotPasswordModal = ({
             /* ==========================================
                SUCCESS STATE: Reset Link Sent
                ========================================== */
-            <div className="forgot-success-container">
+            <div className="forgot-success-container" style={{ width: '100%', textAlign: 'center' }}>
               <div className="forgot-success-icon-wrap" aria-hidden="true">
-                <CheckIcon size={28} color="#FFFFFF" />
+                <CheckIcon size={26} color="#FFFFFF" />
               </div>
 
-              <h2 className="otp-modal-title" style={{ marginTop: '12px' }}>
+              <h2 className="otp-modal-title" style={{ marginTop: '10px', marginBottom: '6px' }}>
                 Reset Link Sent!
               </h2>
 
-              <p className="otp-modal-subheading" style={{ marginBottom: '14px' }}>
-                We have sent a password reset link to your registered email address:
+              <p className="otp-modal-subheading" style={{ marginBottom: '12px' }}>
+                We have sent a password reset link to your registered email:
               </p>
 
-              <div className="otp-target-email-pill" style={{ marginBottom: '20px' }}>
+              <div className="otp-target-email-pill" style={{ marginBottom: '18px' }}>
                 <MailIcon size={16} color="#1A6BFF" />
                 <span className="otp-email-text" title={sentEmail}>
                   {sentEmail}
                 </span>
               </div>
 
-              <div className="forgot-instructions-box">
-                <p className="forgot-instructions-text">
-                  Please check your inbox (and <strong>Spam/Junk</strong> folder). Click the link in the email to set a new password.
+              <div className="forgot-instructions-box" style={{ marginBottom: '18px' }}>
+                <p className="forgot-instructions-text" style={{ marginBottom: '10px' }}>
+                  Please check your inbox (and <strong>Spam / Junk</strong> folder). Click the link in the email to set a new password.
                 </p>
-                <div className="forgot-expiry-pill">
-                  ⏱️ Link is valid for 30 minutes
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span className="forgot-expiry-pill">
+                    ⏱️ Link is valid for 30 minutes
+                  </span>
                 </div>
               </div>
 
-              {availableResetLink && (
-                <div className="direct-link-box" style={{ marginTop: '16px', marginBottom: '16px' }}>
-                  <div className="direct-link-label">Direct Reset Link:</div>
-                  <div className="direct-link-actions">
-                    <a
-                      href={availableResetLink}
-                      className="direct-link-anchor"
-                      onClick={() => onClose()}
-                    >
-                      Open Password Reset Page &rarr;
-                    </a>
-                    <button
-                      type="button"
-                      className="copy-link-btn"
-                      onClick={handleCopyLink}
-                    >
-                      {copiedLink ? 'Copied! ✓' : 'Copy Link'}
-                    </button>
-                  </div>
-                </div>
-              )}
 
               <div className="forgot-success-actions">
                 <button

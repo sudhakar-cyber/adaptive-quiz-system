@@ -13,6 +13,7 @@ import { EducatorAnalyticsView } from '../components/EducatorAnalyticsView';
 import { EducatorReportsView } from '../components/EducatorReportsView';
 import { EducatorNotificationsView } from '../components/EducatorNotificationsView';
 import { EducatorProfileView } from '../components/EducatorProfileView';
+import { EducatorSettingsView } from '../components/EducatorSettingsView';
 import {
   INITIAL_EDUCATOR_QUIZZES,
   INITIAL_EDUCATOR_NOTIFICATIONS,
@@ -152,6 +153,7 @@ export const EducatorDashboard = ({ onLogout }) => {
   useEffect(() => {
     const unsubStudents = sharedDatabase.subscribe((updatedStudents) => {
       setStudents(updatedStudents);
+      setSubmissions(sharedDatabase.getSubmissions());
     });
 
     const unsubSubmissions = sharedDatabase.subscribeSubmissions
@@ -179,6 +181,7 @@ export const EducatorDashboard = ({ onLogout }) => {
       }
       if (!e.key || e.key === 'learnsmart_shared_students' || e.key === 'learnsmart_educator_students') {
         setStudents(sharedDatabase.getStudents());
+        setSubmissions(sharedDatabase.getSubmissions());
       }
       if (!e.key || e.key === 'learnsmart_educator_notifications') {
         try {
@@ -190,15 +193,43 @@ export const EducatorDashboard = ({ onLogout }) => {
       }
     };
 
+    const handleStudentReset = () => {
+      setStudents(sharedDatabase.getStudents());
+      setSubmissions(sharedDatabase.getSubmissions());
+    };
+
+    const handleEducatorNotifsUpdated = (e) => {
+      const updated = e?.detail || JSON.parse(localStorage.getItem('learnsmart_educator_notifications') || '[]');
+      if (Array.isArray(updated)) {
+        setNotifications(updated);
+      }
+    };
+
+    const handleStudentsUpdated = (e) => {
+      const updated = e?.detail || sharedDatabase.getStudents();
+      setStudents(updated);
+      setSubmissions(sharedDatabase.getSubmissions());
+    };
+
+    window.addEventListener('learnsmart_students_updated', handleStudentsUpdated);
     window.addEventListener('learnsmart_submissions_updated', handleSubmissionsUpdated);
     window.addEventListener('learnsmart_quizzes_updated', handleQuizzesUpdated);
+    window.addEventListener('learnsmart_student_reset', handleStudentReset);
+    window.addEventListener('learnsmart_educator_notifications_updated', handleEducatorNotifsUpdated);
     window.addEventListener('storage', handleStorageChange);
+
+    if (typeof sharedDatabase?.syncStudentsFromFirestore === 'function') {
+      sharedDatabase.syncStudentsFromFirestore(true).catch(() => {});
+    }
 
     return () => {
       unsubStudents();
       unsubSubmissions();
+      window.removeEventListener('learnsmart_students_updated', handleStudentsUpdated);
       window.removeEventListener('learnsmart_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('learnsmart_quizzes_updated', handleQuizzesUpdated);
+      window.removeEventListener('learnsmart_student_reset', handleStudentReset);
+      window.removeEventListener('learnsmart_educator_notifications_updated', handleEducatorNotifsUpdated);
       window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
@@ -214,31 +245,39 @@ export const EducatorDashboard = ({ onLogout }) => {
 
   const handleAddStudent = (newStudentData) => {
     const created = sharedDatabase.addStudent(newStudentData);
+    setStudents(sharedDatabase.getStudents());
     showToast(`Student ${created.name} added to cohort successfully!`);
   };
 
   const handleRemoveStudent = (studentId) => {
     sharedDatabase.removeStudent(studentId);
+    setSubmissions(sharedDatabase.getSubmissions());
+    setStudents(sharedDatabase.getStudents());
     showToast('Student removed from active cohort.');
   };
 
   const handleClearAllStudents = () => {
     sharedDatabase.clearAllStudents();
+    setSubmissions(sharedDatabase.getSubmissions());
+    setStudents(sharedDatabase.getStudents());
     showToast('All students removed from the directory.');
   };
 
-  const handleResetStudent = (studentId) => {
-    sharedDatabase.resetStudent(studentId);
-    showToast('Student performance data reset successfully.');
+  const handleResetStudent = (studentId, selectedSubjects) => {
+    if (studentId === 'all') {
+      sharedDatabase.resetAllStudents(selectedSubjects);
+      showToast('Cohort performance data reset successfully.');
+    } else {
+      sharedDatabase.resetStudent(studentId, selectedSubjects);
+      showToast('Student performance data reset successfully.');
+    }
+    setSubmissions(sharedDatabase.getSubmissions());
+    setStudents(sharedDatabase.getStudents());
   };
 
   const handleUpdateQuizzes = (updated) => {
     setQuizzes(updated);
-    try {
-      localStorage.setItem('learnsmart_educator_quizzes', JSON.stringify(updated));
-    } catch (err) {
-      console.warn(err);
-    }
+    sharedDatabase.persistQuizzes(updated);
   };
 
   const handleUpdateNotifications = (updated) => {
@@ -299,8 +338,21 @@ export const EducatorDashboard = ({ onLogout }) => {
   };
 
   const handleCreateQuiz = (newQuiz) => {
-    const updated = [newQuiz, ...quizzes];
+    const quizToAdd = {
+      ...newQuiz,
+      isRecommended: newQuiz.status === 'Active' || newQuiz.isRecommended !== false,
+      recommendationReason: newQuiz.recommendationReason || 'Newly Published Assessment • Assigned by Educator'
+    };
+    const updated = [quizToAdd, ...quizzes];
     handleUpdateQuizzes(updated);
+    if (quizToAdd.status === 'Active') {
+      sharedDatabase.sendStudentNotification({
+        title: `New Quiz: ${quizToAdd.title}`,
+        message: `A new ${quizToAdd.difficulty || 'Adaptive'} assessment in ${quizToAdd.category} has been published by your instructor. Test your knowledge now!`,
+        category: 'quiz',
+        type: 'info'
+      });
+    }
     showToast(`New quiz "${newQuiz.title}" created & published successfully!`);
     setActiveTab('Manage Quizzes');
   };
@@ -371,6 +423,7 @@ export const EducatorDashboard = ({ onLogout }) => {
         onLogout={onLogout}
         onOpenNotifications={() => setActiveTab('Notifications')}
         onOpenProfile={() => setActiveTab('Profile')}
+        onOpenSettings={() => setActiveTab('Settings')}
         educatorName={profileData.fullName || 'Dr. Sarah Jenkins'}
         educatorEmail={profileData.email || 'educator@learnsmart.com'}
         educatorRole={profileData.academicTitle ? 'Faculty' : 'Educator'}
@@ -549,6 +602,11 @@ export const EducatorDashboard = ({ onLogout }) => {
               onLogout={onLogout}
               showToast={showToast}
             />
+          )}
+
+          {/* TAB 8: SETTINGS */}
+          {activeTab === 'Settings' && (
+            <EducatorSettingsView showToast={showToast} />
           )}
         </main>
       </div>

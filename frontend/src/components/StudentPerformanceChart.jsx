@@ -15,6 +15,17 @@ export const StudentPerformanceChart = ({
 }) => {
   const [hoveredIndex, setHoveredIndex] = useState(null);
 
+  // Filter students who have actually completed quizzes / assessments
+  const studentsWithAttempts = React.useMemo(() => {
+    if (!students || !Array.isArray(students)) return [];
+    return students.filter(
+      (s) =>
+        (s.quizzesCompleted || 0) > 0 ||
+        (s.avgScore || 0) > 0 ||
+        (Array.isArray(s.recentSubmissions) && s.recentSubmissions.length > 0)
+    );
+  }, [students]);
+
   // Derive dynamic chart data from live students cohort
   const chartData = React.useMemo(() => {
     if (Array.isArray(data) && data.length > 0) {
@@ -24,7 +35,7 @@ export const StudentPerformanceChart = ({
       }));
     }
 
-    if (!students || students.length === 0) {
+    if (!students || students.length === 0 || studentsWithAttempts.length === 0) {
       return [
         { category: 'Excellent', percentage: 0, count: 0, label: '0%', color: '#10B981' },
         { category: 'Good', percentage: 0, count: 0, label: '0%', color: '#2563EB' },
@@ -33,13 +44,13 @@ export const StudentPerformanceChart = ({
       ];
     }
 
-    const total = students.length;
+    const total = studentsWithAttempts.length;
     let excellent = 0;
     let good = 0;
     let average = 0;
     let belowAvg = 0;
 
-    students.forEach((s) => {
+    studentsWithAttempts.forEach((s) => {
       const score = s.avgScore || 0;
       if (score >= 85 || s.status === 'Top Performer') {
         excellent++;
@@ -82,7 +93,7 @@ export const StudentPerformanceChart = ({
         color: '#EF4444'
       }
     ];
-  }, [data, students]);
+  }, [data, students, studentsWithAttempts]);
 
   // SVG dimensions & grid configuration
   const svgWidth = 360;
@@ -109,7 +120,11 @@ export const StudentPerformanceChart = ({
         <div>
           <h2 className="educator-card-title">{title}</h2>
           <span style={{ fontSize: '0.76rem', color: '#64748B' }}>
-            {students && students.length > 0 ? `${students.length} students enrolled` : 'Real-time cohort distribution'}
+            {students && students.length > 0
+              ? `${students.length} ${students.length === 1 ? 'student' : 'students'} enrolled${
+                  studentsWithAttempts.length === 0 ? ' • Performance reset' : ''
+                }`
+              : 'Real-time cohort distribution'}
           </span>
         </div>
         {onViewAll && (
@@ -187,7 +202,7 @@ export const StudentPerformanceChart = ({
                     y={Math.max(14, yPos - 6)}
                     className="chart-bar-value"
                     style={{
-                      fill: isHovered ? item.color : '#0F172A',
+                      fill: isHovered ? item.color : 'var(--chart-bar-val, currentColor)',
                       fontWeight: isHovered ? 800 : 700,
                       pointerEvents: 'none'
                     }}
@@ -221,7 +236,7 @@ export const StudentPerformanceChart = ({
                     y={svgHeight - 8}
                     className="chart-category-label"
                     style={{
-                      fill: isHovered ? '#0F172A' : '#475569',
+                      fill: isHovered ? 'var(--chart-bar-val, currentColor)' : 'var(--chart-cat, #64748B)',
                       fontWeight: isHovered ? 700 : 600,
                       pointerEvents: 'none'
                     }}
@@ -336,7 +351,9 @@ export const StudentPerformanceChart = ({
                 fontWeight: 500
               }}
             >
-              Hover over any bar to inspect cohort breakdown
+              {studentsWithAttempts.length === 0
+                ? 'Cohort metrics reset • Awaiting student quiz attempts'
+                : 'Hover over any bar to inspect cohort breakdown'}
             </span>
           )}
         </div>

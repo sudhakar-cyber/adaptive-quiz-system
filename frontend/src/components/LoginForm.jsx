@@ -249,19 +249,13 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
       const res = await authService.loginWithGoogle();
       setIsLoading(false);
 
-      if (res && res.success && res.student) {
-        showToast('Signed in successfully! Redirecting...');
+      if (res && res.success && (res.student || res.user)) {
+        showToast('Signed in with Google successfully! Redirecting...');
+        const userObj = res.student || res.user;
+        const studentName = userObj.name || userObj.displayName || 'Student';
         if (onLoginSuccess) {
-          onLoginSuccess(res.student.name, res.role || 'student', res.student);
+          onLoginSuccess(studentName, res.role || 'student', userObj);
         }
-        return;
-      }
-
-      if (res && res.requiresVerification) {
-        setGoogleVerifyEmail(res.email || '');
-        setIsGoogleVerifyModalOpen(true);
-        showToast('Verification email sent. Please check your email and verify your account.');
-        setErrorMessage('Verification email sent. Please check your email and verify your account.');
         return;
       }
 

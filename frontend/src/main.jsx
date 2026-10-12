@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
+import './styles/theme.css';
 
 // Automatically normalize hostname to 'localhost' so Firebase Google OAuth domain whitelist matches
 if (typeof window !== 'undefined' && window.location.hostname === '127.0.0.1') {

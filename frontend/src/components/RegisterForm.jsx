@@ -250,19 +250,12 @@ export const RegisterForm = ({
       });
       setIsLoading(false);
 
-      if (res && res.success && res.student) {
-        showToast('Signed in successfully! Redirecting...');
+      if (res && res.success && (res.student || res.user)) {
+        showToast('Signed in with Google successfully! Redirecting...');
+        const userObj = res.student || res.user;
         if (onRegisterSuccess) {
-          onRegisterSuccess(res.student, true);
+          onRegisterSuccess(userObj, true);
         }
-        return;
-      }
-
-      if (res && res.requiresVerification) {
-        setGoogleVerifyEmail(res.email || '');
-        setIsGoogleVerifyModalOpen(true);
-        showToast('Verification email sent. Please check your email and verify your account.');
-        setErrorMessage('Verification email sent. Please check your email and verify your account.');
         return;
       }
 

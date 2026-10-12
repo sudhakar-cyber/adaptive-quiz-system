@@ -1,5 +1,6 @@
 import { INITIAL_EDUCATOR_QUIZZES } from '../data/educatorData.js';
-import { INITIAL_NOTIFICATIONS } from '../data/quizData.js';
+import { QUIZ_CATALOG, INITIAL_NOTIFICATIONS } from '../data/quizData.js';
+import { db, collection, getDocs } from '../config/firebase.js';
 
 const STORAGE_KEY_STUDENTS = 'learnsmart_shared_students';
 const STORAGE_KEY_LEGACY = 'learnsmart_educator_students';
@@ -25,60 +26,38 @@ export const getInitials = (name = '') => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-// Helper: Generate Sequential Student ID
-const generateStudentId = (existingList = []) => {
-  const currentCount = existingList.length + 101;
-  return `LS-2024-${currentCount}`;
-};
+// Helper: Generate Guaranteed Unique Student ID for each student
+export const generateStudentId = (existingList = []) => {
+  const allStudents = (existingList && existingList.length > 0)
+    ? existingList
+    : (typeof loadStoredStudents === 'function' ? loadStoredStudents() : []);
 
-// Automatic cleanup of legacy default/mock accounts from localStorage
-// Automatic cleanup of legacy default/mock student accounts from localStorage
-const DB_VERSION_KEY = 'learnsmart_db_clean_v8_purge_default_student';
-const purgeLegacyDefaultUsers = () => {
+  const existingIds = new Set();
+  (allStudents || []).forEach((s) => {
+    if (s && s.studentId) existingIds.add(String(s.studentId).trim().toUpperCase());
+  });
+
   try {
-    if (typeof localStorage === 'undefined') return;
-    if (!localStorage.getItem(DB_VERSION_KEY)) {
-      localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
-      localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
-
-      // Remove default demo student session from local and session storage
-      const storedUser = (localStorage.getItem('learnsmart_user') || '').toLowerCase();
-      const storedEmail = (localStorage.getItem('learnsmart_email') || '').toLowerCase();
-      const storedRole = (localStorage.getItem('learnsmart_role') || '').toLowerCase();
-
-      if (
-        storedRole === 'student' ||
-        storedUser.includes('shaik') ||
-        storedUser.includes('aathif') ||
-        storedEmail.includes('shaik') ||
-        storedEmail.includes('aathif') ||
-        storedEmail === 'student@learnsmart.edu'
-      ) {
-        localStorage.removeItem('learnsmart_user');
-        localStorage.removeItem('learnsmart_email');
-        localStorage.removeItem('learnsmart_student_profile');
-        localStorage.removeItem('learnsmart_uid');
-        localStorage.removeItem('learnsmart_role');
-        localStorage.removeItem('learnsmart_completed_quizzes');
-        localStorage.removeItem('learnsmart_active_quiz_attempt');
-        localStorage.removeItem('learnsmart_student_notifications');
-        try {
-          sessionStorage.clear();
-        } catch {}
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_shared_students') : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((s) => {
+          if (s && s.studentId) existingIds.add(String(s.studentId).trim().toUpperCase());
+        });
       }
-
-      localStorage.setItem(DB_VERSION_KEY, 'true');
     }
-  } catch (err) {
-    console.warn('Failed to clear default students from localStorage:', err);
-  }
-};
-purgeLegacyDefaultUsers();
+  } catch (e) {}
 
-// Base Seed Students with required role and metadata
-const getInitialSeedStudents = () => {
-  return [];
+  let counter = 1001;
+  while (existingIds.has(`LS-2025-${counter}`)) {
+    counter++;
+  }
+  return `LS-2025-${counter}`;
 };
+
+// Safe compatibility check
+export const isTargetToDelete = () => false;
 
 // Initialize / Load Students from LocalStorage
 const loadStoredStudents = () => {
@@ -87,17 +66,27 @@ const loadStoredStudents = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
-        return parsed
-          .filter((s) => {
-            const email = (s.email || '').toLowerCase();
-            const name = (s.name || '').toLowerCase();
-            return !email.includes('shaik.aathif') && !name.includes('shaik aathif');
-          })
-          .map((s) => ({
+        let needsResave = false;
+        const cleaned = parsed.map((s, index) => {
+          let validId = s.studentId;
+          if (!validId || typeof validId !== 'string' || !validId.trim()) {
+            validId = `LS-2025-${1001 + index}`;
+            needsResave = true;
+          }
+          return {
             ...s,
+            studentId: validId,
             role: 'student',
             isActive: s.isActive !== undefined ? s.isActive : true
-          }));
+          };
+        });
+        if (needsResave) {
+          try {
+            localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(cleaned));
+            localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify(cleaned));
+          } catch (e) {}
+        }
+        return cleaned;
       }
     }
   } catch (err) {
@@ -106,6 +95,122 @@ const loadStoredStudents = () => {
 
   return [];
 };
+
+// Sync registered students from Firebase Firestore into sharedDatabase
+let isSyncingFirestore = false;
+let lastFirestoreSyncTime = 0;
+
+export const syncStudentsFromFirestore = async (force = false) => {
+  const now = Date.now();
+  if (!force && (isSyncingFirestore || (now - lastFirestoreSyncTime < 8000))) {
+    return;
+  }
+  isSyncingFirestore = true;
+  lastFirestoreSyncTime = now;
+
+  try {
+    if (!db) {
+      isSyncingFirestore = false;
+      return;
+    }
+    const usersCol = collection(db, 'users');
+    const snapshot = await getDocs(usersCol);
+    if (!snapshot || snapshot.empty) {
+      isSyncingFirestore = false;
+      return;
+    }
+
+    const all = loadStoredStudents();
+    let hasChanges = false;
+
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const uid = docSnap.id || data.uid;
+      const email = (data.email || '').trim().toLowerCase();
+      const role = (data.role || 'student').trim().toLowerCase();
+
+      // Only sync students
+      if (role !== 'student') return;
+
+      const fullName = (
+        data.displayName ||
+        data.name ||
+        `${data.firstName || ''} ${data.lastName || ''}`.trim() ||
+        (email ? email.split('@')[0] : 'Student')
+      );
+
+      // Check if student already in local database
+      const existingIdx = all.findIndex(
+        (s) => (s.uid && uid && s.uid === uid) || (email && s.email && s.email.toLowerCase() === email)
+      );
+
+      if (existingIdx !== -1) {
+        const existing = all[existingIdx];
+        let studentChanged = false;
+        if (!existing.phone && (data.phoneNumber || data.phone)) {
+          existing.phone = data.phoneNumber || data.phone;
+          studentChanged = true;
+        }
+        if (!existing.country && data.country) {
+          existing.country = data.country;
+          studentChanged = true;
+        }
+        if (studentChanged) {
+          all[existingIdx] = existing;
+          hasChanges = true;
+        }
+      } else {
+        const newStud = {
+          id: uid ? `stud-${uid}` : `stud-${Date.now()}`,
+          name: fullName,
+          email,
+          phone: data.phoneNumber || data.phone || '',
+          country: data.country || '',
+          studentId: data.studentId || generateStudentId(all),
+          role: 'student',
+          created_at: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
+          quizzesCompleted: data.quizzesCompleted || 0,
+          avgScore: data.avgScore || 0,
+          highestScore: data.highestScore || 0,
+          topSubject: data.topSubject || 'General / Onboarding',
+          status: 'On Track',
+          statusVariant: 'info',
+          lastActive: 'Recently',
+          avatarInitials: getInitials(fullName),
+          avatarImage: data.photoURL || null,
+          uid: uid || '',
+          authProvider: data.authProvider || 'firebase',
+          isActive: data.isActive !== undefined ? data.isActive : true,
+          subjectMastery: [
+            { subject: 'Mathematics', score: 0 },
+            { subject: 'Data Structures', score: 0 },
+            { subject: 'Python', score: 0 },
+            { subject: 'Web Security', score: 0 },
+            { subject: 'Others', score: 0 }
+          ],
+          recentSubmissions: []
+        };
+        all.unshift(newStud);
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      persistStudents(all);
+    }
+  } catch (err) {
+    console.warn('Notice: Background sync from Firestore skipped:', err);
+  } finally {
+    isSyncingFirestore = false;
+  }
+};
+
+// Initial background sync
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    syncStudentsFromFirestore().catch(() => {});
+  }, 1000);
+}
 
 // Seed Educators
 const INITIAL_SEED_EDUCATORS = [
@@ -181,9 +286,9 @@ const persistEducators = (educators) => {
 const loadStoredQuizzes = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_QUIZZES);
-    if (saved) {
+    if (saved !== null) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
@@ -291,14 +396,20 @@ const notifyAdminSubscribers = () => {
 };
 
 export const sharedDatabase = {
+  syncStudentsFromFirestore: (force = false) => {
+    return syncStudentsFromFirestore(force);
+  },
+
   // Get active students list
   getStudents: () => {
+    syncStudentsFromFirestore().catch(() => {});
     const all = loadStoredStudents();
     return all.filter((s) => s.isActive !== false);
   },
 
   // Get all students including inactive
   getAllStudents: () => {
+    syncStudentsFromFirestore().catch(() => {});
     return loadStoredStudents();
   },
 
@@ -382,11 +493,13 @@ export const sharedDatabase = {
     if (existingIndex !== -1) {
       // If student was deactivated, reactivate and update fields
       const existing = all[existingIndex];
+      const assignedId = existing.studentId || generateStudentId(all);
       const updated = {
         ...existing,
         name: (fullName && fullName !== 'Student') ? fullName : existing.name,
         avatarImage: resolvedAvatar || existing.avatarImage || null,
         uid: uid || existing.uid || '',
+        studentId: assignedId,
         avatarInitials: getInitials((fullName && fullName !== 'Student') ? fullName : existing.name),
         authProvider: authProvider || existing.authProvider,
         password: password || existing.password || '',
@@ -449,11 +562,18 @@ export const sharedDatabase = {
     const fullName = name.trim() || 'New Student';
     const cleanEmail = email.trim().toLowerCase();
 
+    // Ensure assigned studentId is strictly unique across all students
+    let finalStudentId = studentId ? studentId.trim() : '';
+    const isTaken = all.some((s) => s.studentId && s.studentId.toUpperCase() === finalStudentId.toUpperCase());
+    if (!finalStudentId || isTaken) {
+      finalStudentId = generateStudentId(all);
+    }
+
     const newStudent = {
       id: `stud-${Date.now()}`,
       name: fullName,
       email: cleanEmail,
-      studentId: studentId.trim() || generateStudentId(all),
+      studentId: finalStudentId,
       phone: phone.trim(),
       role: 'student',
       created_at: new Date().toISOString(),
@@ -478,11 +598,68 @@ export const sharedDatabase = {
     return newStudent;
   },
 
-  // Educator deletes / deactivates a student
-  removeStudent: (studentId) => {
+  // Educator / Admin deletes a student and all related submissions
+  removeStudent: (studentIdentifier) => {
     const all = loadStoredStudents();
-    const updated = all.filter((s) => s.id !== studentId);
+    const cleanId = String(studentIdentifier || '').trim().toLowerCase();
+
+    // Find the student target by id, studentId, or email
+    const removedTarget = all.find((s) => {
+      const sId = String(s.id || '').trim().toLowerCase();
+      const sStudId = String(s.studentId || '').trim().toLowerCase();
+      const sEmail = String(s.email || '').trim().toLowerCase();
+      return sId === cleanId || sStudId === cleanId || sEmail === cleanId;
+    });
+
+    const updated = all.filter((s) => {
+      const sId = String(s.id || '').trim().toLowerCase();
+      const sStudId = String(s.studentId || '').trim().toLowerCase();
+      const sEmail = String(s.email || '').trim().toLowerCase();
+      return sId !== cleanId && sStudId !== cleanId && sEmail !== cleanId;
+    });
+
     persistStudents(updated);
+
+    // Thoroughly clean up all submissions belonging to this deleted student
+    try {
+      const savedSubmissions = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+      if (savedSubmissions) {
+        const list = JSON.parse(savedSubmissions);
+        if (Array.isArray(list)) {
+          const tId = removedTarget ? String(removedTarget.id || '').trim().toLowerCase() : cleanId;
+          const tStudId = removedTarget?.studentId ? String(removedTarget.studentId).trim().toLowerCase() : '';
+          const tEmail = removedTarget?.email ? String(removedTarget.email).trim().toLowerCase() : '';
+          const tName = removedTarget?.name ? String(removedTarget.name).trim().toLowerCase() : '';
+
+          const filtered = list.filter((sub) => {
+            const subId = String(sub.studentId || '').trim().toLowerCase();
+            const subEmail = String(sub.studentEmail || '').trim().toLowerCase();
+            const subName = String(sub.student || '').trim().toLowerCase();
+
+            // Match by ID
+            if (tId && subId === tId) return false;
+            if (tStudId && subId === tStudId) return false;
+            // Match by email
+            if (tEmail && subEmail === tEmail) return false;
+            // Match by name
+            if (tName && (subName === tName || subName.includes(tName) || tName.includes(subName))) return false;
+
+            return true;
+          });
+
+          localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(filtered));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: filtered })
+            );
+            window.dispatchEvent(new Event('storage'));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to update submissions on student remove:', err);
+    }
+
     return updated.filter((s) => s.isActive !== false);
   },
 
@@ -492,6 +669,12 @@ export const sharedDatabase = {
     try {
       localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
       localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: [] })
+        );
+      }
     } catch (e) {
       console.warn('Failed to clear students storage:', e);
     }
@@ -503,7 +686,7 @@ export const sharedDatabase = {
   },
 
   // Educator resets a student's performance metrics & unlocks quizzes
-  resetStudent: (studentIdOrIdentifier) => {
+  resetStudent: (studentIdOrIdentifier, selectedSubjects = null) => {
     const all = loadStoredStudents();
     let idx = all.findIndex((s) => s.id === studentIdOrIdentifier);
     if (idx === -1 && typeof studentIdOrIdentifier === 'string') {
@@ -517,36 +700,184 @@ export const sharedDatabase = {
 
     if (idx !== -1) {
       const targetStudent = all[idx];
+      const isResetAll =
+        !selectedSubjects ||
+        selectedSubjects === 'all' ||
+        (Array.isArray(selectedSubjects) && selectedSubjects.length === 0);
+
+      const subjectsToReset = Array.isArray(selectedSubjects)
+        ? selectedSubjects.map((s) => (typeof s === 'string' ? s.toLowerCase().trim() : ''))
+        : [];
+
+      const matchesSubject = (subName) => {
+        if (isResetAll) return true;
+        if (!subName) return false;
+        const lower = subName.toLowerCase().trim();
+        return subjectsToReset.some((resetSub) => {
+          if (!resetSub) return false;
+          if (resetSub === lower) return true;
+          if (
+            (resetSub.includes('program') || resetSub.includes('python') || resetSub.includes('javascript')) &&
+            (lower.includes('program') || lower.includes('python') || lower.includes('javascript'))
+          ) {
+            return true;
+          }
+          if (
+            (resetSub.includes('data structure') || resetSub.includes('algorithm') || resetSub.includes('dsa')) &&
+            (lower.includes('data structure') || lower.includes('algorithm') || lower.includes('dsa'))
+          ) {
+            return true;
+          }
+          if (
+            (resetSub.includes('security') || resetSub.includes('cyber') || resetSub.includes('web security')) &&
+            (lower.includes('security') || lower.includes('cyber') || lower.includes('web security'))
+          ) {
+            return true;
+          }
+          if (
+            (resetSub.includes('math') || resetSub.includes('discrete')) &&
+            (lower.includes('math') || lower.includes('discrete'))
+          ) {
+            return true;
+          }
+          return resetSub.includes(lower) || lower.includes(resetSub);
+        });
+      };
+
+      let updatedMastery = [];
+      if (Array.isArray(targetStudent.subjectMastery)) {
+        updatedMastery = targetStudent.subjectMastery.map((m) => {
+          if (matchesSubject(m.subject)) {
+            return { ...m, score: 0 };
+          }
+          return { ...m };
+        });
+      }
+
+      // Filter recentSubmissions
+      const updatedSubmissions = Array.isArray(targetStudent.recentSubmissions)
+        ? targetStudent.recentSubmissions.filter((sub) => {
+            const cat = sub.category || sub.title || '';
+            return !matchesSubject(cat);
+          })
+        : [];
+
+      // Recalculate metrics
+      const remainingScores = updatedSubmissions.map((s) => s.score || 0);
+      const newQuizzesCompleted = updatedSubmissions.length;
+      const newAvg =
+        newQuizzesCompleted > 0
+          ? Math.round(remainingScores.reduce((a, b) => a + b, 0) / newQuizzesCompleted)
+          : 0;
+      const newHigh =
+        newQuizzesCompleted > 0 ? Math.max(...remainingScores) : 0;
+
+      const nonZeroMastery = updatedMastery.filter((m) => (m.score || 0) > 0);
+      const newTopSub =
+        nonZeroMastery.length > 0
+          ? [...nonZeroMastery].sort((a, b) => b.score - a.score)[0]?.subject
+          : targetStudent.topSubject || 'General';
+
       all[idx] = {
         ...targetStudent,
-        quizzesCompleted: 0,
-        avgScore: 0,
-        highestScore: 0,
-        status: 'On Track',
-        statusVariant: 'info',
+        quizzesCompleted: newQuizzesCompleted,
+        avgScore: newAvg,
+        highestScore: newHigh,
+        topSubject: newTopSub,
+        status: newAvg >= 85 ? 'Top Performer' : newAvg >= 70 ? 'On Track' : newAvg > 0 ? 'Needs Support' : 'On Track',
+        statusVariant: newAvg >= 85 ? 'success' : newAvg >= 70 ? 'info' : 'warning',
         lastActive: 'Reset just now',
-        recentSubmissions: [],
-        subjectMastery: (targetStudent.subjectMastery || []).map((m) => ({ ...m, score: 0 }))
+        recentSubmissions: updatedSubmissions,
+        subjectMastery: updatedMastery
       };
       persistStudents(all);
 
-      // Clear student's completed quiz locks so all quizzes unlock in student dashboard
+      // Unlock quizzes in localStorage
       try {
-        localStorage.removeItem('learnsmart_completed_quizzes');
-        localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
-        localStorage.removeItem('learnsmart_active_quiz_attempt');
-        localStorage.removeItem('learnsmart_student_quiz_history');
+        if (isResetAll) {
+          localStorage.removeItem('learnsmart_completed_quizzes');
+          localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
+          localStorage.removeItem('learnsmart_active_quiz_attempt');
+          localStorage.removeItem('learnsmart_student_quiz_history');
+        } else {
+          // Selectively unlock completed quizzes matching the reset subjects
+          const completed = JSON.parse(localStorage.getItem('learnsmart_completed_quizzes') || '[]');
+          if (Array.isArray(completed)) {
+            const allQuizzes = sharedDatabase.getPublishedQuizzes ? sharedDatabase.getPublishedQuizzes() : [];
+            const remainingCompleted = completed.filter((qId) => {
+              const quizObj = allQuizzes.find((q) => q.id === qId);
+              const cat = quizObj ? (quizObj.category || quizObj.title || '') : qId;
+              return !matchesSubject(cat);
+            });
+            localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify(remainingCompleted));
+          }
+
+          // Filter quiz history
+          const hist = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || '[]');
+          if (Array.isArray(hist)) {
+            const remainingHist = hist.filter((item) => {
+              const cat = item.category || item.title || '';
+              return !matchesSubject(cat);
+            });
+            localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify(remainingHist));
+          }
+        }
+
+        // Filter & sync global submissions table (Recent Quiz Submissions)
+        try {
+          const savedSubmissions = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+          const list = savedSubmissions ? JSON.parse(savedSubmissions) : [];
+          if (Array.isArray(list)) {
+            const isTargetStudentSub = (sub) => {
+              const subStudent = (sub.student || '').trim().toLowerCase();
+              const subEmail = (sub.studentEmail || '').trim().toLowerCase();
+              const tName = (targetStudent.name || '').trim().toLowerCase();
+              const tEmail = (targetStudent.email || '').trim().toLowerCase();
+              const tId = (targetStudent.id || '').trim().toLowerCase();
+              const tStudentId = (targetStudent.studentId || '').trim().toLowerCase();
+
+              if (subEmail && tEmail && subEmail === tEmail) return true;
+              if (sub.studentId && (sub.studentId === tId || sub.studentId === tStudentId)) return true;
+              if (subStudent && tName && (subStudent === tName || subStudent.includes(tName) || tName.includes(subStudent))) return true;
+              if (subStudent && tEmail && subStudent === tEmail) return true;
+              return false;
+            };
+
+            const remainingGlobal = list.filter((sub) => {
+              if (!isTargetStudentSub(sub)) {
+                return true; // Keep other students' submissions
+              }
+              if (isResetAll) {
+                return false; // Remove all submissions for this reset student
+              }
+              const titleOrCat = `${sub.quizTitle || ''} ${sub.category || ''}`;
+              return !matchesSubject(titleOrCat);
+            });
+
+            localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(remainingGlobal));
+
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: remainingGlobal })
+              );
+            }
+          }
+        } catch (subErr) {
+          console.warn('Failed to filter global submissions on reset:', subErr);
+        }
+
         localStorage.setItem(
           'learnsmart_last_reset_student',
           JSON.stringify({
             studentId: targetStudent.id,
             name: targetStudent.name,
             email: targetStudent.email,
+            selectedSubjects: isResetAll ? 'all' : selectedSubjects,
             timestamp: Date.now()
           })
         );
       } catch (err) {
-        console.warn('Failed to clear quiz storage on reset:', err);
+        console.warn('Failed to update quiz storage on reset:', err);
       }
 
       if (typeof window !== 'undefined') {
@@ -555,10 +886,12 @@ export const sharedDatabase = {
             detail: {
               studentId: targetStudent.id,
               name: targetStudent.name,
-              email: targetStudent.email
+              email: targetStudent.email,
+              resetSubjects: isResetAll ? 'all' : selectedSubjects
             }
           })
         );
+        window.dispatchEvent(new CustomEvent('learnsmart_quiz_completed', { detail: { action: 'reset' } }));
       }
 
       return all[idx];
@@ -566,14 +899,43 @@ export const sharedDatabase = {
     return null;
   },
 
-  // Update existing student metrics (e.g. after quiz completion)
-  updateStudent: (studentId, updates) => {
+  resetAllStudents: (selectedSubjects = null) => {
     const all = loadStoredStudents();
-    const idx = all.findIndex((s) => s.id === studentId);
+    const isResetAll =
+      !selectedSubjects ||
+      selectedSubjects === 'all' ||
+      (Array.isArray(selectedSubjects) && selectedSubjects.length === 0);
+
+    all.forEach((s) => {
+      sharedDatabase.resetStudent(s.id, selectedSubjects);
+    });
+
+    if (isResetAll) {
+      try {
+        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: [] })
+          );
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    return loadStoredStudents();
+  },
+
+  // Update existing student metrics (e.g. after quiz completion)
+  // Ensures assigned studentId is strictly non-editable
+  updateStudent: (studentId, updates = {}) => {
+    const all = loadStoredStudents();
+    const idx = all.findIndex((s) => s.id === studentId || s.studentId === studentId);
     if (idx !== -1) {
+      // Strip out any attempts to overwrite the permanent unique studentId
+      const { studentId: _attemptedChange, ...safeUpdates } = updates;
       all[idx] = {
         ...all[idx],
-        ...updates
+        ...safeUpdates
       };
       persistStudents(all);
       return all[idx];
@@ -581,13 +943,20 @@ export const sharedDatabase = {
     return null;
   },
 
+  // Generate unique student ID
+  generateUniqueStudentId: () => {
+    return generateStudentId();
+  },
+
   // Record a completed quiz attempt for a student
   recordQuizAttempt: ({ studentName, studentEmail, quizTitle, score, category }) => {
     const all = loadStoredStudents();
     const student =
+      (studentEmail && sharedDatabase.getStudentByEmail(studentEmail)) ||
+      (studentName && sharedDatabase.getStudentByUsername(studentName)) ||
       all.find((s) => studentEmail && s.email && s.email.toLowerCase() === studentEmail.toLowerCase()) ||
       all.find((s) => studentName && s.name && s.name.toLowerCase() === studentName.toLowerCase()) ||
-      all[0];
+      (all.length > 0 ? all[0] : null);
 
     if (student) {
       const prevTotal = student.quizzesCompleted || 0;
@@ -595,15 +964,6 @@ export const sharedDatabase = {
       const newTotal = prevTotal + 1;
       const newAvg = Math.round(((prevAvg * prevTotal + score) / newTotal) * 10) / 10;
       const newHigh = Math.max(student.highestScore || 0, score);
-
-      const newSubmission = {
-        title: quizTitle,
-        score: `${score}%`,
-        status: 'Completed',
-        date: 'Today'
-      };
-
-      const updatedSubmissions = [newSubmission, ...(student.recentSubmissions || [])].slice(0, 5);
 
       // Determine subject domain for quiz
       const resolveSubject = (t = '', c = '') => {
@@ -622,6 +982,17 @@ export const sharedDatabase = {
       };
 
       const subName = resolveSubject(quizTitle, category);
+
+      const newSubmission = {
+        id: `sub-${Date.now()}`,
+        title: quizTitle,
+        category: category || subName || 'General',
+        score: `${score}%`,
+        status: 'Completed',
+        date: 'Today'
+      };
+
+      const updatedSubmissions = [newSubmission, ...(student.recentSubmissions || [])].slice(0, 5);
       const currentMastery = Array.isArray(student.subjectMastery) && student.subjectMastery.length > 0
         ? [...student.subjectMastery]
         : [
@@ -669,7 +1040,10 @@ export const sharedDatabase = {
         const newEntry = {
           id: Date.now(),
           student: student.name,
+          studentEmail: student.email,
+          studentId: student.id,
           quizTitle,
+          category: category || subName,
           score: `${score}%`,
           status: 'Completed',
           date: 'Just now'
@@ -741,6 +1115,48 @@ export const sharedDatabase = {
       return newNotif;
     } catch (e) {
       console.warn('Failed to send student notification:', e);
+      return null;
+    }
+  },
+
+  // Admin / System sends notification to educators
+  sendEducatorNotification: ({
+    title,
+    message,
+    category = 'announcement',
+    type = 'info',
+    sender = 'Administrator',
+    priority = 'normal'
+  }) => {
+    try {
+      const notifKey = 'learnsmart_educator_notifications';
+      const rawNotifs = localStorage.getItem(notifKey);
+      const currentNotifs = rawNotifs ? JSON.parse(rawNotifs) : [];
+      const newNotif = {
+        id: `ed-notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        title,
+        message,
+        category,
+        type,
+        time: 'Just now',
+        timestamp: 'Just now',
+        unread: true,
+        read: false,
+        sender,
+        priority,
+        date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+      };
+      const updatedNotifs = [newNotif, ...currentNotifs];
+      localStorage.setItem(notifKey, JSON.stringify(updatedNotifs));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('learnsmart_educator_notifications_updated', { detail: updatedNotifs })
+        );
+        window.dispatchEvent(new Event('storage'));
+      }
+      return newNotif;
+    } catch (err) {
+      console.warn('Failed to dispatch educator notification:', err);
       return null;
     }
   },
@@ -988,13 +1404,63 @@ export const sharedDatabase = {
     return loadStoredQuizzes();
   },
 
+  /**
+   * Returns all active/published quizzes for the student dashboard.
+   * Merges custom educator/admin quizzes and baseline curriculum quizzes without duplicates.
+   */
+  getPublishedQuizzes: () => {
+    const stored = loadStoredQuizzes();
+    const storedActive = stored.filter(
+      (q) => q.status === 'Active' || (!q.status && q.status !== 'Draft' && q.status !== 'Archived')
+    );
+
+    const seenIds = new Set();
+    const seenTitles = new Set();
+    const result = [];
+
+    // 1. Add active stored quizzes (created/managed by educators and admins)
+    storedActive.forEach((q) => {
+      const idKey = (q.id || '').toLowerCase();
+      const titleKey = (q.title || '').trim().toLowerCase();
+      if (!seenIds.has(idKey) && !seenTitles.has(titleKey)) {
+        seenIds.add(idKey);
+        seenTitles.add(titleKey);
+        result.push({
+          ...q,
+          isRecommended: q.isRecommended !== undefined ? q.isRecommended : true,
+          questionsCount: q.questionsCount || (q.questions || []).length || 5,
+          duration: q.duration || '15 mins',
+          recommendationReason: q.recommendationReason || 'Curriculum Assessment • Assigned by Instructor'
+        });
+      }
+    });
+
+    // 2. Also ensure baseline curriculum quizzes from QUIZ_CATALOG are included
+    QUIZ_CATALOG.forEach((q) => {
+      const idKey = (q.id || '').toLowerCase();
+      const titleKey = (q.title || '').trim().toLowerCase();
+      if (!seenIds.has(idKey) && !seenTitles.has(titleKey)) {
+        seenIds.add(idKey);
+        seenTitles.add(titleKey);
+        result.push(q);
+      }
+    });
+
+    return result;
+  },
+
+  persistQuizzes: (quizzes) => {
+    persistQuizzes(quizzes);
+  },
+
   getQuizById: (id) => {
-    const all = loadStoredQuizzes();
+    const all = sharedDatabase.getPublishedQuizzes();
     return all.find((q) => q.id === id) || null;
   },
 
   addQuiz: (quizData) => {
     const all = loadStoredQuizzes();
+    const isPub = quizData.status === 'Active' || !quizData.status;
     const newQuiz = {
       id: quizData.id || `quiz-${Date.now()}`,
       title: quizData.title || 'Untitled Quiz',
@@ -1005,6 +1471,8 @@ export const sharedDatabase = {
       diffBg: quizData.diffBg || '#FFEDD5',
       diffColor: quizData.diffColor || '#C2410C',
       status: quizData.status || 'Active',
+      isRecommended: quizData.isRecommended !== undefined ? quizData.isRecommended : isPub,
+      recommendationReason: quizData.recommendationReason || 'Newly Published Assessment • Assigned by Instructor',
       questionsCount: (quizData.questions || []).length || 5,
       duration: quizData.duration || '15 mins',
       submissionsCount: 0,
@@ -1026,12 +1494,22 @@ export const sharedDatabase = {
       type: 'info'
     });
 
+    // Notify students that a new quiz is published
+    if (isPub) {
+      sharedDatabase.sendStudentNotification({
+        title: `New Quiz: ${newQuiz.title}`,
+        message: `A new ${newQuiz.difficulty} assessment in ${newQuiz.category} has been published by your instructor. Test your knowledge now!`,
+        category: 'quiz',
+        type: 'info'
+      });
+    }
+
     return newQuiz;
   },
 
   updateQuiz: (id, updates) => {
     const all = loadStoredQuizzes();
-    const idx = all.findIndex((q) => q.id === id);
+    const idx = all.findIndex((q) => String(q.id).trim() === String(id).trim());
     if (idx !== -1) {
       all[idx] = { ...all[idx], ...updates, lastUpdated: 'Just now' };
       persistQuizzes(all);
@@ -1042,14 +1520,14 @@ export const sharedDatabase = {
 
   removeQuiz: (id) => {
     const all = loadStoredQuizzes();
-    const updated = all.filter((q) => q.id !== id);
+    const updated = all.filter((q) => String(q.id).trim() !== String(id).trim());
     persistQuizzes(updated);
     return updated;
   },
 
   toggleQuizStatus: (id) => {
     const all = loadStoredQuizzes();
-    const idx = all.findIndex((q) => q.id === id);
+    const idx = all.findIndex((q) => String(q.id).trim() === String(id).trim());
     if (idx !== -1) {
       const current = all[idx].status || 'Active';
       all[idx].status = current === 'Active' ? 'Draft' : 'Active';
@@ -1063,27 +1541,76 @@ export const sharedDatabase = {
   // SUBMISSIONS
   // ==========================================
   getSubmissions: () => {
+    const allStudents = loadStoredStudents();
+    const validStudentIds = new Set();
+    const validStudentEmails = new Set();
+    const validStudentNames = new Set();
+
+    allStudents.forEach((student) => {
+      if (student.isActive !== false) {
+        if (student.id) validStudentIds.add(String(student.id).trim().toLowerCase());
+        if (student.studentId) validStudentIds.add(String(student.studentId).trim().toLowerCase());
+        if (student.email) validStudentEmails.add(String(student.email).trim().toLowerCase());
+        if (student.name) validStudentNames.add(String(student.name).trim().toLowerCase());
+      }
+    });
+
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          // If no active students exist at all, clear submissions
+          if (validStudentIds.size === 0 && validStudentEmails.size === 0 && validStudentNames.size === 0) {
+            if (parsed.length > 0) {
+              localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
+            }
+            return [];
+          }
+
+          // Filter out submissions belonging to deleted students
+          const validSubmissions = parsed.filter((sub) => {
+            const subId = String(sub.studentId || '').trim().toLowerCase();
+            const subEmail = String(sub.studentEmail || '').trim().toLowerCase();
+            const subName = String(sub.student || '').trim().toLowerCase();
+
+            if (subId && validStudentIds.has(subId)) return true;
+            if (subEmail && validStudentEmails.has(subEmail)) return true;
+            if (subName && validStudentNames.has(subName)) return true;
+
+            for (const validName of validStudentNames) {
+              if (validName && subName && (validName === subName || subName.includes(validName) || validName.includes(subName))) {
+                return true;
+              }
+            }
+
+            return false;
+          });
+
+          // Sync storage if orphan submissions were pruned
+          if (validSubmissions.length !== parsed.length) {
+            localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(validSubmissions));
+          }
+
+          return validSubmissions;
         }
       }
     } catch {
       // ignore
     }
+
     // Fallback: Aggregate from active students' recentSubmissions
-    const allStudents = loadStoredStudents();
     const aggregated = [];
     allStudents.forEach((student) => {
-      if (Array.isArray(student.recentSubmissions) && student.recentSubmissions.length > 0) {
+      if (student.isActive !== false && Array.isArray(student.recentSubmissions) && student.recentSubmissions.length > 0) {
         student.recentSubmissions.forEach((sub, idx) => {
           aggregated.push({
             id: `sub-${student.id}-${idx}`,
             student: student.name,
-            quizTitle: sub.title,
+            studentEmail: student.email,
+            studentId: student.id,
+            quizTitle: sub.title || sub.quizTitle,
+            category: sub.category || '',
             score: sub.score,
             status: sub.status || 'Completed',
             date: sub.date || student.lastActive || 'Today'
@@ -1235,9 +1762,10 @@ export const sharedDatabase = {
   },
 
   deleteUser: (userId, role) => {
-    if (role === 'Student' || role === 'student') {
+    const cleanRole = String(role || '').trim().toLowerCase();
+    if (cleanRole === 'student') {
       return sharedDatabase.removeStudent(userId);
-    } else if (role === 'Educator' || role === 'educator') {
+    } else if (cleanRole === 'educator') {
       return sharedDatabase.removeEducator(userId);
     }
     return null;

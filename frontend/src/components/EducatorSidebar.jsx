@@ -3,7 +3,8 @@ import {
   HomeIcon,
   BellIcon,
   UserIcon,
-  LogoutIcon
+  LogoutIcon,
+  SettingsIcon
 } from './Icons';
 
 // Custom icons specifically matching the reference image's sidebar
@@ -63,7 +64,8 @@ export const EducatorSidebar = ({
     { id: 'Analytics', label: 'Analytics', icon: AnalyticsIcon },
     { id: 'Reports', label: 'Reports', icon: ReportsIcon },
     { id: 'Notifications', label: 'Notifications', icon: BellIcon, badge: notificationCount > 0 ? notificationCount : null },
-    { id: 'Profile', label: 'Profile', icon: UserIcon }
+    { id: 'Profile', label: 'Profile', icon: UserIcon },
+    { id: 'Settings', label: 'Settings', icon: SettingsIcon }
   ];
 
   const handleItemClick = (id) => {

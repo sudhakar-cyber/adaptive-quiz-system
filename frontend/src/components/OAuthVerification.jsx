@@ -60,13 +60,14 @@ export const OAuthVerification = ({
 
       setIsVerifying(false);
 
-      if (res && res.success && res.student) {
+      if (res && res.success && (res.student || res.user)) {
         setIsSuccess(true);
         setShowConsentModal(false);
         showToast('Google account verified successfully!');
+        const userObj = res.student || res.user;
         setTimeout(() => {
           if (onOAuthSuccess) {
-            onOAuthSuccess(res.student);
+            onOAuthSuccess(userObj);
           }
         }, 800);
       } else if (res?.error) {

@@ -17,7 +17,8 @@ import {
   CameraIcon,
   UploadIcon,
   TrashIcon,
-  LockIcon
+  LockIcon,
+  SettingsIcon
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 
@@ -44,17 +45,25 @@ export const ProfileView = ({
   }, [profileImage]);
 
   const [formData, setFormData] = useState(() => {
+    let resolvedStudentId = '';
     try {
       const saved = localStorage.getItem('learnsmart_student_profile');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
+          resolvedStudentId = parsed.studentId || '';
+          if (!resolvedStudentId) {
+            const student =
+              (userEmail ? sharedDatabase.getStudentByEmail(userEmail) : null) ||
+              (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
+            resolvedStudentId = student?.studentId || sharedDatabase.generateUniqueStudentId();
+          }
           return {
             fullName: displayName || parsed.fullName || 'Student',
             email: userEmail || parsed.email || '',
             phone: parsed.phone || '',
             major: parsed.major || 'Computer Science & Engineering',
-            studentId: parsed.studentId || '',
+            studentId: resolvedStudentId,
             uid: uid || parsed.uid || '',
             semester: parsed.semester || 'Year 1',
             bio: parsed.bio || '',
@@ -65,12 +74,17 @@ export const ProfileView = ({
     } catch (e) {
       console.warn('Failed to parse saved student profile', e);
     }
+    const student =
+      (userEmail ? sharedDatabase.getStudentByEmail(userEmail) : null) ||
+      (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
+    resolvedStudentId = student?.studentId || sharedDatabase.generateUniqueStudentId();
+
     return {
       fullName: displayName || 'Student',
       email: userEmail || '',
       phone: '',
       major: 'Computer Science & Engineering',
-      studentId: '',
+      studentId: resolvedStudentId,
       uid: uid || '',
       semester: 'Year 1',
       bio: '',
@@ -81,12 +95,37 @@ export const ProfileView = ({
 
   // Sync with prop if display name, email, or uid changes
   useEffect(() => {
-    setFormData((prev) => ({
-      ...prev,
-      fullName: displayName || prev.fullName,
-      email: userEmail || prev.email,
-      uid: uid || prev.uid || ''
-    }));
+    setFormData((prev) => {
+      let currentId = prev.studentId;
+      if (!currentId) {
+        const student =
+          (userEmail ? sharedDatabase.getStudentByEmail(userEmail) : null) ||
+          (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
+        if (student?.studentId) {
+          currentId = student.studentId;
+        } else {
+          currentId = sharedDatabase.generateUniqueStudentId();
+          if (student) {
+            sharedDatabase.updateStudent(student.id, { studentId: currentId });
+          }
+        }
+      }
+      try {
+        const saved = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
+        saved.studentId = currentId;
+        if (displayName) saved.fullName = displayName;
+        if (userEmail) saved.email = userEmail;
+        localStorage.setItem('learnsmart_student_profile', JSON.stringify(saved));
+      } catch (e) {}
+
+      return {
+        ...prev,
+        fullName: displayName || prev.fullName,
+        email: userEmail || prev.email,
+        studentId: currentId,
+        uid: uid || prev.uid || ''
+      };
+    });
   }, [displayName, userEmail, uid]);
 
   // Handle external trigger to open edit modal (e.g. from dropdown)
@@ -279,8 +318,7 @@ export const ProfileView = ({
               {formData.major} • {formData.semester}
             </p>
             <div className="profile-id-pills">
-              <span className="id-pill">ID: {formData.studentId}</span>
-              {formData.uid && <span className="id-pill">UID: {formData.uid.slice(0, 10)}...</span>}
+              <span className="id-pill">Student ID: {formData.studentId}</span>
               <span className="id-pill">Academic Year: 2024-2027</span>
             </div>
           </div>
@@ -325,12 +363,10 @@ export const ProfileView = ({
               <span className="detail-item-value">{formData.email}</span>
             </div>
 
-            {formData.uid && (
-              <div className="profile-detail-item">
-                <span className="detail-item-label">Firebase UID:</span>
-                <span className="detail-item-value" style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{formData.uid}</span>
-              </div>
-            )}
+            <div className="profile-detail-item">
+              <span className="detail-item-label">Student ID:</span>
+              <span className="detail-item-value" style={{ fontWeight: 600 }}>{formData.studentId}</span>
+            </div>
 
             <div className="profile-detail-item">
               <span className="detail-item-label">Phone Number:</span>
@@ -340,11 +376,6 @@ export const ProfileView = ({
             <div className="profile-detail-item">
               <span className="detail-item-label">Department:</span>
               <span className="detail-item-value">{formData.major}</span>
-            </div>
-
-            <div className="profile-detail-item">
-              <span className="detail-item-label">Student ID:</span>
-              <span className="detail-item-value">{formData.studentId}</span>
             </div>
 
             <div className="profile-detail-item full-width">
@@ -500,6 +531,27 @@ export const ProfileView = ({
                   <div className="form-row-2col">
                     <div className="form-group-field">
                       <div className="field-label-row">
+                        <label className="field-label">Student ID</label>
+                        <span className="field-locked-pill" title="Unique Student ID is permanent and non-editable">
+                          <LockIcon size={11} color="#64748B" />
+                          <span>Non-editable</span>
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        className="field-text-input input-field-readonly"
+                        value={formData.studentId}
+                        readOnly
+                        disabled
+                        tabIndex={-1}
+                        title="Student ID is permanently assigned by LearnSmart and cannot be modified."
+                        placeholder="LS-2025-XXXX"
+                      />
+                      <span className="field-hint-text">Assigned unique student identification number.</span>
+                    </div>
+
+                    <div className="form-group-field">
+                      <div className="field-label-row">
                         <label className="field-label">Email Address</label>
                         <span className="field-locked-pill" title="Email Address cannot be modified by student">
                           <LockIcon size={11} color="#64748B" />
@@ -518,6 +570,9 @@ export const ProfileView = ({
                       />
                       <span className="field-hint-text">Institutional account email cannot be modified.</span>
                     </div>
+                  </div>
+
+                  <div className="form-row-2col">
                     <div className="form-group-field">
                       <label className="field-label">Phone Number</label>
                       <input
@@ -528,29 +583,7 @@ export const ProfileView = ({
                         placeholder="+91 98765 43210"
                       />
                     </div>
-                  </div>
 
-                  <div className="form-row-2col">
-                    <div className="form-group-field">
-                      <div className="field-label-row">
-                        <label className="field-label">Department / Major</label>
-                        <span className="field-locked-pill" title="Department / Major cannot be modified by student">
-                          <LockIcon size={11} color="#64748B" />
-                          <span>Non-editable</span>
-                        </span>
-                      </div>
-                      <input
-                        type="text"
-                        className="field-text-input input-field-readonly"
-                        value={formData.major}
-                        readOnly
-                        disabled
-                        tabIndex={-1}
-                        title="Department / Major cannot be modified by student."
-                        placeholder="Computer Science & Engineering"
-                      />
-                      <span className="field-hint-text">Department is assigned by your institution or educator.</span>
-                    </div>
                     <div className="form-group-field">
                       <label className="field-label">Academic Semester</label>
                       <input
@@ -561,6 +594,27 @@ export const ProfileView = ({
                         placeholder="Year 3 (Semester 6)"
                       />
                     </div>
+                  </div>
+
+                  <div className="form-group-field">
+                    <div className="field-label-row">
+                      <label className="field-label">Department / Major</label>
+                      <span className="field-locked-pill" title="Department / Major cannot be modified by student">
+                        <LockIcon size={11} color="#64748B" />
+                        <span>Non-editable</span>
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      className="field-text-input input-field-readonly"
+                      value={formData.major}
+                      readOnly
+                      disabled
+                      tabIndex={-1}
+                      title="Department / Major cannot be modified by student."
+                      placeholder="Computer Science & Engineering"
+                    />
+                    <span className="field-hint-text">Department is assigned by your institution or educator.</span>
                   </div>
 
                   <div className="form-group-field">
@@ -661,6 +715,18 @@ export const ProfileDropdownMenu = ({
         >
           <EditIcon size={16} />
           <span>Edit Student Profile</span>
+        </button>
+
+        <button
+          type="button"
+          className="dropdown-menu-link"
+          onClick={() => {
+            onNavigate('settings');
+            onClose();
+          }}
+        >
+          <SettingsIcon size={16} />
+          <span>Settings</span>
         </button>
 
         <button

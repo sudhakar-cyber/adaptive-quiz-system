@@ -32,7 +32,11 @@ export const TakeQuizView = ({
     }
   }, [isRecommendedView]);
 
-  const categories = ['Recommended', 'All', 'Programming', 'Cyber Security', 'DSA', 'Mathematics'];
+  const baseCategories = ['Programming', 'Cyber Security', 'DSA', 'Mathematics'];
+  const extraCategories = Array.from(
+    new Set((quizzes || []).map((q) => q.category).filter(Boolean))
+  ).filter((c) => !baseCategories.some((b) => b.toLowerCase() === c.toLowerCase()));
+  const categories = ['Recommended', 'All', ...baseCategories, ...extraCategories];
   const difficulties = ['All', 'Easy', 'Medium', 'Hard'];
 
   const effectiveSearch = (externalSearch || localSearch).trim().toLowerCase();

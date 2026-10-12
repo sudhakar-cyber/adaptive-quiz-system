@@ -12,10 +12,15 @@ const AdminHeader = ({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  const adminName = adminUser?.name || adminUser?.fullName || 'Admin';
+  const adminName = adminUser?.fullName || adminUser?.name || 'Alex Vance';
   const adminEmail = adminUser?.email || 'admin@learnsmart.edu';
   const adminRole = adminUser?.title || 'Administrator';
-  const adminInitial = (adminName || 'A').trim()[0]?.toUpperCase() || 'A';
+  const adminInitial = (() => {
+    const n = adminName.trim();
+    const parts = n.split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (n[0] || 'A').toUpperCase();
+  })();
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -106,7 +111,17 @@ const AdminHeader = ({
             onClick={() => setDropdownOpen(!dropdownOpen)}
             title="Administrator Profile Menu"
           >
-            <div className="adh-avatar">{adminInitial}</div>
+            <div className="adh-avatar" style={{ overflow: 'hidden' }}>
+              {adminUser?.avatarImage ? (
+                <img
+                  src={adminUser.avatarImage}
+                  alt={adminName}
+                  style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                />
+              ) : (
+                adminInitial
+              )}
+            </div>
             <div className="adh-profile-info">
               <span className="adh-profile-name">{adminName}</span>
               <span className="adh-profile-role">{adminRole}</span>
@@ -119,16 +134,16 @@ const AdminHeader = ({
           {dropdownOpen && (
             <div className="adh-dropdown">
               <div
-                style={{ padding: '8px 16px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer' }}
+                style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-light, #F1F5F9)', cursor: 'pointer' }}
                 onClick={() => {
                   setDropdownOpen(false);
                   if (onSelectTab) onSelectTab('profile');
                 }}
               >
-                <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0F172A' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'inherit' }}>
                   {adminName}
                 </div>
-                <div style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                <div style={{ fontSize: '0.74rem', color: '#94A3B8' }}>
                   {adminEmail}
                 </div>
               </div>
@@ -163,20 +178,6 @@ const AdminHeader = ({
             </div>
           )}
         </div>
-
-        {/* Prominent Direct Header Logout Button */}
-        <button
-          className="adh-direct-logout-btn"
-          onClick={onLogout}
-          title="Sign Out of Admin Portal"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-          <span>Logout</span>
-        </button>
       </div>
     </header>
   );

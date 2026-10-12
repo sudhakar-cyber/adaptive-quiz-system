@@ -280,11 +280,21 @@ export const authService = {
         }
       }
 
+      let assignedStudentId = student?.studentId;
+      if (!assignedStudentId) {
+        assignedStudentId = sharedDatabase.generateUniqueStudentId();
+        if (student && student.id) {
+          student.studentId = assignedStudentId;
+          sharedDatabase.updateStudent(student.id, { studentId: assignedStudentId });
+        }
+      }
+
       const activeStudent = student || {
         name: studentName || 'Student',
         email: studentEmail || '',
         avatarImage: avatarImage || null,
         uid: uid || '',
+        studentId: assignedStudentId,
         role: 'student'
       };
 
@@ -311,7 +321,7 @@ export const authService = {
           photoURL: activeStudent.avatarImage || null,
           uid: activeStudent.uid || '',
           phone: activeStudent.phone || '',
-          studentId: activeStudent.studentId || '',
+          studentId: activeStudent.studentId || assignedStudentId,
           major: activeStudent.topSubject || 'General / Onboarding',
           role: 'student'
         })
@@ -660,28 +670,9 @@ export const authService = {
         return { success: false, error: new Error('Google authentication returned no user.') };
       }
 
-      // 3. Check Firebase email verification status
-      if (user.emailVerified) {
-        // Google accounts are normally already verified by Google.
-        // Do NOT send another verification email.
-        return await authService.completeGoogleLogin(user, additionalData);
-      }
-
-      // 4. If emailVerified === false:
-      // Send Firebase verification email and block access until complete
-      try {
-        await sendEmailVerification(user);
-      } catch (evErr) {
-        console.warn('sendEmailVerification notice:', evErr);
-      }
-
-      return {
-        success: false,
-        requiresVerification: true,
-        user,
-        email: user.email,
-        message: 'Verification email sent. Please check your email and verify your account.'
-      };
+      // 3. Complete Google Login immediately
+      // Google accounts authenticated via Google OAuth are inherently verified by Google.
+      return await authService.completeGoogleLogin(user, additionalData);
     } catch (error) {
       console.warn('Firebase Google login error:', error);
       const friendlyMessage = authService.getGoogleAuthErrorMessage(error);
@@ -822,7 +813,21 @@ export const authService = {
       let firebaseSuccess = false;
       let firebaseError = null;
 
-      // 1. Attempt sending password reset email via Firebase Authentication
+      // 1. Ensure user account is registered in Firebase Auth so Firebase actually delivers the email
+      try {
+        const createdCred = await createUserWithEmailAndPassword(
+          auth,
+          cleanEmail,
+          `Ls_Reset_${Date.now()}!${Math.random().toString(36).substring(2, 8)}`
+        );
+        if (createdCred?.user) {
+          await firebaseSignOut(auth).catch(() => {});
+        }
+      } catch (createErr) {
+        // 'auth/email-already-in-use' means user is already registered in Firebase Auth, proceed normally
+      }
+
+      // 2. Attempt sending password reset email via Firebase Authentication
       try {
         await sendPasswordResetEmail(auth, cleanEmail);
         firebaseSuccess = true;
