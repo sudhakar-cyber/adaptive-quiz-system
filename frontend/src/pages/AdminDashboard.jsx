@@ -25,6 +25,8 @@ export const AdminDashboard = ({ onLogout }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedQuizCategory, setSelectedQuizCategory] = useState('all');
+  const [selectedQuizStatus, setSelectedQuizStatus] = useState('all');
   const [toastMessage, setToastMessage] = useState('');
   const mainRef = useRef(null);
 
@@ -301,6 +303,18 @@ export const AdminDashboard = ({ onLogout }) => {
     setNotifications(updated);
   };
 
+  const handleDeleteNotification = (notifOrId) => {
+    const updated = sharedDatabase.deleteAdminNotification(notifOrId);
+    setNotifications(updated);
+    showToast('Notification deleted successfully');
+  };
+
+  const handleClearAllNotifications = () => {
+    const updated = sharedDatabase.clearAllAdminNotifications();
+    setNotifications(updated);
+    showToast('All notifications cleared successfully');
+  };
+
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
   const activeQuizzesCount = quizzes.filter((q) => q.status === 'Active' || !q.status).length;
   const draftQuizzesCount = Math.max(0, quizzes.length - activeQuizzesCount);
@@ -328,7 +342,12 @@ export const AdminDashboard = ({ onLogout }) => {
       value: quizzes.length || stats.totalQuizzes || 0,
       subtitle: `${activeQuizzesCount} Published • ${draftQuizzesCount} Drafts`,
       color: 'green',
-      onClick: () => setActiveTab('quizzes'),
+      onClick: () => {
+        setSelectedQuizCategory('all');
+        setSelectedQuizStatus('all');
+        setActiveTab('quizzes');
+        showToast('Viewing all quizzes in Quiz Management');
+      },
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -345,7 +364,12 @@ export const AdminDashboard = ({ onLogout }) => {
       value: activeQuizzesCount,
       subtitle: 'Live in student catalog',
       color: 'orange',
-      onClick: () => setActiveTab('quizzes'),
+      onClick: () => {
+        setSelectedQuizCategory('all');
+        setSelectedQuizStatus('active');
+        setActiveTab('quizzes');
+        showToast('Filtered to active quizzes in Quiz Management');
+      },
       icon: (
         <svg viewBox="0 0 24 24" fill="currentColor">
           <polygon points="5 3 19 12 5 21 5 3"/>
@@ -408,6 +432,10 @@ export const AdminDashboard = ({ onLogout }) => {
         onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
         onLogout={onLogout}
         onSelectTab={(tab) => {
+          if (tab === 'quizzes') {
+            setSelectedQuizCategory('all');
+            setSelectedQuizStatus('all');
+          }
           setActiveTab(tab);
           setSidebarOpen(false);
         }}
@@ -422,6 +450,10 @@ export const AdminDashboard = ({ onLogout }) => {
         <AdminSidebar
           activeTab={activeTab}
           onSelectTab={(tab) => {
+            if (tab === 'quizzes') {
+              setSelectedQuizCategory('all');
+              setSelectedQuizStatus('all');
+            }
             setActiveTab(tab);
             setSidebarOpen(false);
           }}
@@ -450,14 +482,46 @@ export const AdminDashboard = ({ onLogout }) => {
               {/* Charts Row */}
               <div className="ad-charts-row">
                 <div className="ad-chart-card ad-growth-card">
-                  <h3 className="ad-card-title">User Growth</h3>
-                  <UserGrowthChart users={users} />
+                  <div className="ad-card-header-flex">
+                    <h3 className="ad-card-title">User Growth</h3>
+                    <button
+                      type="button"
+                      className="ad-card-action-link"
+                      onClick={() => setActiveTab('users')}
+                      title="Manage institutional users"
+                    >
+                      Manage Users →
+                    </button>
+                  </div>
+                  <UserGrowthChart
+                    users={users}
+                    onSelectPoint={() => setActiveTab('users')}
+                  />
                 </div>
                 <div className="ad-chart-card ad-category-card">
-                  <h3 className="ad-card-title">Quiz Category Distribution</h3>
+                  <div className="ad-card-header-flex">
+                    <h3 className="ad-card-title">Quiz Category Distribution</h3>
+                    <button
+                      type="button"
+                      className="ad-card-action-link"
+                      onClick={() => {
+                        setSelectedQuizCategory('all');
+                        setSelectedQuizStatus('all');
+                        setActiveTab('quizzes');
+                      }}
+                      title="View all quiz categories"
+                    >
+                      Manage Quizzes →
+                    </button>
+                  </div>
                   <QuizCategoryChart
                     quizzes={quizzes}
-                    onSelectCategory={() => setActiveTab('quizzes')}
+                    onSelectCategory={(categoryName) => {
+                      setSelectedQuizCategory(categoryName);
+                      setSelectedQuizStatus('all');
+                      setActiveTab('quizzes');
+                      showToast(`Filtered quizzes by category: ${categoryName}`);
+                    }}
                   />
                 </div>
               </div>
@@ -495,6 +559,8 @@ export const AdminDashboard = ({ onLogout }) => {
           {activeTab === 'quizzes' && (
             <AdminQuizManagementView
               quizzes={quizzes}
+              initialCategoryFilter={selectedQuizCategory}
+              initialStatusFilter={selectedQuizStatus}
               onToggleStatus={handleToggleQuizStatus}
               onDeleteQuiz={handleDeleteQuiz}
               onUpdateQuizzes={handleUpdateQuizzes}
@@ -535,6 +601,8 @@ export const AdminDashboard = ({ onLogout }) => {
               notifications={notifications}
               onMarkRead={handleMarkRead}
               onMarkAllRead={handleMarkAllRead}
+              onDeleteNotification={handleDeleteNotification}
+              onClearAllNotifications={handleClearAllNotifications}
               showToast={showToast}
               onRefresh={refreshData}
             />

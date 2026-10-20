@@ -6,14 +6,12 @@ import {
   ShieldIcon,
   SparklesIcon,
   CheckIcon,
-  StarIcon,
-  SunIcon,
-  MoonIcon
+  StarIcon
 } from './Icons';
 import { useTheme } from './ThemeToggle';
 
 export const EducatorSettingsView = ({ showToast }) => {
-  const { theme, toggleTheme, isDark } = useTheme();
+  const { isDark } = useTheme();
   const [settings, setSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('learnsmart_educator_settings');
@@ -280,42 +278,6 @@ export const EducatorSettingsView = ({ showToast }) => {
                 defaultChecked={true}
                 className="educator-custom-checkbox"
               />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 4: Appearance & Display Theme */}
-        <div className="educator-content-card" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
-            <div style={{ width: '38px', height: '38px', borderRadius: '10px', backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {isDark ? <MoonIcon size={20} color="#818CF8" /> : <SunIcon size={20} color="#F59E0B" />}
-            </div>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>Appearance & Display Theme</h3>
-              <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: '#64748B' }}>
-                Select between Light and Dark interface modes for the educator portal
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <strong style={{ fontSize: '0.88rem', display: 'block' }}>
-                  Dark Mode Theme ({isDark ? 'Active' : 'Disabled'})
-                </strong>
-                <span style={{ fontSize: '0.76rem', color: '#64748B' }}>
-                  Toggle between high-contrast Dark theme and clean Light theme
-                </span>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={isDark}
-                  onChange={toggleTheme}
-                />
-                <span className="slider round"></span>
-              </label>
             </div>
           </div>
         </div>

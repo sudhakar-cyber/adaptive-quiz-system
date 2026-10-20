@@ -4,17 +4,12 @@ import {
   CheckCircleIcon,
   SparklesIcon,
   ShieldIcon,
-  SunIcon,
-  MoonIcon,
   LockIcon,
   XIcon
 } from './Icons';
-import { useTheme } from './ThemeToggle';
 import { sharedDatabase } from '../services/sharedDatabase';
 
 export const AdminSettingsView = () => {
-  const { theme, toggleTheme, isDark } = useTheme();
-
   const [settings, setSettings] = useState({
     registrationOpen: true,
     adaptiveDifficulty: true,
@@ -314,39 +309,6 @@ export const AdminSettingsView = () => {
                 type="checkbox"
                 checked={settings.maintenanceMode}
                 onChange={() => toggle('maintenanceMode')}
-              />
-              <span className="slider round"></span>
-            </label>
-          </div>
-        </div>
-
-        {/* Card 5: Appearance & Display Theme */}
-        <div className="settings-group-card">
-          <div className="settings-group-header">
-            {isDark ? (
-              <MoonIcon size={20} color="#818CF8" />
-            ) : (
-              <SunIcon size={20} color="#F59E0B" />
-            )}
-            <div>
-              <h3>Appearance & Theme Preference</h3>
-              <p>Configure interface lighting mode across the administrative portal</p>
-            </div>
-          </div>
-          <div className="settings-toggle-row">
-            <div>
-              <span className="toggle-title">
-                Dark Mode Theme ({isDark ? 'Active' : 'Disabled'})
-              </span>
-              <span className="toggle-desc">
-                Switch between high-contrast Dark theme and clean Light theme.
-              </span>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={isDark}
-                onChange={toggleTheme}
               />
               <span className="slider round"></span>
             </label>

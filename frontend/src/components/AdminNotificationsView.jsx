@@ -7,7 +7,8 @@ import {
   UserPlusIcon,
   SettingsIcon,
   FlameIcon,
-  SendIcon
+  SendIcon,
+  TrashIcon
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 
@@ -15,6 +16,8 @@ export const AdminNotificationsView = ({
   notifications = [],
   onMarkRead,
   onMarkAllRead,
+  onDeleteNotification,
+  onClearAllNotifications,
   showToast,
   onRefresh
 }) => {
@@ -98,6 +101,7 @@ export const AdminNotificationsView = ({
       educatorName: 'Administrator'
     };
 
+    const broadcastId = `bcast-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     let recipientSummary = '';
 
     // 1. Send to students if selected or All
@@ -107,7 +111,8 @@ export const AdminNotificationsView = ({
         message: payload.message,
         category: payload.category,
         priority: payload.priority,
-        educatorName: 'Administrator'
+        educatorName: 'Administrator',
+        broadcastId
       });
     }
 
@@ -118,7 +123,8 @@ export const AdminNotificationsView = ({
         message: payload.message,
         category: payload.category,
         priority: payload.priority,
-        sender: 'Administrator'
+        sender: 'Administrator',
+        broadcastId
       });
     }
 
@@ -136,7 +142,10 @@ export const AdminNotificationsView = ({
       title: `Sent to ${recipientSummary}: ${payload.title}`,
       message: payload.message,
       category: payload.category,
-      type: 'info'
+      type: 'info',
+      broadcastId,
+      rawTitle: payload.title,
+      targetAudience: recipientSummary
     });
 
     if (showToast) {
@@ -158,6 +167,36 @@ export const AdminNotificationsView = ({
     setSendToEducators(false);
     setSendToStudents(false);
     setIsSendModalOpen(false);
+  };
+
+  const handleDeleteNotification = (notif) => {
+    if (onDeleteNotification) {
+      onDeleteNotification(notif);
+    } else {
+      sharedDatabase.deleteAdminNotification(notif);
+      if (showToast) {
+        showToast('Notification deleted successfully');
+      }
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+    }
+  };
+
+  const handleClearAll = () => {
+    if (window.confirm('Are you sure you want to delete all notifications? Any broadcast announcements sent to students or educators will also be removed.')) {
+      if (onClearAllNotifications) {
+        onClearAllNotifications();
+      } else {
+        sharedDatabase.clearAllAdminNotifications();
+        if (showToast) {
+          showToast('All notifications cleared successfully');
+        }
+        if (typeof onRefresh === 'function') {
+          onRefresh();
+        }
+      }
+    }
   };
 
   const filtered = notifications.filter((n) => {
@@ -210,6 +249,18 @@ export const AdminNotificationsView = ({
             <CheckCircleIcon size={16} color="#6366F1" />
             <span>Mark All as Read</span>
           </button>
+
+          {notifications.length > 0 && (
+            <button
+              type="button"
+              className="admin-secondary-btn danger"
+              onClick={handleClearAll}
+              title="Delete all notifications"
+            >
+              <TrashIcon size={16} color="#DC2626" />
+              <span>Clear All</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -249,9 +300,23 @@ export const AdminNotificationsView = ({
                 </div>
                 <p className="notif-item-message">{notif.message}</p>
               </div>
-              {notif.unread && (
-                <div className="notif-unread-dot" title="Unread notification" />
-              )}
+              <div className="notif-item-actions" onClick={(e) => e.stopPropagation()}>
+                {notif.unread && (
+                  <div className="notif-unread-dot" title="Unread notification" />
+                )}
+                <button
+                  type="button"
+                  className="notif-delete-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteNotification(notif);
+                  }}
+                  title="Delete notification"
+                  aria-label="Delete notification"
+                >
+                  <TrashIcon size={16} />
+                </button>
+              </div>
             </div>
           ))
         )}

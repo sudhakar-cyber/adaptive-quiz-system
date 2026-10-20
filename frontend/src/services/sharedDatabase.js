@@ -9,9 +9,11 @@ const STORAGE_KEY_QUIZZES = 'learnsmart_educator_quizzes';
 const STORAGE_KEY_SUBMISSIONS = 'learnsmart_shared_submissions';
 const STORAGE_KEY_STUDENT_NOTIFICATIONS = 'learnsmart_student_notifications';
 const STORAGE_KEY_ADMIN_NOTIFICATIONS = 'learnsmart_admin_notifications';
+const STORAGE_KEY_EDUCATOR_NOTIFICATIONS = 'learnsmart_educator_notifications';
 
 const EVENT_STUDENTS_UPDATED = 'learnsmart_students_updated';
 const EVENT_STUDENT_NOTIFICATIONS_UPDATED = 'learnsmart_student_notifications_updated';
+const EVENT_EDUCATOR_NOTIFICATIONS_UPDATED = 'learnsmart_educator_notifications_updated';
 const EVENT_ADMIN_UPDATED = 'learnsmart_admin_updated';
 const EVENT_QUIZZES_UPDATED = 'learnsmart_quizzes_updated';
 export const EVENT_SUBMISSIONS_UPDATED = 'learnsmart_submissions_updated';
@@ -229,26 +231,16 @@ const INITIAL_SEED_EDUCATORS = [
     lastActive: 'Just now',
     avatarInitials: 'SJ',
     avatarImage: null,
-    quizzesCreated: 4,
-    activeQuizzes: 4,
-    totalStudents: 48,
-    avgPerformance: 88.5,
-    rating: 4.9,
+    quizzesCreated: 0,
+    activeQuizzes: 0,
+    totalStudents: 0,
+    avgPerformance: 0,
+    rating: 5.0,
     isActive: true
   }
 ];
 
-const INITIAL_ADMIN_NOTIFICATIONS = [
-  {
-    id: 'admin-notif-system',
-    title: 'System Online',
-    message: 'Adaptive Quiz Platform is running smoothly.',
-    category: 'system',
-    timestamp: 'Today',
-    unread: false,
-    type: 'system'
-  }
-];
+const INITIAL_ADMIN_NOTIFICATIONS = [];
 
 // Load Stored Educators
 const loadStoredEducators = () => {
@@ -282,6 +274,84 @@ const persistEducators = (educators) => {
   notifyAdminSubscribers();
 };
 
+// Storage Keys & Clean Slate Reset
+const STORAGE_KEY_CLEAN_SLATE = 'learnsmart_clean_slate_v3';
+
+// Execute one-time clean slate reset to purge all default data while preserving educator and admin credentials
+const performCleanSlateReset = () => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (localStorage.getItem(STORAGE_KEY_CLEAN_SLATE) === 'true') return;
+
+    // 1. Wipe all default mock data
+    localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_ADMIN_NOTIFICATIONS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEY_EDUCATOR_NOTIFICATIONS, JSON.stringify([]));
+    localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify([]));
+    localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
+    localStorage.setItem('learnsmart_student_streak', '0');
+    localStorage.setItem('learnsmart_educator_reports', JSON.stringify([]));
+    localStorage.setItem('learnsmart_shared_feedbacks', JSON.stringify([]));
+
+    // 2. Preserve Educator credentials
+    const existingEducators = (() => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_EDUCATORS);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    })();
+
+    if (!Array.isArray(existingEducators) || existingEducators.length === 0) {
+      localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(INITIAL_SEED_EDUCATORS));
+    } else {
+      const updatedEdu = existingEducators.map((e) => ({
+        ...e,
+        quizzesCreated: 0,
+        activeQuizzes: 0,
+        totalStudents: 0,
+        avgPerformance: 0
+      }));
+      localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(updatedEdu));
+    }
+
+    // 3. Preserve Admin credentials
+    const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
+    try {
+      const rawAdmin = localStorage.getItem(STORAGE_KEY_ADMIN);
+      if (!rawAdmin) {
+        localStorage.setItem(
+          STORAGE_KEY_ADMIN,
+          JSON.stringify({
+            name: 'Alex Vance',
+            email: 'admin@learnsmart.edu',
+            password: 'Admin@123',
+            role: 'admin'
+          })
+        );
+      }
+    } catch {}
+
+    localStorage.setItem(STORAGE_KEY_CLEAN_SLATE, 'true');
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: [] }));
+      window.dispatchEvent(new CustomEvent(EVENT_STUDENTS_UPDATED, { detail: [] }));
+      window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: [] }));
+      window.dispatchEvent(new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: [] }));
+      window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: [] }));
+      window.dispatchEvent(new Event('storage'));
+    }
+  } catch (e) {
+    console.warn('Notice: Clean slate initialization skipped:', e);
+  }
+};
+
+performCleanSlateReset();
+
 // Load Stored Quizzes
 const loadStoredQuizzes = () => {
   try {
@@ -295,13 +365,7 @@ const loadStoredQuizzes = () => {
   } catch (err) {
     console.warn('Failed to load quizzes from localStorage:', err);
   }
-
-  try {
-    localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(INITIAL_EDUCATOR_QUIZZES));
-  } catch (err) {
-    console.warn('Failed to seed quizzes to localStorage:', err);
-  }
-  return INITIAL_EDUCATOR_QUIZZES;
+  return [];
 };
 
 // Persist Quizzes
@@ -313,6 +377,7 @@ const persistQuizzes = (quizzes) => {
   }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: quizzes }));
+    window.dispatchEvent(new Event('storage'));
   }
   notifyAdminSubscribers();
 };
@@ -321,9 +386,9 @@ const persistQuizzes = (quizzes) => {
 const loadAdminNotifications = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_ADMIN_NOTIFICATIONS);
-    if (saved) {
+    if (saved !== null) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
@@ -347,6 +412,9 @@ const persistAdminNotifications = (notifications) => {
     console.error('Failed to persist admin notifications:', err);
   }
   notifyAdminSubscribers();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('storage'));
+  }
 };
 
 // Save Students to LocalStorage and trigger events
@@ -1087,13 +1155,14 @@ export const sharedDatabase = {
     targetStudentIds = 'all',
     targetStudentNames = [],
     educatorName = 'Educator',
-    priority = 'normal'
+    priority = 'normal',
+    broadcastId = null
   }) => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
-      const list = saved ? JSON.parse(saved) : [...INITIAL_NOTIFICATIONS];
+      const list = saved !== null ? JSON.parse(saved) : [...INITIAL_NOTIFICATIONS];
       const newNotif = {
-        id: `notif-${Date.now()}`,
+        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         title,
         message,
         category,
@@ -1103,6 +1172,7 @@ export const sharedDatabase = {
         sender: educatorName,
         targetStudentIds,
         targetStudentNames,
+        broadcastId: broadcastId || null,
         date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
       };
       const updated = [newNotif, ...list];
@@ -1111,6 +1181,7 @@ export const sharedDatabase = {
         window.dispatchEvent(
           new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updated })
         );
+        window.dispatchEvent(new Event('storage'));
       }
       return newNotif;
     } catch (e) {
@@ -1126,12 +1197,13 @@ export const sharedDatabase = {
     category = 'announcement',
     type = 'info',
     sender = 'Administrator',
-    priority = 'normal'
+    priority = 'normal',
+    broadcastId = null
   }) => {
     try {
-      const notifKey = 'learnsmart_educator_notifications';
+      const notifKey = STORAGE_KEY_EDUCATOR_NOTIFICATIONS;
       const rawNotifs = localStorage.getItem(notifKey);
-      const currentNotifs = rawNotifs ? JSON.parse(rawNotifs) : [];
+      const currentNotifs = rawNotifs !== null ? JSON.parse(rawNotifs) : [];
       const newNotif = {
         id: `ed-notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         title,
@@ -1144,13 +1216,14 @@ export const sharedDatabase = {
         read: false,
         sender,
         priority,
+        broadcastId: broadcastId || null,
         date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
       };
       const updatedNotifs = [newNotif, ...currentNotifs];
       localStorage.setItem(notifKey, JSON.stringify(updatedNotifs));
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
-          new CustomEvent('learnsmart_educator_notifications_updated', { detail: updatedNotifs })
+          new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updatedNotifs })
         );
         window.dispatchEvent(new Event('storage'));
       }
@@ -1406,7 +1479,7 @@ export const sharedDatabase = {
 
   /**
    * Returns all active/published quizzes for the student dashboard.
-   * Merges custom educator/admin quizzes and baseline curriculum quizzes without duplicates.
+   * Unified with educator & admin quizzes in the shared database.
    */
   getPublishedQuizzes: () => {
     const stored = loadStoredQuizzes();
@@ -1418,7 +1491,6 @@ export const sharedDatabase = {
     const seenTitles = new Set();
     const result = [];
 
-    // 1. Add active stored quizzes (created/managed by educators and admins)
     storedActive.forEach((q) => {
       const idKey = (q.id || '').toLowerCase();
       const titleKey = (q.title || '').trim().toLowerCase();
@@ -1435,17 +1507,6 @@ export const sharedDatabase = {
       }
     });
 
-    // 2. Also ensure baseline curriculum quizzes from QUIZ_CATALOG are included
-    QUIZ_CATALOG.forEach((q) => {
-      const idKey = (q.id || '').toLowerCase();
-      const titleKey = (q.title || '').trim().toLowerCase();
-      if (!seenIds.has(idKey) && !seenTitles.has(titleKey)) {
-        seenIds.add(idKey);
-        seenTitles.add(titleKey);
-        result.push(q);
-      }
-    });
-
     return result;
   },
 
@@ -1454,8 +1515,10 @@ export const sharedDatabase = {
   },
 
   getQuizById: (id) => {
-    const all = sharedDatabase.getPublishedQuizzes();
-    return all.find((q) => q.id === id) || null;
+    if (!id) return null;
+    const all = loadStoredQuizzes();
+    const targetId = String(id).trim().toLowerCase();
+    return all.find((q) => String(q.id).trim().toLowerCase() === targetId) || null;
   },
 
   addQuiz: (quizData) => {
@@ -1788,7 +1851,7 @@ export const sharedDatabase = {
     const validScores = students.filter((s) => s.avgScore > 0);
     const avgScore = validScores.length > 0
       ? Math.round((validScores.reduce((acc, s) => acc + (s.avgScore || 0), 0) / validScores.length) * 10) / 10
-      : 82.5;
+      : 0;
 
     return {
       totalUsers: liveTotalUsers,
@@ -1799,7 +1862,7 @@ export const sharedDatabase = {
       totalEducators: educators.length,
       completedQuizzes: liveCompleted,
       avgScore: `${avgScore}%`,
-      completionRate: '100%',
+      completionRate: liveTotalQuizzes > 0 ? `${Math.round((liveCompleted / liveTotalQuizzes) * 100)}%` : '0%',
       serverUptime: '99.98%',
       apiLatency: '42ms'
     };
@@ -1809,61 +1872,67 @@ export const sharedDatabase = {
   getUserGrowthData: (timeframe = '6 Months') => {
     const students = sharedDatabase.getStudents();
     const educators = sharedDatabase.getEducators();
-    const extra = students.length + educators.length;
+    const totalUsers = students.length + educators.length + 1;
 
     switch (timeframe) {
       case '7 Days':
         return [
-          { label: 'Mon', count: 320 + extra },
-          { label: 'Tue', count: 345 + extra },
-          { label: 'Wed', count: 370 + extra },
-          { label: 'Thu', count: 395 + extra },
-          { label: 'Fri', count: 420 + extra },
-          { label: 'Sat', count: 455 + extra },
-          { label: 'Sun', count: 482 + extra }
+          { label: 'Mon', count: totalUsers },
+          { label: 'Tue', count: totalUsers },
+          { label: 'Wed', count: totalUsers },
+          { label: 'Thu', count: totalUsers },
+          { label: 'Fri', count: totalUsers },
+          { label: 'Sat', count: totalUsers },
+          { label: 'Sun', count: totalUsers }
         ];
       case '30 Days':
         return [
-          { label: 'Week 1', count: 210 + extra },
-          { label: 'Week 2', count: 290 + extra },
-          { label: 'Week 3', count: 380 + extra },
-          { label: 'Week 4', count: 482 + extra }
+          { label: 'Week 1', count: totalUsers },
+          { label: 'Week 2', count: totalUsers },
+          { label: 'Week 3', count: totalUsers },
+          { label: 'Week 4', count: totalUsers }
         ];
       case '3 Months':
         return [
-          { label: 'Month 1', count: 260 + extra },
-          { label: 'Month 2', count: 360 + extra },
-          { label: 'Month 3', count: 482 + extra }
+          { label: 'Month 1', count: totalUsers },
+          { label: 'Month 2', count: totalUsers },
+          { label: 'Month 3', count: totalUsers }
         ];
       case '1 Year':
         return [
-          { label: 'Q1', count: 120 + extra },
-          { label: 'Q2', count: 220 + extra },
-          { label: 'Q3', count: 340 + extra },
-          { label: 'Q4', count: 482 + extra }
+          { label: 'Q1', count: totalUsers },
+          { label: 'Q2', count: totalUsers },
+          { label: 'Q3', count: totalUsers },
+          { label: 'Q4', count: totalUsers }
         ];
       case '6 Months':
       default:
         return [
-          { label: 'Jan', count: 50 },
-          { label: 'Feb', count: 100 },
-          { label: 'Mar', count: 140 },
-          { label: 'Apr', count: 170 },
-          { label: 'May', count: 210 },
-          { label: 'Jun', count: 240 }
+          { label: 'Jan', count: totalUsers },
+          { label: 'Feb', count: totalUsers },
+          { label: 'Mar', count: totalUsers },
+          { label: 'Apr', count: totalUsers },
+          { label: 'May', count: totalUsers },
+          { label: 'Jun', count: totalUsers }
         ];
     }
   },
 
-  // Quiz Category Distribution (Donut/Pie Chart matching attached image)
+  // Quiz Category Distribution (Donut/Pie Chart matching real quizzes)
   getQuizCategoryDistribution: () => {
-    return [
-      { name: 'Programming', percentage: 32, count: 28, color: '#3B82F6' },
-      { name: 'DSA', percentage: 28, count: 24, color: '#10B981' },
-      { name: 'Cyber Security', percentage: 20, count: 17, color: '#8B5CF6' },
-      { name: 'Web Dev', percentage: 12, count: 11, color: '#F97316' },
-      { name: 'Others', percentage: 8, count: 7, color: '#F59E0B' }
-    ];
+    const quizzes = sharedDatabase.getQuizzes();
+    if (!Array.isArray(quizzes) || quizzes.length === 0) return [];
+    const counts = {};
+    quizzes.forEach((q) => {
+      const cat = q.category || 'General';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    const total = quizzes.length;
+    return Object.keys(counts).map((name) => ({
+      name,
+      count: counts[name],
+      percentage: Math.round((counts[name] / total) * 100)
+    }));
   },
 
   // Recent Users
@@ -1891,20 +1960,244 @@ export const sharedDatabase = {
     return updated;
   },
 
-  sendAdminNotification: ({ title, message, category = 'system', type = 'info' }) => {
+  sendAdminNotification: ({
+    title,
+    message,
+    category = 'system',
+    type = 'info',
+    broadcastId = null,
+    rawTitle = null,
+    targetAudience = null
+  }) => {
     const list = loadAdminNotifications();
     const newNotif = {
-      id: `admin-notif-${Date.now()}`,
+      id: `admin-notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       title,
       message,
       category,
       type,
       timestamp: 'Just now',
-      unread: true
+      unread: true,
+      broadcastId: broadcastId || null,
+      rawTitle: rawTitle || title,
+      targetAudience: targetAudience || null
     };
     const updated = [newNotif, ...list];
     persistAdminNotifications(updated);
     return newNotif;
+  },
+
+  // Synchronize notification deletion across Student and Educator dashboards
+  syncNotificationDeletionAcrossDashboards: (targetNotif) => {
+    if (!targetNotif) return;
+    const bId = targetNotif.broadcastId;
+    const cleanMsg = (targetNotif.message || '').trim().toLowerCase();
+    const rawTitle = (targetNotif.rawTitle || '').trim().toLowerCase();
+    const fullTitle = (targetNotif.title || '').trim().toLowerCase();
+    const strippedTitle = (targetNotif.title || '').replace(/^sent to [^:]+:\s*/i, '').trim().toLowerCase();
+
+    // 1. Delete matching from Student notifications
+    try {
+      const studentRaw = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
+      if (studentRaw) {
+        const studentList = JSON.parse(studentRaw);
+        if (Array.isArray(studentList)) {
+          const updatedStudents = studentList.filter((sn) => {
+            if (sn.id && sn.id === targetNotif.id) return false;
+            if (bId && sn.broadcastId && sn.broadcastId === bId) return false;
+            const snMsg = (sn.message || '').trim().toLowerCase();
+            const snTitle = (sn.title || '').trim().toLowerCase();
+            if (cleanMsg && snMsg === cleanMsg) {
+              if (rawTitle && snTitle === rawTitle) return false;
+              if (strippedTitle && snTitle === strippedTitle) return false;
+              if (fullTitle && snTitle === fullTitle) return false;
+              if (fullTitle.includes(snTitle) || snTitle.includes(strippedTitle)) return false;
+              const sender = (sn.sender || '').trim().toLowerCase();
+              if (sender === 'administrator' || sender === 'admin') return false;
+            }
+            return true;
+          });
+
+          if (updatedStudents.length !== studentList.length) {
+            localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify(updatedStudents));
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updatedStudents })
+              );
+              window.dispatchEvent(new Event('storage'));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to sync student notification deletion:', err);
+    }
+
+    // 2. Delete matching from Educator notifications
+    try {
+      const edRaw = localStorage.getItem(STORAGE_KEY_EDUCATOR_NOTIFICATIONS);
+      if (edRaw) {
+        const edList = JSON.parse(edRaw);
+        if (Array.isArray(edList)) {
+          const updatedEducators = edList.filter((en) => {
+            if (en.id && en.id === targetNotif.id) return false;
+            if (bId && en.broadcastId && en.broadcastId === bId) return false;
+            const enMsg = (en.message || '').trim().toLowerCase();
+            const enTitle = (en.title || '').trim().toLowerCase();
+            if (cleanMsg && enMsg === cleanMsg) {
+              if (rawTitle && enTitle === rawTitle) return false;
+              if (strippedTitle && enTitle === strippedTitle) return false;
+              if (fullTitle && enTitle === fullTitle) return false;
+              if (fullTitle.includes(enTitle) || enTitle.includes(strippedTitle)) return false;
+              const sender = (en.sender || '').trim().toLowerCase();
+              if (sender === 'administrator' || sender === 'admin') return false;
+            }
+            return true;
+          });
+
+          if (updatedEducators.length !== edList.length) {
+            localStorage.setItem(STORAGE_KEY_EDUCATOR_NOTIFICATIONS, JSON.stringify(updatedEducators));
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updatedEducators })
+              );
+              window.dispatchEvent(new Event('storage'));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to sync educator notification deletion:', err);
+    }
+  },
+
+  deleteAdminNotification: (idOrNotif) => {
+    const list = loadAdminNotifications();
+    const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
+    const targetNotif = typeof idOrNotif === 'object' && idOrNotif !== null 
+      ? idOrNotif 
+      : list.find((n) => n.id === targetId);
+
+    const updatedAdmin = list.filter((n) => n.id !== targetId);
+    persistAdminNotifications(updatedAdmin);
+
+    if (targetNotif) {
+      sharedDatabase.syncNotificationDeletionAcrossDashboards(targetNotif);
+    }
+
+    return updatedAdmin;
+  },
+
+  clearAllAdminNotifications: () => {
+    const list = loadAdminNotifications();
+    list.forEach((notif) => {
+      sharedDatabase.syncNotificationDeletionAcrossDashboards(notif);
+    });
+    persistAdminNotifications([]);
+    return [];
+  },
+
+  // Educator Notification Deletion (with reflection to Student Dashboard)
+  deleteEducatorNotification: (idOrNotif) => {
+    try {
+      const notifKey = STORAGE_KEY_EDUCATOR_NOTIFICATIONS;
+      const rawNotifs = localStorage.getItem(notifKey);
+      const list = rawNotifs !== null ? JSON.parse(rawNotifs) : [];
+
+      const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
+      const targetNotif = typeof idOrNotif === 'object' && idOrNotif !== null
+        ? idOrNotif
+        : list.find((n) => n.id === targetId);
+
+      const updatedEducators = list.filter((n) => n.id !== targetId);
+      localStorage.setItem(notifKey, JSON.stringify(updatedEducators));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updatedEducators })
+        );
+        window.dispatchEvent(new Event('storage'));
+      }
+
+      // If this notification was sent to students, remove it from Student notifications
+      if (targetNotif) {
+        const bId = targetNotif.broadcastId;
+        const rawTitle = (targetNotif.rawTitle || (targetNotif.title || '').replace(/^sent:\s*/i, '')).trim().toLowerCase();
+
+        // Extract raw message if it was formatted like: Delivered to All Students: "..."
+        let rawMsg = targetNotif.rawMessage;
+        if (!rawMsg && targetNotif.message) {
+          const matchQuote = targetNotif.message.match(/"([^"]+)"/);
+          rawMsg = matchQuote ? matchQuote[1] : targetNotif.message;
+        }
+        const cleanMsg = (rawMsg || '').trim().toLowerCase();
+
+        try {
+          const studentRaw = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
+          if (studentRaw) {
+            const studentList = JSON.parse(studentRaw);
+            if (Array.isArray(studentList)) {
+              const updatedStudents = studentList.filter((sn) => {
+                if (sn.id && sn.id === targetNotif.id) return false;
+                if (bId && sn.broadcastId && sn.broadcastId === bId) return false;
+
+                const snMsg = (sn.message || '').trim().toLowerCase();
+                const snTitle = (sn.title || '').trim().toLowerCase();
+
+                if (cleanMsg && (snMsg === cleanMsg || snMsg.includes(cleanMsg) || cleanMsg.includes(snMsg))) {
+                  if (rawTitle && (snTitle === rawTitle || snTitle.includes(rawTitle) || rawTitle.includes(snTitle))) {
+                    return false;
+                  }
+                  if (targetNotif.category === 'sent') return false;
+                }
+                return true;
+              });
+
+              if (updatedStudents.length !== studentList.length) {
+                localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify(updatedStudents));
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(
+                    new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updatedStudents })
+                  );
+                  window.dispatchEvent(new Event('storage'));
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to sync student notification deletion from educator:', e);
+        }
+      }
+
+      return updatedEducators;
+    } catch (err) {
+      console.warn('Failed to delete educator notification:', err);
+      return [];
+    }
+  },
+
+  clearAllEducatorNotifications: () => {
+    try {
+      const notifKey = STORAGE_KEY_EDUCATOR_NOTIFICATIONS;
+      const rawNotifs = localStorage.getItem(notifKey);
+      const list = rawNotifs !== null ? JSON.parse(rawNotifs) : [];
+      list.forEach((n) => {
+        if (n.category === 'sent' || n.broadcastId) {
+          sharedDatabase.deleteEducatorNotification(n);
+        }
+      });
+      localStorage.setItem(notifKey, JSON.stringify([]));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: [] })
+        );
+        window.dispatchEvent(new Event('storage'));
+      }
+      return [];
+    } catch (err) {
+      console.warn('Failed to clear educator notifications:', err);
+      return [];
+    }
   },
 
   // Subscribe to Admin updates

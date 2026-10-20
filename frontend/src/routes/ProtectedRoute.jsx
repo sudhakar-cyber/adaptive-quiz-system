@@ -102,31 +102,9 @@ export const StudentRoute = ({ children }) => {
   return <Navigate to="/login" replace />;
 };
 
-// Public Route Guard for root /:
-// - If already logged in as Admin -> auto-redirect to /admin-dashboard
-// - If already logged in as Educator -> auto-redirect to /educator-dashboard
-// - If already logged in as Student -> auto-redirect to /dashboard
-// - Otherwise -> allow Login page
+// Public Route Guard for auth pages:
+// Renders public authentication screens (Login, Register, OTP)
 export const PublicAuthRoute = ({ children }) => {
-  const { isLoading, user, role } = useAuthStatus();
-
-  if (isLoading) {
-    return <RouteLoader />;
-  }
-
-  if (role === 'admin') {
-    return <Navigate to="/admin-dashboard" replace />;
-  }
-
-  if (role === 'educator') {
-    return <Navigate to="/educator-dashboard" replace />;
-  }
-
-  const effectiveRole = role || (user ? 'student' : null);
-  if (effectiveRole === 'student' && (user || authService.isStudent())) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
   return children;
 };
 

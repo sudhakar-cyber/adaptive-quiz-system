@@ -3,10 +3,12 @@ import React from 'react';
 const StatCard = ({ label, value, subtitle, color, icon, onClick }) => {
   return (
     <div
-      className={`asc-card asc-${color}`}
+      className={`asc-card asc-${color} ${onClick ? 'clickable' : ''}`}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
+      title={onClick ? `Click to view ${label}` : undefined}
+      aria-label={label}
       onKeyDown={
         onClick
           ? (e) => {

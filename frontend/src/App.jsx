@@ -5,7 +5,7 @@ import { ResetPassword } from './pages/ResetPassword';
 import { EducatorDashboard } from './pages/EducatorDashboard';
 import { Dashboard } from './components/Dashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
-import { AdminRoute, EducatorRoute, StudentRoute, PublicAuthRoute } from './routes/ProtectedRoute';
+import { AdminRoute, EducatorRoute, StudentRoute } from './routes/ProtectedRoute';
 import { authService } from './services/authService';
 import { auth, onAuthStateChanged } from './config/firebase';
 import { useTheme } from './components/ThemeToggle';
@@ -100,11 +100,7 @@ function AppRoutes() {
       />
       <Route
         path="/"
-        element={
-          <PublicAuthRoute>
-            <Login onLoginSuccess={handleLoginSuccess} />
-          </PublicAuthRoute>
-        }
+        element={<Navigate to="/login" replace />}
       />
 
       {/* Role-Protected Admin Dashboard */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   SearchIcon,
   FilterIcon,
@@ -14,6 +14,15 @@ import {
 import { INITIAL_EDUCATOR_QUIZZES } from '../data/educatorData';
 import { sharedDatabase } from '../services/sharedDatabase';
 
+const normalizeCategory = (cat) => {
+  if (!cat) return '';
+  const c = cat.trim().toLowerCase();
+  if (c.startsWith('database')) return 'database systems';
+  if (c.startsWith('web dev')) return 'web development';
+  if (c === 'data structures' || c === 'algorithms' || c === 'dsa') return 'dsa';
+  return c;
+};
+
 export const AdminQuizManagementView = ({
   quizzes = [],
   onToggleStatus,
@@ -21,25 +30,51 @@ export const AdminQuizManagementView = ({
   onUpdateQuizzes,
   onSaveQuiz,
   showToast,
-  externalSearch = ''
+  externalSearch = '',
+  initialCategoryFilter = 'all',
+  initialStatusFilter = 'all'
 }) => {
-  const [search, setSearch] = useState(externalSearch);
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [search, setSearch] = useState(externalSearch || '');
+  const [categoryFilter, setCategoryFilter] = useState(
+    initialCategoryFilter ? initialCategoryFilter.toLowerCase() : 'all'
+  );
   const [difficultyFilter, setDifficultyFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(
+    initialStatusFilter ? initialStatusFilter.toLowerCase() : 'all'
+  );
+
+  const lastInitialCategory = useRef(initialCategoryFilter);
+  const lastInitialStatus = useRef(initialStatusFilter);
+  const lastExternalSearch = useRef(externalSearch);
+
+  // Synchronize external filters ONLY when their props actually change value
+  useEffect(() => {
+    if (initialCategoryFilter !== undefined && initialCategoryFilter !== lastInitialCategory.current) {
+      lastInitialCategory.current = initialCategoryFilter;
+      setCategoryFilter(initialCategoryFilter ? initialCategoryFilter.toLowerCase() : 'all');
+    }
+  }, [initialCategoryFilter]);
+
+  useEffect(() => {
+    if (initialStatusFilter !== undefined && initialStatusFilter !== lastInitialStatus.current) {
+      lastInitialStatus.current = initialStatusFilter;
+      setStatusFilter(initialStatusFilter ? initialStatusFilter.toLowerCase() : 'all');
+    }
+  }, [initialStatusFilter]);
+
+  // Synchronize external search if passed from top header search bar
+  useEffect(() => {
+    if (externalSearch !== undefined && externalSearch !== lastExternalSearch.current) {
+      lastExternalSearch.current = externalSearch;
+      setSearch(externalSearch);
+    }
+  }, [externalSearch]);
 
   // Modals state
   const [selectedQuiz, setSelectedQuiz] = useState(null); // Preview / Inspect
   const [isFormModalOpen, setIsFormModalOpen] = useState(false); // Create or Edit Modal
   const [editingQuiz, setEditingQuiz] = useState(null); // null = Create, object = Edit
   const [deleteConfirmQuiz, setDeleteConfirmQuiz] = useState(null); // Quiz pending delete confirmation
-
-  // Synchronize external search if passed from top header search bar
-  useEffect(() => {
-    if (externalSearch !== undefined) {
-      setSearch(externalSearch);
-    }
-  }, [externalSearch]);
 
   // Form State for Quiz Create / Edit
   const [formData, setFormData] = useState({
@@ -52,7 +87,7 @@ export const AdminQuizManagementView = ({
     description: '',
     questions: [
       {
-        id: 1,
+        id: 'q-initial-1',
         question: '',
         options: ['', '', '', ''],
         correctIndex: 0,
@@ -62,9 +97,9 @@ export const AdminQuizManagementView = ({
   });
 
   // Effective list of quizzes with safe fallback
-  const rawList = Array.isArray(quizzes) && quizzes.length > 0
+  const rawList = Array.isArray(quizzes)
     ? quizzes
-    : (typeof sharedDatabase?.getQuizzes === 'function' ? sharedDatabase.getQuizzes() : INITIAL_EDUCATOR_QUIZZES);
+    : (typeof sharedDatabase?.getQuizzes === 'function' ? sharedDatabase.getQuizzes() : []);
 
   // Dynamically extract categories for filter
   const standardCategories = [
@@ -74,7 +109,8 @@ export const AdminQuizManagementView = ({
     'Machine Learning',
     'Cloud Computing',
     'Database Systems',
-    'Web Development'
+    'Web Development',
+    'Mathematics'
   ];
 
   const availableCategories = Array.from(
@@ -96,7 +132,7 @@ export const AdminQuizManagementView = ({
 
     const matchCategory =
       categoryFilter === 'all' ||
-      q.category?.trim().toLowerCase() === categoryFilter.trim().toLowerCase();
+      normalizeCategory(q.category) === normalizeCategory(categoryFilter);
 
     const matchDifficulty =
       difficultyFilter === 'all' ||
@@ -116,6 +152,10 @@ export const AdminQuizManagementView = ({
     setCategoryFilter('all');
     setDifficultyFilter('all');
     setStatusFilter('all');
+    lastInitialCategory.current = 'all';
+    lastInitialStatus.current = 'all';
+    lastExternalSearch.current = '';
+    if (showToast) showToast('Filters reset to default view.');
   };
 
   // Open Create Quiz Modal
@@ -131,7 +171,7 @@ export const AdminQuizManagementView = ({
       description: '',
       questions: [
         {
-          id: Date.now(),
+          id: `q-${Date.now()}-1`,
           question: '',
           options: ['', '', '', ''],
           correctIndex: 0,
@@ -144,7 +184,35 @@ export const AdminQuizManagementView = ({
 
   // Open Edit Quiz Modal
   const handleOpenEdit = (quiz) => {
+    if (!quiz) return;
     setEditingQuiz(quiz);
+    const existingQuestions = Array.isArray(quiz.questions) && quiz.questions.length > 0
+      ? JSON.parse(JSON.stringify(quiz.questions))
+      : [
+          {
+            id: `q-${Date.now()}-1`,
+            question: `Core principles testing comprehension of ${quiz.category || 'Topic'}`,
+            options: ['Option A (Correct)', 'Option B', 'Option C', 'Option D'],
+            correctIndex: 0,
+            explanation: 'Verified solution according to course syllabus.'
+          }
+        ];
+
+    const normalizedQuestions = existingQuestions.map((q, idx) => ({
+      id: q.id || `q-${Date.now()}-${idx + 1}`,
+      question: q.question || q.title || `Question ${idx + 1}`,
+      options: Array.isArray(q.options) && q.options.length === 4
+        ? q.options
+        : [
+            (q.options && q.options[0]) || 'Option A',
+            (q.options && q.options[1]) || 'Option B',
+            (q.options && q.options[2]) || 'Option C',
+            (q.options && q.options[3]) || 'Option D'
+          ],
+      correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
+      explanation: q.explanation || ''
+    }));
+
     setFormData({
       title: quiz.title || '',
       category: quiz.category || 'Programming',
@@ -153,17 +221,7 @@ export const AdminQuizManagementView = ({
       status: quiz.status || 'Active',
       createdBy: quiz.createdBy || 'Administrator',
       description: quiz.description || '',
-      questions: Array.isArray(quiz.questions) && quiz.questions.length > 0
-        ? JSON.parse(JSON.stringify(quiz.questions))
-        : [
-            {
-              id: Date.now(),
-              question: '',
-              options: ['', '', '', ''],
-              correctIndex: 0,
-              explanation: ''
-            }
-          ]
+      questions: normalizedQuestions
     });
     if (selectedQuiz) setSelectedQuiz(null);
     setIsFormModalOpen(true);
@@ -176,7 +234,7 @@ export const AdminQuizManagementView = ({
       questions: [
         ...prev.questions,
         {
-          id: Date.now(),
+          id: `q-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           question: '',
           options: ['', '', '', ''],
           correctIndex: 0,
@@ -237,11 +295,16 @@ export const AdminQuizManagementView = ({
     const map = {
       Programming: { bg: '#E6FAF0', color: '#00BA88' },
       DSA: { bg: '#DBEAFE', color: '#1D4ED8' },
+      'Data Structures': { bg: '#DBEAFE', color: '#1D4ED8' },
       'Cyber Security': { bg: '#F3E8FF', color: '#7E22CE' },
       'Machine Learning': { bg: '#FEF3C7', color: '#B45309' },
       'Cloud Computing': { bg: '#E0F2FE', color: '#0369A1' },
       'Web Development': { bg: '#FFEDD5', color: '#C2410C' },
-      'Database Systems': { bg: '#EDE9FE', color: '#6D28D9' }
+      'Web Dev': { bg: '#FFEDD5', color: '#C2410C' },
+      'Database Systems': { bg: '#EDE9FE', color: '#6D28D9' },
+      Databases: { bg: '#EDE9FE', color: '#6D28D9' },
+      Mathematics: { bg: '#EEF2FF', color: '#4F46E5' },
+      Math: { bg: '#EEF2FF', color: '#4F46E5' }
     };
     return map[category] || { bg: '#EEF2FF', color: '#4F46E5' };
   };
@@ -273,7 +336,7 @@ export const AdminQuizManagementView = ({
       id: q.id || idx + 1,
       question: q.question?.trim() || `Question ${idx + 1}`,
       options: Array.isArray(q.options) && q.options.length === 4
-        ? q.options.map((opt, i) => opt?.trim() || `Option ${i + 1}`)
+        ? q.options.map((opt, i) => opt?.trim() || `Option ${String.fromCharCode(65 + i)}`)
         : ['Option A', 'Option B', 'Option C', 'Option D'],
       correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
       explanation: q.explanation?.trim() || ''
@@ -311,8 +374,6 @@ export const AdminQuizManagementView = ({
             String(q.id) === String(editingQuiz.id) ? updatedQuiz : q
           );
           onUpdateQuizzes(updatedAll);
-        } else if (typeof onToggleStatus === 'function') {
-          onToggleStatus(null);
         }
         if (showToast) showToast(`Quiz "${updatedQuiz.title}" updated successfully!`);
       }
@@ -347,8 +408,6 @@ export const AdminQuizManagementView = ({
         const created = sharedDatabase.addQuiz(newQuizData);
         if (typeof onUpdateQuizzes === 'function') {
           onUpdateQuizzes([created, ...rawList]);
-        } else if (typeof onToggleStatus === 'function') {
-          onToggleStatus(null);
         }
         if (showToast) showToast(`New quiz "${newQuizData.title}" published successfully!`);
       }
@@ -404,7 +463,7 @@ export const AdminQuizManagementView = ({
   };
 
   // Metric counts
-  const totalPublishedCount = rawList.length;
+  const totalQuizzesCount = rawList.length;
   const activeQuizzesCount = rawList.filter((q) => q.status === 'Active' || !q.status).length;
   const draftQuizzesCount = rawList.filter((q) => q.status === 'Draft').length;
   const totalQuestionsCount = rawList.reduce(
@@ -426,6 +485,7 @@ export const AdminQuizManagementView = ({
           type="button"
           className="admin-primary-btn"
           onClick={handleOpenCreate}
+          title="Create a new assessment"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -503,25 +563,59 @@ export const AdminQuizManagementView = ({
         )}
       </div>
 
-      {/* Quiz Stats Ribbon */}
+      {/* Quiz Stats Ribbon - Interactive Filter Pills */}
       <div className="user-stats-ribbon">
-        <div className="stat-pill">
-          <span className="stat-pill-label">Total Published</span>
-          <span className="stat-pill-val">{totalPublishedCount}</span>
+        <div
+          className={`stat-pill clickable ${statusFilter === 'all' && categoryFilter === 'all' ? 'active-pill' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            setStatusFilter('all');
+            setCategoryFilter('all');
+            if (showToast) showToast('Showing all curriculum quizzes');
+          }}
+          title="Click to view all quizzes"
+        >
+          <span className="stat-pill-label">Total Quizzes</span>
+          <span className="stat-pill-val">{totalQuizzesCount}</span>
         </div>
-        <div className="stat-pill">
+        <div
+          className={`stat-pill clickable ${statusFilter === 'active' ? 'active-pill' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            setStatusFilter('active');
+            if (showToast) showToast('Filtered to active published quizzes');
+          }}
+          title="Click to filter active quizzes"
+        >
           <span className="stat-pill-label">Active Quizzes</span>
           <span className="stat-pill-val" style={{ color: '#10B981' }}>
             {activeQuizzesCount}
           </span>
         </div>
-        <div className="stat-pill">
+        <div
+          className={`stat-pill clickable ${statusFilter === 'draft' ? 'active-pill' : ''}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            setStatusFilter('draft');
+            if (showToast) showToast('Filtered to draft quizzes');
+          }}
+          title="Click to filter draft quizzes"
+        >
           <span className="stat-pill-label">Drafts</span>
           <span className="stat-pill-val" style={{ color: '#F59E0B' }}>
             {draftQuizzesCount}
           </span>
         </div>
-        <div className="stat-pill">
+        <div
+          className="stat-pill clickable"
+          role="button"
+          tabIndex={0}
+          onClick={handleResetFilters}
+          title="Total questions across all curriculum quizzes • Click to reset filters"
+        >
           <span className="stat-pill-label">Total Questions</span>
           <span className="stat-pill-val" style={{ color: '#6366F1' }}>
             {totalQuestionsCount}
@@ -550,24 +644,30 @@ export const AdminQuizManagementView = ({
               {filteredQuizzes.length === 0 ? (
                 <tr>
                   <td colSpan="9" className="table-empty-cell">
-                    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                      <ListIcon size={36} color="#94A3B8" />
-                      <span style={{ fontSize: '0.96rem', fontWeight: 700, color: '#334155' }}>
+                    <div style={{ padding: '36px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                      <ListIcon size={40} color="#94A3B8" />
+                      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#334155' }}>
                         No quizzes match your filter criteria.
                       </span>
-                      <span style={{ fontSize: '0.84rem', color: '#64748B' }}>
-                        Try clearing active filters or click &quot;Create New Quiz&quot; to author a new assessment.
+                      <span style={{ fontSize: '0.86rem', color: '#64748B' }}>
+                        Try clearing active filters or click below to author a brand new curriculum assessment.
                       </span>
-                      {(search || categoryFilter !== 'all' || difficultyFilter !== 'all' || statusFilter !== 'all') && (
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
                         <button
                           type="button"
                           className="admin-secondary-btn"
-                          style={{ marginTop: '8px' }}
                           onClick={handleResetFilters}
                         >
                           Clear Filters
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          className="admin-primary-btn"
+                          onClick={handleOpenCreate}
+                        >
+                          + Create New Quiz
+                        </button>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -728,8 +828,12 @@ export const AdminQuizManagementView = ({
       {/* MODAL 1: Quiz Details & Questions Preview */}
       {selectedQuiz && (
         <div className="admin-modal-backdrop" onClick={() => setSelectedQuiz(null)}>
-          <div className="admin-modal-card wide" onClick={(e) => e.stopPropagation()}>
-            <div className="admin-modal-header">
+          <div
+            className="admin-modal-card wide"
+            style={{ maxWidth: '780px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="admin-modal-header" style={{ flexShrink: 0 }}>
               <div className="modal-title-group">
                 <div
                   className="quiz-category-tag-badge"
@@ -756,7 +860,7 @@ export const AdminQuizManagementView = ({
               </button>
             </div>
 
-            <div className="admin-modal-body">
+            <div className="admin-modal-body" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
               <div className="profile-detail-grid">
                 <div className="profile-field">
                   <label>Category</label>
@@ -787,9 +891,11 @@ export const AdminQuizManagementView = ({
               </div>
 
               {selectedQuiz.description && (
-                <div className="quiz-desc-block">
+                <div className="quiz-desc-block" style={{ marginTop: '16px', marginBottom: '16px' }}>
                   <label>Curriculum Description</label>
-                  <p>{selectedQuiz.description}</p>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.88rem', color: '#334155', lineHeight: 1.5 }}>
+                    {selectedQuiz.description}
+                  </p>
                 </div>
               )}
 
@@ -810,7 +916,7 @@ export const AdminQuizManagementView = ({
                   </button>
                 </div>
 
-                <div className="questions-sample-list" style={{ maxHeight: '300px' }}>
+                <div className="questions-sample-list" style={{ maxHeight: '340px' }}>
                   {((selectedQuiz.questions && selectedQuiz.questions.length > 0)
                     ? selectedQuiz.questions
                     : [
@@ -818,7 +924,7 @@ export const AdminQuizManagementView = ({
                         { id: 2, question: `Core principles testing comprehension of ${selectedQuiz.category}`, options: ['Standard Answer A (Correct)', 'Option B', 'Option C', 'Option D'], correctIndex: 0 }
                       ]
                   ).map((q, idx) => (
-                    <div key={idx} className="question-sample-item">
+                    <div key={q.id || idx} className="question-sample-item">
                       <span className="q-number">Q{idx + 1}.</span>
                       <div style={{ flex: 1 }}>
                         <span className="q-text" style={{ fontWeight: 600 }}>{q.question || q.title}</span>
@@ -831,7 +937,7 @@ export const AdminQuizManagementView = ({
                                   key={optIdx}
                                   style={{
                                     fontSize: '0.78rem',
-                                    padding: '3px 10px',
+                                    padding: '4px 10px',
                                     borderRadius: '6px',
                                     background: isCorrect ? '#ECFDF5' : '#F1F5F9',
                                     color: isCorrect ? '#059669' : '#475569',
@@ -839,7 +945,7 @@ export const AdminQuizManagementView = ({
                                     border: isCorrect ? '1.5px solid #A7F3D0' : '1px solid #E2E8F0',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '4px'
+                                    gap: '5px'
                                   }}
                                 >
                                   {isCorrect && (
@@ -847,7 +953,7 @@ export const AdminQuizManagementView = ({
                                       <polyline points="20 6 9 17 4 12"></polyline>
                                     </svg>
                                   )}
-                                  {opt}
+                                  <span>{String.fromCharCode(65 + optIdx)}. {opt}</span>
                                 </span>
                               );
                             })}
@@ -865,7 +971,7 @@ export const AdminQuizManagementView = ({
               </div>
             </div>
 
-            <div className="admin-modal-footer">
+            <div className="admin-modal-footer" style={{ flexShrink: 0 }}>
               <button
                 type="button"
                 className="admin-secondary-btn"
@@ -888,6 +994,16 @@ export const AdminQuizManagementView = ({
               >
                 {selectedQuiz.status === 'Draft' ? 'Publish Quiz' : 'Unpublish to Draft'}
               </button>
+              <button
+                type="button"
+                className="btn-icon-danger"
+                style={{ marginLeft: 'auto', padding: '9px 14px', borderRadius: '10px' }}
+                title="Delete this quiz"
+                onClick={() => setDeleteConfirmQuiz(selectedQuiz)}
+              >
+                <TrashIcon size={16} color="#EF4444" />
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#EF4444', marginLeft: '6px' }}>Delete</span>
+              </button>
             </div>
           </div>
         </div>
@@ -898,10 +1014,10 @@ export const AdminQuizManagementView = ({
         <div className="admin-modal-backdrop" onClick={() => setIsFormModalOpen(false)}>
           <div
             className="admin-modal-card wide"
-            style={{ maxWidth: '780px', maxHeight: '92vh', overflowY: 'auto' }}
+            style={{ maxWidth: '820px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="admin-modal-header">
+            <div className="admin-modal-header" style={{ flexShrink: 0 }}>
               <div className="modal-title-group">
                 <div
                   className="quiz-category-tag-badge"
@@ -927,8 +1043,8 @@ export const AdminQuizManagementView = ({
               </button>
             </div>
 
-            <form onSubmit={handleFormSubmit}>
-              <div className="admin-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={handleFormSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div className="admin-modal-body" style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {/* Title & Category */}
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px' }}>
                   <div className="admin-form-group" style={{ margin: 0 }}>
@@ -1024,7 +1140,8 @@ export const AdminQuizManagementView = ({
                       fontFamily: 'inherit',
                       color: '#0F172A',
                       outline: 'none',
-                      resize: 'vertical'
+                      resize: 'vertical',
+                      boxSizing: 'border-box'
                     }}
                     placeholder="Curriculum expectations, topics evaluated, and course guidelines..."
                     value={formData.description}
@@ -1040,7 +1157,7 @@ export const AdminQuizManagementView = ({
                         Quiz Questions ({formData.questions.length})
                       </h4>
                       <span style={{ fontSize: '0.78rem', color: '#64748B' }}>
-                        Provide question prompt, 4 choices, and select the radio button for the correct answer
+                        Provide question prompt, 4 choices, and select the radio button next to the correct answer
                       </span>
                     </div>
                     <button
@@ -1059,127 +1176,182 @@ export const AdminQuizManagementView = ({
                         key={q.id || qIndex}
                         style={{
                           background: '#F8FAFC',
-                          border: '1px solid #CBD5E1',
+                          border: '1.5px solid #CBD5E1',
                           borderRadius: '12px',
-                          padding: '16px'
+                          padding: '16px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '12px'
                         }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                          <span style={{ fontWeight: 800, fontSize: '0.88rem', color: '#6C5CE7' }}>
-                            Question #{qIndex + 1}
-                          </span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.88rem', color: '#6366F1' }}>
+                              Question #{qIndex + 1}
+                            </span>
+                            <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                              (Designate the correct answer choice below)
+                            </span>
+                          </div>
                           {formData.questions.length > 1 && (
                             <button
                               type="button"
                               onClick={() => handleRemoveQuestion(qIndex)}
                               style={{
-                                background: 'transparent',
-                                border: 'none',
+                                background: '#FEE2E2',
+                                border: '1px solid #FECACA',
                                 color: '#EF4444',
-                                fontSize: '0.80rem',
+                                fontSize: '0.78rem',
                                 fontWeight: 700,
                                 cursor: 'pointer',
-                                padding: '2px 6px'
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
                               }}
+                              title="Delete this question"
                             >
-                              Remove Question
+                              <TrashIcon size={13} color="#EF4444" />
+                              <span>Remove</span>
                             </button>
                           )}
                         </div>
 
                         {/* Question Text */}
-                        <div style={{ marginBottom: '12px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
+                            Question Text *
+                          </label>
                           <input
                             type="text"
                             required
-                            placeholder={`Enter text for Question ${qIndex + 1}...`}
+                            placeholder={`e.g. Enter question text for Question ${qIndex + 1}...`}
                             value={q.question}
                             onChange={(e) => handleQuestionTextChange(qIndex, e.target.value)}
                             style={{
                               width: '100%',
-                              padding: '9px 12px',
+                              padding: '10px 12px',
                               borderRadius: '8px',
                               border: '1.5px solid #CBD5E1',
                               background: '#FFFFFF',
                               fontSize: '0.88rem',
                               fontFamily: 'inherit',
                               color: '#0F172A',
-                              outline: 'none'
+                              outline: 'none',
+                              boxSizing: 'border-box'
                             }}
                           />
                         </div>
 
                         {/* 4 Options with Radio to choose correct index */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-                          {q.options.map((opt, optIndex) => (
-                            <div
-                              key={optIndex}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                background: q.correctIndex === optIndex ? '#F0FDF4' : '#FFFFFF',
-                                border: q.correctIndex === optIndex ? '1.5px solid #86EFAC' : '1px solid #E2E8F0',
-                                borderRadius: '8px',
-                                padding: '6px 10px'
-                              }}
-                            >
-                              <input
-                                type="radio"
-                                name={`correct-radio-${qIndex}`}
-                                id={`q-${qIndex}-opt-${optIndex}`}
-                                checked={q.correctIndex === optIndex}
-                                onChange={() => handleCorrectIndexChange(qIndex, optIndex)}
-                                title="Click to mark as correct answer"
-                                style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                              />
-                              <input
-                                type="text"
-                                required
-                                placeholder={`Option ${optIndex + 1}${optIndex === q.correctIndex ? ' (Correct)' : ''}`}
-                                value={opt}
-                                onChange={(e) => handleOptionChange(qIndex, optIndex, e.target.value)}
-                                style={{
-                                  flex: 1,
-                                  border: 'none',
-                                  background: 'transparent',
-                                  fontSize: '0.84rem',
-                                  fontFamily: 'inherit',
-                                  color: '#0F172A',
-                                  outline: 'none'
-                                }}
-                              />
-                            </div>
-                          ))}
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                            Answer Choices (4 Options) *
+                          </label>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                            {(q.options || ['', '', '', '']).map((opt, optIndex) => {
+                              const isCorrect = q.correctIndex === optIndex;
+                              const letter = String.fromCharCode(65 + optIndex);
+                              return (
+                                <div
+                                  key={optIndex}
+                                  onClick={() => handleCorrectIndexChange(qIndex, optIndex)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    background: isCorrect ? '#F0FDF4' : '#FFFFFF',
+                                    border: isCorrect ? '2px solid #22C55E' : '1.5px solid #E2E8F0',
+                                    borderRadius: '8px',
+                                    padding: '8px 10px',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s'
+                                  }}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`correct-radio-${q.id || qIndex}`}
+                                    id={`q-${qIndex}-opt-${optIndex}`}
+                                    checked={isCorrect}
+                                    onChange={() => handleCorrectIndexChange(qIndex, optIndex)}
+                                    title="Click to mark as correct answer"
+                                    style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0 }}
+                                  />
+                                  <span style={{ fontSize: '0.80rem', fontWeight: 800, color: isCorrect ? '#16A34A' : '#64748B' }}>
+                                    {letter}.
+                                  </span>
+                                  <input
+                                    type="text"
+                                    required
+                                    placeholder={`Choice ${letter}...`}
+                                    value={opt}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => handleOptionChange(qIndex, optIndex, e.target.value)}
+                                    style={{
+                                      flex: 1,
+                                      border: 'none',
+                                      background: 'transparent',
+                                      fontSize: '0.84rem',
+                                      fontFamily: 'inherit',
+                                      color: '#0F172A',
+                                      outline: 'none',
+                                      fontWeight: isCorrect ? '600' : '400'
+                                    }}
+                                  />
+                                  {isCorrect && (
+                                    <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#16A34A', background: '#DCFCE7', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                                      Correct
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
 
                         {/* Explanation */}
                         <div>
+                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
+                            Explanation / Rationale (Optional)
+                          </label>
                           <input
                             type="text"
-                            placeholder="Explanation / educational rationale (optional)..."
+                            placeholder="Explanation / educational rationale..."
                             value={q.explanation || ''}
                             onChange={(e) => handleExplanationChange(qIndex, e.target.value)}
                             style={{
                               width: '100%',
-                              padding: '7px 12px',
+                              padding: '8px 12px',
                               borderRadius: '8px',
-                              border: '1px solid #E2E8F0',
+                              border: '1px solid #CBD5E1',
                               background: '#FFFFFF',
-                              fontSize: '0.80rem',
+                              fontSize: '0.82rem',
                               fontFamily: 'inherit',
-                              color: '#64748B',
-                              outline: 'none'
+                              color: '#334155',
+                              outline: 'none',
+                              boxSizing: 'border-box'
                             }}
                           />
                         </div>
                       </div>
                     ))}
                   </div>
+
+                  <div style={{ marginTop: '14px' }}>
+                    <button
+                      type="button"
+                      className="admin-secondary-btn"
+                      style={{ padding: '8px 16px', fontSize: '0.82rem' }}
+                      onClick={handleAddQuestion}
+                    >
+                      + Add Another Question
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="admin-modal-footer">
+              <div className="admin-modal-footer" style={{ flexShrink: 0 }}>
                 <button
                   type="button"
                   className="admin-secondary-btn"

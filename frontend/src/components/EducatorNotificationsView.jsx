@@ -106,6 +106,7 @@ export const EducatorNotificationsView = ({
 
     try {
       const targetStudentNames = cohortStudents.map((s) => s.name);
+      const broadcastId = `bcast-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
       // Send to shared student notifications
       sharedDatabase.sendStudentNotification({
@@ -115,7 +116,8 @@ export const EducatorNotificationsView = ({
         priority: notificationPriority,
         targetStudentIds: 'all',
         targetStudentNames,
-        educatorName
+        educatorName,
+        broadcastId
       });
 
       // Record in educator notifications log
@@ -125,6 +127,9 @@ export const EducatorNotificationsView = ({
         id: `sent-${Date.now()}`,
         title: `Sent: ${notificationTitle.trim()}`,
         message: `Delivered to ${recipientSummary}: "${notificationMessage.trim()}"`,
+        rawTitle: notificationTitle.trim(),
+        rawMessage: notificationMessage.trim(),
+        broadcastId,
         category: 'sent',
         timestamp: 'Just now',
         unread: false,
@@ -150,6 +155,28 @@ export const EducatorNotificationsView = ({
       if (showToast) showToast('Failed to send notification. Please try again.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteNotification = (notif) => {
+    const updated = sharedDatabase.deleteEducatorNotification(notif);
+    onUpdateNotifications(updated);
+    if (showToast) {
+      if (notif.category === 'sent' || notif.broadcastId) {
+        showToast('Notification deleted and removed from student dashboard.');
+      } else {
+        showToast('Notification deleted successfully.');
+      }
+    }
+  };
+
+  const handleClearAll = () => {
+    if (window.confirm('Are you sure you want to delete all notifications? Any announcements sent to students will also be removed.')) {
+      const updated = sharedDatabase.clearAllEducatorNotifications();
+      onUpdateNotifications(updated);
+      if (showToast) {
+        showToast('All educator notifications cleared successfully.');
+      }
     }
   };
 
@@ -213,6 +240,19 @@ export const EducatorNotificationsView = ({
             <CheckCircleIcon size={16} color="#10B981" />
             <span>Mark All as Read</span>
           </button>
+
+          {notifications.length > 0 && (
+            <button
+              type="button"
+              className="educator-secondary-btn"
+              onClick={handleClearAll}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#DC2626', borderColor: '#FECACA' }}
+              title="Delete all notifications"
+            >
+              <TrashIcon size={15} color="#DC2626" />
+              <span>Clear All</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -391,6 +431,15 @@ export const EducatorNotificationsView = ({
                       Mark Read
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="educator-icon-btn danger"
+                    onClick={() => handleDeleteNotification(notif)}
+                    title={notif.category === 'sent' ? 'Delete notification and remove from student dashboard' : 'Delete notification'}
+                    aria-label="Delete notification"
+                  >
+                    <TrashIcon size={15} color="#DC2626" />
+                  </button>
                 </div>
               </div>
             );

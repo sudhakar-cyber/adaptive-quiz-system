@@ -722,7 +722,7 @@ export const EducatorAnalyticsView = ({
         {/* Header Right Actions: Timeframe Pills & Export Button */}
         <div className="educator-analytics-header-actions">
           <div className="educator-timeframe-pills">
-            {['Last 7 Days', 'Last 30 Days', 'Semester 1', 'All Time'].map((tf) => (
+            {['Last 7 Days', 'Last 30 Days', 'All Time'].map((tf) => (
               <button
                 key={tf}
                 type="button"
@@ -1926,7 +1926,7 @@ export const EducatorAnalyticsView = ({
         <div className="educator-modal-overlay" onClick={() => setInspectingQuestion(null)}>
           <div
             className="educator-modal-box"
-            style={{ maxWidth: '640px' }}
+            style={{ maxWidth: '640px', maxHeight: '90vh', overflowY: 'auto' }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -1987,6 +1987,7 @@ export const EducatorAnalyticsView = ({
                 type="button"
                 className="educator-modal-close-btn"
                 onClick={() => setInspectingQuestion(null)}
+                aria-label="Close inspector"
               >
                 ✕
               </button>
@@ -2018,10 +2019,17 @@ export const EducatorAnalyticsView = ({
                 <div className="educator-inspect-options-list">
                   {(inspectingQuestion.options || []).map((opt, oIdx) => {
                     const isCorrect = oIdx === inspectingQuestion.correctIndex;
+                    const optText = typeof opt === 'string' ? opt : (opt?.text || opt?.label || String(opt));
+                    const failPct = inspectingQuestion.failureRate || 30;
+                    const incorrectCount = Math.max(1, (inspectingQuestion.options || []).length - 1);
+                    const distractorPct = Math.round(failPct / incorrectCount);
+                    const correctPct = Math.max(10, 100 - failPct);
+                    const pctVal = isCorrect ? correctPct : distractorPct;
+
                     return (
                       <div
                         key={oIdx}
-                        className={`educator-inspect-option-item ${isCorrect ? 'correct' : ''}`}
+                        className={`educator-inspect-option-item ${isCorrect ? 'correct' : 'distractor'}`}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span
@@ -2035,33 +2043,61 @@ export const EducatorAnalyticsView = ({
                               alignItems: 'center',
                               justifyContent: 'center',
                               fontSize: '0.78rem',
-                              fontWeight: 700
+                              fontWeight: 700,
+                              flexShrink: 0
                             }}
                           >
                             {String.fromCharCode(65 + oIdx)}
                           </span>
                           <span style={{ fontWeight: isCorrect ? 700 : 500 }}>
-                            {opt}
+                            {optText}
                           </span>
                         </div>
 
-                        {isCorrect && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                           <span
                             style={{
                               fontSize: '0.74rem',
                               fontWeight: 700,
-                              color: '#059669',
-                              backgroundColor: '#D1FAE5',
                               padding: '2px 8px',
                               borderRadius: '9999px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
+                              backgroundColor: isCorrect ? '#D1FAE5' : '#FEF3C7',
+                              color: isCorrect ? '#059669' : '#D97706'
                             }}
                           >
-                            <CheckIcon size={11} color="#059669" /> Correct Answer
+                            {pctVal}% Selected
                           </span>
-                        )}
+                          {isCorrect ? (
+                            <span
+                              style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 700,
+                                color: '#059669',
+                                backgroundColor: '#D1FAE5',
+                                padding: '2px 8px',
+                                borderRadius: '9999px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <CheckIcon size={11} color="#059669" /> Correct
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                color: '#92400E',
+                                backgroundColor: '#FEF3C7',
+                                padding: '2px 8px',
+                                borderRadius: '9999px'
+                              }}
+                            >
+                              Distractor
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
