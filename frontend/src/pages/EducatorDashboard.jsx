@@ -31,6 +31,9 @@ export const EducatorDashboard = ({ onLogout }) => {
   // Core Persistent State for Educator
   const [quizzes, setQuizzes] = useState(() => {
     try {
+      if (typeof sharedDatabase?.getQuizzes === 'function') {
+        return sharedDatabase.getQuizzes();
+      }
       const saved = localStorage.getItem('learnsmart_educator_quizzes');
       return saved ? JSON.parse(saved) : INITIAL_EDUCATOR_QUIZZES;
     } catch {

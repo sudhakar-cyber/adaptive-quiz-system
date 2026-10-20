@@ -839,65 +839,6 @@ export const EducatorPerformanceView = ({
         </div>
       </div>
 
-      {/* Mastery Tier Distribution Bar */}
-      <div className="educator-content-card" style={{ marginBottom: '22px' }}>
-        <h3 className="educator-card-title" style={{ marginBottom: '14px' }}>
-          Cohort Mastery Tier Distribution
-        </h3>
-        <div style={{ display: 'flex', height: '14px', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px', backgroundColor: '#F1F5F9' }}>
-          {totalCount > 0 ? (
-            <>
-              <div
-                style={{
-                  width: `${(topPerformersCount / totalCount) * 100}%`,
-                  backgroundColor: '#10B981',
-                  transition: 'width 0.3s ease'
-                }}
-                title={`Top Performers: ${topPerformersCount}`}
-              />
-              <div
-                style={{
-                  width: `${(onTrackCount / totalCount) * 100}%`,
-                  backgroundColor: '#3B82F6',
-                  transition: 'width 0.3s ease'
-                }}
-                title={`On Track: ${onTrackCount}`}
-              />
-              <div
-                style={{
-                  width: `${(atRiskCount / totalCount) * 100}%`,
-                  backgroundColor: '#EF4444',
-                  transition: 'width 0.3s ease'
-                }}
-                title={`Needs Support: ${atRiskCount}`}
-              />
-            </>
-          ) : (
-            <div style={{ width: '100%', backgroundColor: '#E2E8F0' }} title="No enrolled students" />
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '0.84rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10B981' }} />
-            <span style={{ color: '#334155' }}>
-              Top Performers (≥85%): <strong>{topPerformersCount} students</strong>
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#3B82F6' }} />
-            <span style={{ color: '#334155' }}>
-              On Track (70–84%): <strong>{onTrackCount} students</strong>
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#EF4444' }} />
-            <span style={{ color: '#334155' }}>
-              Needs Support (&lt;70%): <strong>{atRiskCount} students</strong>
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Search & Filters */}
       <div className="educator-filter-toolbar">
         <div className="educator-filter-search-box">

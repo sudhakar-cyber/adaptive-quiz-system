@@ -136,7 +136,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       const savedHistory = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || 'null');
       if (Array.isArray(savedHistory)) return savedHistory.length;
     } catch {}
-    return currentStudent?.quizzesCompleted === 0 ? 0 : 4;
+    return 0;
   });
   const [averageScore, setAverageScore] = useState(() => {
     if (currentStudent?.avgScore !== undefined) return currentStudent.avgScore;
@@ -147,21 +147,21 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
         return Math.round((sum / savedHistory.length) * 10) / 10;
       }
     } catch {}
-    return currentStudent?.quizzesCompleted === 0 ? 0 : 81.0;
+    return 0;
   });
   const [streakDays, setStreakDays] = useState(() => {
     try {
       const stored = localStorage.getItem('learnsmart_student_streak');
       if (stored !== null) return parseInt(stored, 10) || 0;
     } catch {}
-    return currentStudent?.quizzesCompleted === 0 ? 0 : 7;
+    return 0;
   });
   const [notifications, setNotifications] = useState(() => {
     try {
       const saved = localStorage.getItem('learnsmart_student_notifications');
-      return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_NOTIFICATIONS;
+      return [];
     }
   });
   const [quizHistory, setQuizHistory] = useState(() => {
@@ -175,9 +175,9 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      return student?.quizzesCompleted === 0 ? [] : INITIAL_HISTORY;
+      return [];
     } catch {
-      return INITIAL_HISTORY;
+      return [];
     }
   });
 

@@ -51,6 +51,10 @@ export const EducatorReportsView = ({ showToast }) => {
   };
 
   const handleDownloadReport = (report) => {
+    if (!report) {
+      if (showToast) showToast('No report available to download. Please generate one first.');
+      return;
+    }
     // Generate text/csv content for download
     let content = `LEARNSMART ADAPTIVE QUIZ SYSTEM - OFFICIAL REPORT\n`;
     content += `Title: ${report.title}\n`;
@@ -59,15 +63,12 @@ export const EducatorReportsView = ({ showToast }) => {
     content += `Generated Date: ${report.generatedDate}\n`;
     content += `Summary: ${report.summary}\n\n`;
     content += `--- EXECUTIVE METRICS ---\n`;
-    content += `Total Enrolled Students: 156\n`;
-    content += `Quizzes Evaluated: 24\n`;
-    content += `Average Passing Score: 82.7%\n`;
     content += `Status: Verified by Faculty Office\n`;
 
     let mime = 'text/plain';
     if (report.format === 'CSV') {
       mime = 'text/csv';
-      content = `Report Name,Type,Date,Passing Rate,Cohort Average\n"${report.title}","${report.type}","${report.generatedDate}","89.2%","82.7%"`;
+      content = `Report Name,Type,Date,Passing Rate,Cohort Average\n"${report.title}","${report.type}","${report.generatedDate}","0%","0%"`;
     }
 
     triggerFileDownload(report.title, content, mime);
@@ -299,62 +300,75 @@ export const EducatorReportsView = ({ showToast }) => {
               </tr>
             </thead>
             <tbody>
-              {reportsList.map((rep) => (
-                <tr key={rep.id}>
-                  <td>
-                    <div style={{ fontWeight: 700, color: '#0F172A' }}>{rep.title}</div>
-                    <div style={{ fontSize: '0.76rem', color: '#64748B' }}>{rep.type}</div>
-                  </td>
-                  <td style={{ color: '#334155', fontWeight: 500 }}>{rep.category}</td>
-                  <td>
-                    <span
-                      style={{
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        fontSize: '0.74rem',
-                        fontWeight: 700,
-                        backgroundColor:
-                          rep.format === 'PDF'
-                            ? '#FEE2E2'
-                            : rep.format === 'CSV'
-                            ? '#D1FAE5'
-                            : '#DBEAFE',
-                        color:
-                          rep.format === 'PDF'
-                            ? '#991B1B'
-                            : rep.format === 'CSV'
-                            ? '#065F46'
-                            : '#1E40AF'
-                      }}
-                    >
-                      {rep.format}
-                    </span>
-                  </td>
-                  <td style={{ color: '#475569', fontSize: '0.84rem' }}>{rep.fileSize}</td>
-                  <td className="educator-date-cell">{rep.generatedDate}</td>
-                  <td style={{ fontWeight: 600, color: '#0F172A' }}>{rep.downloads || 0}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '8px' }}>
-                      <button
-                        type="button"
-                        className="educator-secondary-btn sm"
-                        onClick={() => handleDownloadReport(rep)}
-                        title="Download File"
-                      >
-                        Download
-                      </button>
-                      <button
-                        type="button"
-                        className="educator-secondary-btn sm"
-                        onClick={() => setPreviewReport(rep)}
-                        title="Preview Summary"
-                      >
-                        Preview
-                      </button>
+              {reportsList.length === 0 ? (
+                <tr>
+                  <td colSpan="7" style={{ textAlign: 'center', padding: '36px 16px', color: '#64748B' }}>
+                    <div style={{ fontSize: '0.92rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      No reports generated yet
+                    </div>
+                    <div style={{ fontSize: '0.80rem' }}>
+                      Use the report generator above to compile authenticated assessment documents.
                     </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                reportsList.map((rep) => (
+                  <tr key={rep.id}>
+                    <td>
+                      <div style={{ fontWeight: 700, color: '#0F172A' }}>{rep.title}</div>
+                      <div style={{ fontSize: '0.76rem', color: '#64748B' }}>{rep.type}</div>
+                    </td>
+                    <td style={{ color: '#334155', fontWeight: 500 }}>{rep.category}</td>
+                    <td>
+                      <span
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          backgroundColor:
+                            rep.format === 'PDF'
+                              ? '#FEE2E2'
+                              : rep.format === 'CSV'
+                              ? '#D1FAE5'
+                              : '#DBEAFE',
+                          color:
+                            rep.format === 'PDF'
+                              ? '#991B1B'
+                              : rep.format === 'CSV'
+                              ? '#065F46'
+                              : '#1E40AF'
+                        }}
+                      >
+                        {rep.format}
+                      </span>
+                    </td>
+                    <td style={{ color: '#475569', fontSize: '0.84rem' }}>{rep.fileSize}</td>
+                    <td className="educator-date-cell">{rep.generatedDate}</td>
+                    <td style={{ fontWeight: 600, color: '#0F172A' }}>{rep.downloads || 0}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="educator-secondary-btn sm"
+                          onClick={() => handleDownloadReport(rep)}
+                          title="Download File"
+                        >
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          className="educator-secondary-btn sm"
+                          onClick={() => setPreviewReport(rep)}
+                          title="Preview Summary"
+                        >
+                          Preview
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

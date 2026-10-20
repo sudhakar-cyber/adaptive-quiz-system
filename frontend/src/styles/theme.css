@@ -1600,6 +1600,33 @@ body[data-theme='dark'],
   border-color: #334155 !important;
 }
 
+[data-theme='dark'] .educator-inspect-btn,
+.dark-theme .educator-inspect-btn {
+  background-color: rgba(37, 99, 235, 0.2) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  color: #93C5FD !important;
+}
+
+[data-theme='dark'] .educator-inspect-option-item,
+.dark-theme .educator-inspect-option-item {
+  background-color: #0F172A !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
+}
+
+[data-theme='dark'] .educator-inspect-option-item.correct,
+.dark-theme .educator-inspect-option-item.correct {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  color: #6EE7B7 !important;
+}
+
+[data-theme='dark'] .educator-inspect-option-item.distractor,
+.dark-theme .educator-inspect-option-item.distractor {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
 
 /* ==========================================================================
    3. ADMIN DASHBOARD DARK MODE

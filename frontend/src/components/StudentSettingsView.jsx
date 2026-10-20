@@ -5,14 +5,10 @@ import {
   BellIcon,
   ShieldIcon,
   SparklesIcon,
-  CheckIcon,
-  SunIcon,
-  MoonIcon
+  CheckIcon
 } from './Icons';
-import { useTheme } from './ThemeToggle';
 
 export const StudentSettingsView = ({ showToast }) => {
-  const { theme, toggleTheme, isDark } = useTheme();
   const [settings, setSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('learnsmart_student_settings');
@@ -308,44 +304,6 @@ export const StudentSettingsView = ({ showToast }) => {
                   type="checkbox"
                   checked={settings.tabSwitchWarning}
                   onChange={() => toggleSetting('tabSwitchWarning')}
-                />
-                <span className="toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 5: Appearance & Display Theme */}
-        <div className="settings-card">
-          <div className="settings-card-header">
-            <div className={`settings-card-icon-wrap ${isDark ? 'purple' : 'amber'}`}>
-              {isDark ? (
-                <MoonIcon size={20} color="#8B5CF6" />
-              ) : (
-                <SunIcon size={20} color="#F59E0B" />
-              )}
-            </div>
-            <div>
-              <h3 className="settings-card-title">Appearance & Display Theme</h3>
-              <p className="settings-card-desc">Configure interface lighting mode for student portal</p>
-            </div>
-          </div>
-
-          <div className="settings-items-stack">
-            <div className="settings-item-row">
-              <div className="settings-item-info">
-                <strong className="settings-item-title">
-                  Dark Mode Theme ({isDark ? 'Active' : 'Disabled'})
-                </strong>
-                <span className="settings-item-desc">
-                  Switch between high-contrast Dark theme and clean Light theme
-                </span>
-              </div>
-              <label className="settings-toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={isDark}
-                  onChange={toggleTheme}
                 />
                 <span className="toggle-slider"></span>
               </label>
