@@ -38,8 +38,8 @@ export const AdminReportsView = ({
         });
       } else {
         csvContent += "Metric,Value\n";
-        csvContent += `Total Users,${stats.totalUsers || 482}\n`;
-        csvContent += `Total Quizzes,${stats.totalQuizzes || 87}\n`;
+        csvContent += `Total Users,${stats.totalUsers !== undefined ? stats.totalUsers : (safeStudents.length + safeEducators.length + 1)}\n`;
+        csvContent += `Total Quizzes,${stats.totalQuizzes !== undefined ? stats.totalQuizzes : safeQuizzes.length}\n`;
         csvContent += `System Health,${stats.systemHealth || 'Online'}\n`;
       }
 

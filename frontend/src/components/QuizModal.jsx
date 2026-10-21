@@ -202,7 +202,9 @@ export const QuizModal = ({
             score: scorePercentage,
             correctCount,
             totalQuestions,
-            feedback: feedbackPayload
+            feedback: feedbackPayload,
+            answers,
+            selectedAnswers: answers
           });
         } catch (parentErr) {
           console.warn('Failed to run onComplete handler:', parentErr);

@@ -93,10 +93,13 @@ export const authService = {
         } catch {}
 
         const username =
-          (fbUser?.displayName && fbUser.displayName.trim()) ||
-          localStorage.getItem('learnsmart_user') ||
-          storedProfile?.fullName ||
-          'Student';
+          (storedProfile?.fullName && storedProfile.fullName.trim() && !storedProfile.fullName.includes('@'))
+            ? storedProfile.fullName.trim()
+            : (localStorage.getItem('learnsmart_user') && localStorage.getItem('learnsmart_user') !== 'Student')
+              ? localStorage.getItem('learnsmart_user').trim()
+              : (fbUser?.displayName && fbUser.displayName.trim())
+                ? fbUser.displayName.trim()
+                : 'Student';
 
         const profile =
           (fbUser?.email ? sharedDatabase.getStudentByEmail(fbUser.email) : null) ||

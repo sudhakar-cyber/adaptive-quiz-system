@@ -51,6 +51,19 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   const [quizzesList, setQuizzesList] = useState(() => sharedDatabase.getPublishedQuizzes());
 
   useEffect(() => {
+    // Initial and periodic sync with backend MySQL database
+    if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
+      sharedDatabase.syncAllFromBackend().then(() => {
+        setQuizzesList(sharedDatabase.getPublishedQuizzes());
+      }).catch(() => {});
+    }
+
+    const liveTimer = setInterval(() => {
+      if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
+        sharedDatabase.syncAllFromBackend().catch(() => {});
+      }
+    }, 10000);
+
     const handleQuizzesUpdate = () => {
       setQuizzesList(sharedDatabase.getPublishedQuizzes());
     };
@@ -64,6 +77,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     window.addEventListener('storage', handleStorageChange);
 
     return () => {
+      clearInterval(liveTimer);
       window.removeEventListener('learnsmart_quizzes_updated', handleQuizzesUpdate);
       window.removeEventListener('storage', handleStorageChange);
     };
@@ -76,7 +90,22 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         setFirebaseUser(user);
-        if (user.displayName && user.displayName.trim()) {
+        let resolvedName = null;
+        try {
+          const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
+          if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
+            resolvedName = savedProfile.fullName.trim();
+          }
+        } catch {}
+        if (!resolvedName) {
+          const storedUser = localStorage.getItem('learnsmart_user');
+          if (storedUser && storedUser.trim() && storedUser !== 'Student' && !storedUser.includes('@')) {
+            resolvedName = storedUser.trim();
+          }
+        }
+        if (resolvedName) {
+          setCurrentUsername(resolvedName);
+        } else if (user.displayName && user.displayName.trim()) {
           setCurrentUsername(user.displayName.trim());
         }
         if (user.photoURL) {
@@ -85,6 +114,25 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       }
     });
     return () => unsubscribeAuth();
+  }, []);
+
+  // Listen for real-time user profile updates across tabs and components
+  useEffect(() => {
+    const handleProfileUpdate = (e) => {
+      const newName = e.detail?.fullName || (typeof e.detail === 'string' ? e.detail : null);
+      if (newName && newName.trim()) {
+        setCurrentUsername(newName.trim());
+      }
+      if (e.detail?.profileImage !== undefined) {
+        setProfileImage(e.detail.profileImage);
+      }
+    };
+    window.addEventListener('learnsmart_user_profile_updated', handleProfileUpdate);
+    window.addEventListener('learnsmart_user_updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('learnsmart_user_profile_updated', handleProfileUpdate);
+      window.removeEventListener('learnsmart_user_updated', handleProfileUpdate);
+    };
   }, []);
 
   const [activeQuizModal, setActiveQuizModal] = useState(() => {
@@ -118,6 +166,16 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   const currentStudent = sharedDatabase.getStudentByUsername(username);
 
   const [currentUsername, setCurrentUsername] = useState(() => {
+    try {
+      const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
+      if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
+        return savedProfile.fullName.trim();
+      }
+    } catch {}
+    const storedUser = localStorage.getItem('learnsmart_user');
+    if (storedUser && storedUser.trim() && storedUser !== 'Student' && !storedUser.includes('@')) {
+      return storedUser.trim();
+    }
     if (auth.currentUser?.displayName && auth.currentUser.displayName.trim()) {
       return auth.currentUser.displayName.trim();
     }
@@ -305,31 +363,42 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     setTimeout(() => setToastMessage(''), 3500);
   };
 
-  // Determine display name using Firebase Authentication currentUser data first
-  // Critical rule: Do not use the email address as the username when displayName is available.
-  // Safe fallback to email username only when displayName is null or empty.
+  // Determine display name: Prioritize the student's saved full name from their profile
   const displayName = (() => {
-    if (firebaseUser) {
-      if (firebaseUser.displayName && firebaseUser.displayName.trim().length > 0) {
-        return firebaseUser.displayName.trim();
-      }
-      if (firebaseUser.email && firebaseUser.email.includes('@')) {
-        const emailPrefix = firebaseUser.email.split('@')[0];
-        return emailPrefix
-          .replace(/[._-]/g, ' ')
-          .split(' ')
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-      }
-    }
-
+    // 1. Saved student profile has highest priority for custom display name
     try {
       const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
-      if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@')) {
+      if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
         return savedProfile.fullName.trim();
       }
     } catch {}
 
+    // 2. Explicit current state or stored active username
+    if (currentUsername && currentUsername.trim() && currentUsername !== 'Student' && !currentUsername.includes('@')) {
+      return currentUsername.trim();
+    }
+
+    const storedUser = localStorage.getItem('learnsmart_user');
+    if (storedUser && storedUser.trim() && storedUser !== 'Student' && !storedUser.includes('@')) {
+      return storedUser.trim();
+    }
+
+    // 3. Authenticated Firebase user's explicit displayName
+    if (firebaseUser?.displayName && firebaseUser.displayName.trim().length > 0) {
+      return firebaseUser.displayName.trim();
+    }
+
+    // 4. Formatted email prefix from Firebase auth
+    if (firebaseUser?.email && firebaseUser.email.includes('@')) {
+      const emailPrefix = firebaseUser.email.split('@')[0];
+      return emailPrefix
+        .replace(/[._-]/g, ' ')
+        .split(' ')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    }
+
+    // 5. Fallback from username prop or raw string
     const raw = currentUsername || username || localStorage.getItem('learnsmart_user');
     if (!raw || raw.trim() === '') return 'Student';
 
@@ -775,13 +844,22 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     if (!searchQuery.trim()) return pool.slice(0, 3);
     const query = searchQuery.toLowerCase();
     return pool.filter((q) =>
-      q.title.toLowerCase().includes(query) ||
-      q.category.toLowerCase().includes(query) ||
-      q.difficulty.toLowerCase().includes(query)
+      (q.title || '').toLowerCase().includes(query) ||
+      (q.category || '').toLowerCase().includes(query) ||
+      (q.difficulty || '').toLowerCase().includes(query)
     ).slice(0, 3);
   })();
 
-  const handleQuizCompleted = ({ quizId, quizTitle, category, score }) => {
+  const handleQuizCompleted = ({
+    quizId,
+    quizTitle,
+    category,
+    score,
+    correctCount,
+    totalQuestions,
+    answers,
+    selectedAnswers
+  }) => {
     if (quizId) {
       setCompletedQuizzes((prev) => {
         if (!prev.includes(quizId)) {
@@ -857,13 +935,23 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       return updated;
     });
 
+    // Resolve authentic Firebase user details
+    const activeUid = firebaseUser?.uid || auth.currentUser?.uid || localStorage.getItem('learnsmart_uid') || '';
+    const activeEmail = firebaseUser?.email || auth.currentUser?.email || localStorage.getItem('learnsmart_email') || currentStudent?.email || '';
+    const activeName = displayName || currentUsername || firebaseUser?.displayName || auth.currentUser?.displayName || localStorage.getItem('learnsmart_user') || 'Student';
+
     // Record quiz attempt into shared database so Educator Dashboard updates
     sharedDatabase.recordQuizAttempt({
-      studentName: currentUsername,
-      studentEmail: currentStudent?.email || userEmail || '',
+      studentName: activeName,
+      studentEmail: activeEmail,
+      studentId: activeUid,
       quizTitle,
       score,
-      category
+      category,
+      quizId,
+      answers: answers || selectedAnswers || {},
+      correctCount,
+      totalQuestions
     });
 
     showToast(`🎉 Quiz Finished! You scored ${score}%`);
@@ -1606,14 +1694,20 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
                   {recommendedQuizzesList.length === 0 ? (
                     <div className="recommended-empty-state">
-                      <p className="empty-state-msg">No quizzes match &quot;{searchQuery}&quot;</p>
-                      <button
-                        type="button"
-                        className="empty-state-clear-btn"
-                        onClick={() => setSearchQuery('')}
-                      >
-                        Clear Search
-                      </button>
+                      <p className="empty-state-msg">
+                        {searchQuery.trim()
+                          ? `No quizzes match "${searchQuery}"`
+                          : "No quizzes published yet. Check back soon for new assessments!"}
+                      </p>
+                      {searchQuery.trim() && (
+                        <button
+                          type="button"
+                          className="empty-state-clear-btn"
+                          onClick={() => setSearchQuery('')}
+                        >
+                          Clear Search
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="recommended-quizzes-list">

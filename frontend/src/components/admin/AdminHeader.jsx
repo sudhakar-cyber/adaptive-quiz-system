@@ -12,7 +12,7 @@ const AdminHeader = ({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  const adminName = adminUser?.fullName || adminUser?.name || 'Alex Vance';
+  const adminName = adminUser?.fullName || adminUser?.name || 'System Administrator';
   const adminEmail = adminUser?.email || 'admin@learnsmart.edu';
   const adminRole = adminUser?.title || 'Administrator';
   const adminInitial = (() => {

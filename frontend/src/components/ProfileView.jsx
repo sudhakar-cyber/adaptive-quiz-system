@@ -20,7 +20,8 @@ import {
   LockIcon,
   SettingsIcon
 } from './Icons';
-import { sharedDatabase } from '../services/sharedDatabase';
+import { sharedDatabase, getAuthToken } from '../services/sharedDatabase';
+import { auth, updateProfile } from '../config/firebase';
 
 export const ProfileView = ({
   displayName = 'Student',
@@ -46,6 +47,7 @@ export const ProfileView = ({
 
   const [formData, setFormData] = useState(() => {
     let resolvedStudentId = '';
+    let savedName = '';
     try {
       const saved = localStorage.getItem('learnsmart_student_profile');
       if (saved) {
@@ -58,8 +60,11 @@ export const ProfileView = ({
               (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
             resolvedStudentId = student?.studentId || sharedDatabase.generateUniqueStudentId();
           }
+          if (parsed.fullName && parsed.fullName.trim() && !parsed.fullName.includes('@') && parsed.fullName !== 'Student') {
+            savedName = parsed.fullName.trim();
+          }
           return {
-            fullName: displayName || parsed.fullName || 'Student',
+            fullName: savedName || (displayName !== 'Student' ? displayName : '') || parsed.fullName || 'Student',
             email: userEmail || parsed.email || '',
             phone: parsed.phone || '',
             major: parsed.major || 'Computer Science & Engineering',
@@ -79,8 +84,16 @@ export const ProfileView = ({
       (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
     resolvedStudentId = student?.studentId || sharedDatabase.generateUniqueStudentId();
 
+    const storedUser = localStorage.getItem('learnsmart_user');
+    const fallbackName =
+      (storedUser && storedUser.trim() && storedUser !== 'Student' && !storedUser.includes('@'))
+        ? storedUser.trim()
+        : (displayName && displayName !== 'Student')
+          ? displayName
+          : 'Student';
+
     return {
-      fullName: displayName || 'Student',
+      fullName: fallbackName,
       email: userEmail || '',
       phone: '',
       major: 'Computer Science & Engineering',
@@ -88,13 +101,21 @@ export const ProfileView = ({
       uid: uid || '',
       semester: 'Year 1',
       bio: '',
-      targetGoal: 'Aiming for Software Engineering Internships at top technology companies in 2027.'
+      targetGoal: ''
     };
   });
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
-  // Sync with prop if display name, email, or uid changes
+  // Sync with prop if email or uid changes without overwriting saved custom name
   useEffect(() => {
+    let savedName = '';
+    try {
+      const saved = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
+      if (saved?.fullName && saved.fullName.trim() && !saved.fullName.includes('@') && saved.fullName !== 'Student') {
+        savedName = saved.fullName.trim();
+      }
+    } catch (e) {}
+
     setFormData((prev) => {
       let currentId = prev.studentId;
       if (!currentId) {
@@ -110,23 +131,26 @@ export const ProfileView = ({
           }
         }
       }
+
+      const effectiveName = savedName || prev.fullName || (displayName !== 'Student' ? displayName : '') || 'Student';
+
       try {
         const saved = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
         saved.studentId = currentId;
-        if (displayName) saved.fullName = displayName;
+        saved.fullName = effectiveName;
         if (userEmail) saved.email = userEmail;
         localStorage.setItem('learnsmart_student_profile', JSON.stringify(saved));
       } catch (e) {}
 
       return {
         ...prev,
-        fullName: displayName || prev.fullName,
+        fullName: effectiveName,
         email: userEmail || prev.email,
         studentId: currentId,
         uid: uid || prev.uid || ''
       };
     });
-  }, [displayName, userEmail, uid]);
+  }, [userEmail, uid]);
 
   // Handle external trigger to open edit modal (e.g. from dropdown)
   useEffect(() => {
@@ -204,38 +228,110 @@ export const ProfileView = ({
     }
   };
 
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
     setCurrentAvatar(tempAvatar);
 
+    const trimmedName = (formData.fullName || '').trim() || 'Student';
+    const updatedData = {
+      ...formData,
+      fullName: trimmedName,
+      profileImage: tempAvatar
+    };
+
+    setFormData(updatedData);
+
     try {
-      localStorage.setItem('learnsmart_student_profile', JSON.stringify(formData));
+      localStorage.setItem('learnsmart_student_profile', JSON.stringify(updatedData));
+      localStorage.setItem('learnsmart_user', trimmedName);
+      if (tempAvatar) {
+        localStorage.setItem('learnsmart_avatar', tempAvatar);
+      }
+
+      // Update student in sharedDatabase
       const student =
-        sharedDatabase.getStudentByUsername(formData.fullName) ||
-        sharedDatabase.getStudentByEmail(formData.email);
+        (updatedData.studentId ? sharedDatabase.getStudentById(updatedData.studentId) : null) ||
+        (updatedData.email ? sharedDatabase.getStudentByEmail(updatedData.email) : null) ||
+        (updatedData.uid ? sharedDatabase.getStudentByUid(updatedData.uid) : null) ||
+        sharedDatabase.getStudentByUsername(trimmedName) ||
+        (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
+
       if (student) {
         sharedDatabase.updateStudent(student.id, {
-          name: formData.fullName,
-          email: formData.email,
-          phone: formData.phone,
-          studentId: formData.studentId,
-          topSubject: formData.major
+          name: trimmedName,
+          email: updatedData.email,
+          phone: updatedData.phone,
+          avatarImage: tempAvatar,
+          topSubject: updatedData.major
         });
       }
     } catch (err) {
-      console.warn('Failed to save student profile', err);
+      console.warn('Failed to save student profile locally:', err);
     }
 
+    // 1. Update Firebase Auth currentUser displayName and photoURL
+    if (auth?.currentUser) {
+      try {
+        await updateProfile(auth.currentUser, {
+          displayName: trimmedName,
+          ...(tempAvatar ? { photoURL: tempAvatar } : {})
+        });
+      } catch (fbErr) {
+        console.warn('Firebase profile update note:', fbErr);
+      }
+    }
+
+    // 2. Sync name update to backend MySQL via PUT /api/users/me
+    try {
+      const token = await getAuthToken();
+      await fetch('/api/users/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-User-UID': updatedData.uid || auth?.currentUser?.uid || '',
+          'X-User-Email': updatedData.email || auth?.currentUser?.email || '',
+          'X-User-Name': trimmedName
+        },
+        body: JSON.stringify({
+          name: trimmedName,
+          phone: updatedData.phone || '',
+          department: updatedData.major || 'Computer Science',
+          bio: updatedData.bio || '',
+          avatar_url: tempAvatar || null
+        })
+      });
+    } catch (apiErr) {
+      console.warn('Backend profile update note:', apiErr);
+    }
+
+    // 3. Dispatch broadcast events so Dashboard, App, and all components update immediately
+    window.dispatchEvent(
+      new CustomEvent('learnsmart_user_profile_updated', {
+        detail: {
+          fullName: trimmedName,
+          profileImage: tempAvatar,
+          profileData: updatedData
+        }
+      })
+    );
+    window.dispatchEvent(
+      new CustomEvent('learnsmart_user_updated', {
+        detail: trimmedName
+      })
+    );
+
+    // 4. Trigger parent callback
     if (onUpdateProfile) {
       onUpdateProfile({
-        fullName: formData.fullName,
+        fullName: trimmedName,
         profileImage: tempAvatar,
-        profileData: formData
+        profileData: updatedData
       });
     }
 
     setIsEditing(false);
-    setSaveSuccessMsg('Profile and picture updated successfully!');
+    setSaveSuccessMsg('Profile updated successfully! Name changed across dashboard.');
     setTimeout(() => setSaveSuccessMsg(''), 4000);
   };
 
@@ -295,7 +391,7 @@ export const ProfileView = ({
               />
             ) : (
               <div className="profile-avatar-large">
-                <span>{userInitials}</span>
+                <span>{avatarInitials}</span>
               </div>
             )}
             <button
@@ -494,18 +590,6 @@ export const ProfileView = ({
                           <UploadIcon size={15} />
                           <span>{tempAvatar ? 'Change Photo' : 'Upload Photo'}</span>
                         </button>
-
-                        {tempAvatar && (
-                          <button
-                            type="button"
-                            className="btn-remove-photo"
-                            onClick={handleRemovePhoto}
-                            title="Delete profile picture"
-                          >
-                            <TrashIcon size={14} />
-                            <span>Delete Picture</span>
-                          </button>
-                        )}
                       </div>
 
                       <span className="avatar-hint-text">
@@ -523,7 +607,7 @@ export const ProfileView = ({
                       className="field-text-input"
                       value={formData.fullName}
                       onChange={(e) => handleInputChange('fullName', e.target.value)}
-                      placeholder="e.g. Alex Morgan"
+                      placeholder="e.g. Student Name"
                       required
                     />
                   </div>
@@ -566,7 +650,7 @@ export const ProfileView = ({
                         disabled
                         tabIndex={-1}
                         title="Email Address cannot be modified by student."
-                        placeholder="student@learnsmart.edu"
+                        placeholder="student@example.com"
                       />
                       <span className="field-hint-text">Institutional account email cannot be modified.</span>
                     </div>

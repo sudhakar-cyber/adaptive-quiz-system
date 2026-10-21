@@ -82,38 +82,43 @@ export const EducatorAnalyticsView = ({
     }
   }, [timeframe]);
 
-  // Dynamic Key Performance Indicators (KPIs)
+  // Dynamic Key Performance Indicators (KPIs) - 100% Real Calculations based on stored submissions
   const dynamicKpis = useMemo(() => {
-    // Avg Score calculation
-    let avgScoreVal = 82.7;
-    const studentsWithScore = safeStudents.filter((s) => (s.avgScore || 0) > 0);
-    if (studentsWithScore.length > 0) {
-      const sum = studentsWithScore.reduce((acc, s) => acc + s.avgScore, 0);
-      avgScoreVal = Math.round((sum / studentsWithScore.length) * 10) / 10;
-    } else if (safeSubmissions.length > 0) {
+    // 1. Avg Score calculation strictly from real submissions or students
+    let avgScoreVal = 0;
+    if (safeSubmissions.length > 0) {
       const parsedScores = safeSubmissions
         .map((s) => parseFloat(String(s.score).replace('%', '')))
         .filter((n) => !isNaN(n));
       if (parsedScores.length > 0) {
         avgScoreVal = Math.round((parsedScores.reduce((a, b) => a + b, 0) / parsedScores.length) * 10) / 10;
       }
+    } else {
+      const studentsWithScore = safeStudents.filter((s) => (s.avgScore || 0) > 0);
+      if (studentsWithScore.length > 0) {
+        const sum = studentsWithScore.reduce((acc, s) => acc + s.avgScore, 0);
+        avgScoreVal = Math.round((sum / studentsWithScore.length) * 10) / 10;
+      }
     }
 
-    // Pass rate calculation (completions with score >= 70%)
-    let passRateVal = 89.2;
+    // 2. Pass rate calculation (real scores >= 70%)
+    let passRateVal = 0;
     if (safeSubmissions.length > 0) {
       const passed = safeSubmissions.filter((s) => {
         const sc = parseFloat(String(s.score).replace('%', ''));
         return !isNaN(sc) && sc >= 70;
       }).length;
       passRateVal = Math.round((passed / safeSubmissions.length) * 100);
-    } else if (safeStudents.length > 0) {
-      const passed = safeStudents.filter((s) => (s.avgScore || 0) >= 70).length;
-      passRateVal = Math.round((passed / safeStudents.length) * 100);
+    } else {
+      const studentsWithScore = safeStudents.filter((s) => (s.avgScore || 0) > 0);
+      if (studentsWithScore.length > 0) {
+        const passed = studentsWithScore.filter((s) => (s.avgScore || 0) >= 70).length;
+        passRateVal = Math.round((passed / studentsWithScore.length) * 100);
+      }
     }
 
-    // Avg duration calculation from quizzes
-    let avgDurationVal = '15.5 mins';
+    // 3. Avg duration calculation from active quizzes
+    let avgDurationVal = '0 mins';
     const parsedMins = safeQuizzes
       .map((q) => {
         const match = String(q.duration || '').match(/(\d+)/);
@@ -125,243 +130,135 @@ export const EducatorAnalyticsView = ({
       avgDurationVal = `${avgM} mins`;
     }
 
-    // Completion rate
-    let completionRateVal = '89.4%';
+    // 4. Completion rate
+    let completionRateVal = '0%';
     const totalCompletions = safeStudents.reduce((sum, s) => sum + (s.quizzesCompleted || 0), 0);
-    const expectedCompletions = safeStudents.length * Math.max(1, safeQuizzes.length);
+    const activeQuizzesList = safeQuizzes.filter((q) => (q.status || '').toLowerCase() !== 'draft' && (q.status || '').toLowerCase() !== 'archived');
+    const totalQuizzesCount = Math.max(1, activeQuizzesList.length);
     if (safeStudents.length > 0 && totalCompletions > 0) {
-      const pct = Math.min(100, Math.round((totalCompletions / expectedCompletions) * 100));
+      const pct = Math.min(100, Math.round((totalCompletions / (safeStudents.length * totalQuizzesCount)) * 100));
+      completionRateVal = `${pct}%`;
+    } else if (safeSubmissions.length > 0 && safeStudents.length > 0) {
+      const pct = Math.min(100, Math.round((safeSubmissions.length / (safeStudents.length * totalQuizzesCount)) * 100));
       completionRateVal = `${pct}%`;
     }
 
-    // Slight realistic variation based on timeframe
-    let timeframeAvgScore = avgScoreVal;
-    if (timeframe === 'Last 7 Days') timeframeAvgScore = Math.min(100, Math.round((avgScoreVal + 1.2) * 10) / 10);
-    if (timeframe === 'Semester 1') timeframeAvgScore = Math.max(50, Math.round((avgScoreVal - 0.8) * 10) / 10);
-
     return {
-      avgScore: `${timeframeAvgScore}%`,
+      avgScore: `${avgScoreVal}%`,
       passRate: `${passRateVal}%`,
       avgTimeSpent: avgDurationVal,
       completionRate: completionRateVal,
       totalQuizzes: safeQuizzes.length,
       activeStudents: safeStudents.length,
-      totalSubmissions: Math.max(safeSubmissions.length, Math.round(248 * timeframeMultiplier))
+      totalSubmissions: safeSubmissions.length
     };
-  }, [safeQuizzes, safeStudents, safeSubmissions, timeframe, timeframeMultiplier]);
+  }, [safeQuizzes, safeStudents, safeSubmissions]);
 
-  // Subject Mastery & Pass Rates Breakdown (Cohort Telemetry & Passing Distributions)
+  // Subject Mastery & Pass Rates Breakdown derived strictly from active quizzes & submissions
   const dynamicSubjectBreakdown = useMemo(() => {
-    // Standard domain definitions with colors and benchmarks
-    const domainDefinitions = [
-      {
-        id: 'dom-py',
-        subject: 'Python Basics & OOP',
-        domain: 'Programming',
-        matchTokens: ['python', 'programming', 'oop'],
-        color: '#10B981',
-        defaultScore: 92,
-        defaultPass: 98,
-        defaultAttempts: 184
-      },
-      {
-        id: 'dom-dsa',
-        subject: 'Data Structures & Algorithms',
-        domain: 'DSA',
-        matchTokens: ['data structure', 'algorithm', 'dsa', 'tree', 'graph'],
-        color: '#2563EB',
-        defaultScore: 85,
-        defaultPass: 88,
-        defaultAttempts: 162
-      },
-      {
-        id: 'dom-ml',
-        subject: 'Machine Learning Foundations',
-        domain: 'Machine Learning',
-        matchTokens: ['machine learning', 'ml', 'regression', 'model'],
-        color: '#F59E0B',
-        defaultScore: 88,
-        defaultPass: 92,
-        defaultAttempts: 120
-      },
-      {
-        id: 'dom-cloud',
-        subject: 'Cloud Computing & DevOps',
-        domain: 'Cloud Computing',
-        matchTokens: ['cloud', 'devops', 'docker', 'kubernetes', 'container'],
-        color: '#06B6D4',
-        defaultScore: 81,
-        defaultPass: 83,
-        defaultAttempts: 98
-      },
-      {
-        id: 'dom-sec',
-        subject: 'Web Security & OWASP Top 10',
-        domain: 'Cyber Security',
-        matchTokens: ['security', 'owasp', 'cyber', 'xss', 'sql injection'],
-        color: '#8B5CF6',
-        defaultScore: 71,
-        defaultPass: 79,
-        defaultAttempts: 145
-      },
-      {
-        id: 'dom-db',
-        subject: 'Relational Database Systems & SQL',
-        domain: 'Database Systems',
-        matchTokens: ['database', 'sql', 'relational', 'acid', 'normal form'],
-        color: '#EC4899',
-        defaultScore: 74,
-        defaultPass: 76,
-        defaultAttempts: 88
+    // Collect all distinct categories from quizzes and submissions
+    const categoriesMap = new Map();
+
+    safeQuizzes.forEach((q) => {
+      const cat = q.category || 'General';
+      if (!categoriesMap.has(cat)) {
+        categoriesMap.set(cat, {
+          id: `dom-${cat.toLowerCase().replace(/\s+/g, '-')}`,
+          subject: `${cat} Curriculum`,
+          domain: cat,
+          color: q.categoryColor || '#2563EB',
+          quizzes: []
+        });
       }
-    ];
+      categoriesMap.get(cat).quizzes.push(q);
+    });
 
-    // Compute metrics for each domain from live data
-    const list = domainDefinitions.map((def) => {
-      // Find matching quizzes in safeQuizzes
-      const matchingQuizzes = safeQuizzes.filter((q) => {
-        const text = `${q.title || ''} ${q.category || ''} ${q.description || ''}`.toLowerCase();
-        return def.matchTokens.some((tok) => text.includes(tok));
-      });
+    safeSubmissions.forEach((s) => {
+      const cat = s.category || 'General';
+      if (!categoriesMap.has(cat)) {
+        categoriesMap.set(cat, {
+          id: `dom-${cat.toLowerCase().replace(/\s+/g, '-')}`,
+          subject: `${cat} Curriculum`,
+          domain: cat,
+          color: '#10B981',
+          quizzes: []
+        });
+      }
+    });
 
-      // Find matching student mastery scores
-      const studentMasteryScores = [];
-      const topStudents = [];
-      const supportStudents = [];
-
-      safeStudents.forEach((student) => {
-        let matchedScore = null;
-        if (Array.isArray(student.subjectMastery)) {
-          const match = student.subjectMastery.find((m) => {
-            const mText = (m.subject || '').toLowerCase();
-            return def.matchTokens.some((tok) => mText.includes(tok));
-          });
-          if (match && typeof match.score === 'number' && match.score > 0) {
-            matchedScore = match.score;
-          }
-        }
-
-        // Fallback to student average score if student's topSubject matches domain
-        if (matchedScore === null && student.topSubject) {
-          const topText = (student.topSubject || '').toLowerCase();
-          if (def.matchTokens.some((tok) => topText.includes(tok)) && student.avgScore > 0) {
-            matchedScore = student.avgScore;
-          }
-        }
-
-        if (matchedScore !== null) {
-          studentMasteryScores.push(matchedScore);
-          if (matchedScore >= 80) {
-            topStudents.push({ ...student, domainScore: matchedScore });
-          } else if (matchedScore < 70) {
-            supportStudents.push({ ...student, domainScore: matchedScore });
-          }
-        }
-      });
+    const list = Array.from(categoriesMap.values()).map((item) => {
+      const catName = item.domain.toLowerCase();
 
       // Find matching submissions
       const matchingSubmissions = safeSubmissions.filter((sub) => {
-        const sText = `${sub.quizTitle || ''} ${sub.category || ''}`.toLowerCase();
-        return def.matchTokens.some((tok) => sText.includes(tok));
+        const sCat = (sub.category || '').toLowerCase();
+        const sTitle = (sub.quizTitle || '').toLowerCase();
+        return sCat === catName || sTitle.includes(catName);
       });
 
-      // Calculate Average Score
-      let finalAvgScore = def.defaultScore;
-      if (studentMasteryScores.length > 0) {
-        finalAvgScore = Math.round(studentMasteryScores.reduce((a, b) => a + b, 0) / studentMasteryScores.length);
-      } else if (matchingSubmissions.length > 0) {
-        const subScores = matchingSubmissions
+      // Find matching students
+      const matchingStudents = safeStudents.filter((stud) => {
+        if (Array.isArray(stud.subjectMastery)) {
+          return stud.subjectMastery.some((m) => (m.subject || '').toLowerCase().includes(catName) && m.score > 0);
+        }
+        return false;
+      });
+
+      let finalAvgScore = 0;
+      let finalPassRate = 0;
+      const attemptsCount = matchingSubmissions.length;
+
+      if (matchingSubmissions.length > 0) {
+        const scores = matchingSubmissions
           .map((s) => parseFloat(String(s.score).replace('%', '')))
           .filter((n) => !isNaN(n));
-        if (subScores.length > 0) {
-          finalAvgScore = Math.round(subScores.reduce((a, b) => a + b, 0) / subScores.length);
+        if (scores.length > 0) {
+          finalAvgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+          const passed = scores.filter((sc) => sc >= 70).length;
+          finalPassRate = Math.round((passed / scores.length) * 100);
         }
-      } else if (matchingQuizzes.length > 0) {
-        const quizScores = matchingQuizzes.map((q) => q.avgScore).filter((s) => typeof s === 'number' && s > 0);
+      } else if (item.quizzes.length > 0) {
+        const quizScores = item.quizzes.map((q) => q.avgScore).filter((s) => typeof s === 'number' && s > 0);
         if (quizScores.length > 0) {
           finalAvgScore = Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length);
         }
-      }
-
-      // Calculate Pass Rate (scores >= 70%)
-      let finalPassRate = def.defaultPass;
-      if (studentMasteryScores.length > 0) {
-        const passedCount = studentMasteryScores.filter((sc) => sc >= 70).length;
-        finalPassRate = Math.round((passedCount / studentMasteryScores.length) * 100);
-      } else if (matchingSubmissions.length > 0) {
-        const passedSubCount = matchingSubmissions.filter((s) => {
-          const sc = parseFloat(String(s.score).replace('%', ''));
-          return !isNaN(sc) && sc >= 70;
-        }).length;
-        finalPassRate = Math.round((passedSubCount / matchingSubmissions.length) * 100);
-      } else if (matchingQuizzes.length > 0) {
-        const quizPasses = matchingQuizzes.map((q) => q.passRate).filter((p) => typeof p === 'number' && p > 0);
+        const quizPasses = item.quizzes.map((q) => q.passRate).filter((p) => typeof p === 'number' && p > 0);
         if (quizPasses.length > 0) {
           finalPassRate = Math.round(quizPasses.reduce((a, b) => a + b, 0) / quizPasses.length);
         }
       }
 
-      // Calculate Attempts volume
-      const baseAttempts =
-        matchingSubmissions.length > 0
-          ? matchingSubmissions.length * 4
-          : matchingQuizzes.reduce((sum, q) => sum + (q.submissionsCount || 0), 0) || def.defaultAttempts;
-
-      const scaledAttempts = Math.max(14, Math.round(baseAttempts * timeframeMultiplier));
-
-      // Subject mastery status label
-      let status = 'Proficient';
+      let status = 'No Attempts Yet';
       let statusVariant = 'info';
-      if (finalAvgScore >= 85) {
-        status = 'Mastered';
-        statusVariant = 'success';
-      } else if (finalAvgScore < 70) {
-        status = 'Needs Support';
-        statusVariant = 'warning';
+      if (attemptsCount > 0 || finalAvgScore > 0) {
+        if (finalAvgScore >= 85) {
+          status = 'Mastered';
+          statusVariant = 'success';
+        } else if (finalAvgScore >= 70) {
+          status = 'Proficient';
+          statusVariant = 'info';
+        } else {
+          status = 'Needs Support';
+          statusVariant = 'warning';
+        }
       }
 
       return {
-        id: def.id,
-        subject: def.subject,
-        domain: def.domain,
-        color: def.color,
-        attempts: scaledAttempts,
+        id: item.id,
+        subject: item.subject,
+        domain: item.domain,
+        color: item.color,
+        attempts: attemptsCount,
         avgScore: finalAvgScore,
         passRate: finalPassRate,
         status,
         statusVariant,
-        quizzes: matchingQuizzes,
-        quizCount: Math.max(1, matchingQuizzes.length),
-        studentsTested: studentMasteryScores.length || safeStudents.length || 24,
-        topStudents,
-        supportStudents
+        quizzes: item.quizzes,
+        quizCount: item.quizzes.length,
+        studentsTested: matchingStudents.length || (attemptsCount > 0 ? 1 : 0),
+        topStudents: matchingStudents.filter((s) => (s.avgScore || 0) >= 80),
+        supportStudents: matchingStudents.filter((s) => (s.avgScore || 0) > 0 && s.avgScore < 70)
       };
-    });
-
-    // Also include custom quiz categories created by educator
-    safeQuizzes.forEach((quiz) => {
-      const cat = quiz.category || 'General';
-      const alreadyCovered = list.some(
-        (it) => it.domain.toLowerCase() === cat.toLowerCase() || it.subject.toLowerCase().includes(cat.toLowerCase())
-      );
-      if (!alreadyCovered && cat) {
-        list.push({
-          id: `custom-${cat}`,
-          subject: `${cat} Curriculum`,
-          domain: cat,
-          color: quiz.categoryColor || '#3B82F6',
-          attempts: Math.max(10, Math.round((quiz.submissionsCount || 25) * timeframeMultiplier)),
-          avgScore: quiz.avgScore || 78,
-          passRate: quiz.passRate || 82,
-          status: (quiz.avgScore || 78) >= 85 ? 'Mastered' : (quiz.avgScore || 78) >= 70 ? 'Proficient' : 'Needs Support',
-          statusVariant: (quiz.avgScore || 78) >= 85 ? 'success' : (quiz.avgScore || 78) >= 70 ? 'info' : 'warning',
-          quizzes: [quiz],
-          quizCount: 1,
-          studentsTested: safeStudents.length || 18,
-          topStudents: [],
-          supportStudents: []
-        });
-      }
     });
 
     // Sort list according to subjectSort
@@ -374,49 +271,115 @@ export const EducatorAnalyticsView = ({
     }
 
     return list;
-  }, [safeQuizzes, safeStudents, safeSubmissions, timeframeMultiplier, subjectSort]);
+  }, [safeQuizzes, safeStudents, safeSubmissions, subjectSort]);
 
-  // Submission Activity Trends Chart Data
+  // Submission Activity Trends Chart Data (Pure Calculation from Stored Submissions)
   const trendData = useMemo(() => {
-    const baseVolume = Math.max(40, safeSubmissions.length > 0 ? safeSubmissions.length * 8 : 120);
+    const parseScore = (s) => {
+      if (typeof s === 'number') return s;
+      if (typeof s === 'string') return parseFloat(s.replace('%', '')) || 0;
+      return 0;
+    };
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
 
     if (timeframe === 'Last 7 Days') {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const distribution = [0.12, 0.14, 0.16, 0.22, 0.25, 0.18, 0.20];
-      return days.map((day, idx) => ({
-        label: day,
-        submissions: Math.round(baseVolume * 0.28 * distribution[idx] * 4),
-        avgScore: 78 + (idx * 2) % 12
+      const dayBuckets = days.map((day) => ({ label: day, submissions: 0, totalScore: 0 }));
+
+      safeSubmissions.forEach((sub) => {
+        const subTime = sub.timestamp || (typeof sub.id === 'number' ? sub.id : null);
+        if (subTime && now - subTime <= 7 * dayMs) {
+          const d = new Date(subTime);
+          const dayIdx = (d.getDay() + 6) % 7; // Mon=0, Sun=6
+          if (dayBuckets[dayIdx]) {
+            dayBuckets[dayIdx].submissions += 1;
+            dayBuckets[dayIdx].totalScore += parseScore(sub.score);
+          }
+        } else if (!subTime && safeSubmissions.length > 0) {
+          const todayIdx = (new Date().getDay() + 6) % 7;
+          dayBuckets[todayIdx].submissions += 1;
+          dayBuckets[todayIdx].totalScore += parseScore(sub.score);
+        }
+      });
+
+      return dayBuckets.map((b) => ({
+        label: b.label,
+        submissions: b.submissions,
+        avgScore: b.submissions > 0 ? Math.round(b.totalScore / b.submissions) : 0
       }));
     }
 
     if (timeframe === 'Semester 1') {
       const months = ['M1', 'M2', 'M3', 'M4', 'M5'];
-      const curve = [65, 110, 160, 225, 290];
-      return months.map((m, idx) => ({
-        label: m,
-        submissions: Math.round((curve[idx] + safeSubmissions.length * 2) * 0.9),
-        avgScore: 75 + idx * 3
+      const monthBuckets = months.map((m) => ({ label: m, submissions: 0, totalScore: 0 }));
+
+      safeSubmissions.forEach((sub) => {
+        const subTime = sub.timestamp || (typeof sub.id === 'number' ? sub.id : null);
+        if (subTime) {
+          const daysAgo = Math.floor((now - subTime) / dayMs);
+          const monthIdx = Math.min(4, Math.max(0, 4 - Math.floor(daysAgo / 30)));
+          monthBuckets[monthIdx].submissions += 1;
+          monthBuckets[monthIdx].totalScore += parseScore(sub.score);
+        } else if (safeSubmissions.length > 0) {
+          monthBuckets[4].submissions += 1;
+          monthBuckets[4].totalScore += parseScore(sub.score);
+        }
+      });
+
+      return monthBuckets.map((b) => ({
+        label: b.label,
+        submissions: b.submissions,
+        avgScore: b.submissions > 0 ? Math.round(b.totalScore / b.submissions) : 0
       }));
     }
 
     if (timeframe === 'All Time') {
       const terms = ['T1', 'T2', 'T3', 'T4', 'T5'];
-      const curve = [90, 160, 260, 390, 520];
-      return terms.map((t, idx) => ({
-        label: t,
-        submissions: Math.round((curve[idx] + safeSubmissions.length * 3) * 0.9),
-        avgScore: 74 + idx * 3.5
+      const termBuckets = terms.map((t) => ({ label: t, submissions: 0, totalScore: 0 }));
+
+      safeSubmissions.forEach((sub) => {
+        const subTime = sub.timestamp || (typeof sub.id === 'number' ? sub.id : null);
+        if (subTime) {
+          const daysAgo = Math.floor((now - subTime) / dayMs);
+          const termIdx = Math.min(4, Math.max(0, 4 - Math.floor(daysAgo / 60)));
+          termBuckets[termIdx].submissions += 1;
+          termBuckets[termIdx].totalScore += parseScore(sub.score);
+        } else if (safeSubmissions.length > 0) {
+          termBuckets[4].submissions += 1;
+          termBuckets[4].totalScore += parseScore(sub.score);
+        }
+      });
+
+      return termBuckets.map((b) => ({
+        label: b.label,
+        submissions: b.submissions,
+        avgScore: b.submissions > 0 ? Math.round(b.totalScore / b.submissions) : 0
       }));
     }
 
     // Default: 'Last 30 Days' (4 Weeks)
     const weeks = ['W1', 'W2', 'W3', 'W4'];
-    const curve = [54, 82, 115, 148];
-    return weeks.map((w, idx) => ({
-      label: w,
-      submissions: Math.round(curve[idx] + safeSubmissions.length * 1.5),
-      avgScore: 76 + idx * 3
+    const weekBuckets = weeks.map((w) => ({ label: w, submissions: 0, totalScore: 0 }));
+
+    safeSubmissions.forEach((sub) => {
+      const subTime = sub.timestamp || (typeof sub.id === 'number' ? sub.id : null);
+      if (subTime && now - subTime <= 30 * dayMs) {
+        const daysAgo = Math.floor((now - subTime) / dayMs);
+        const weekIdx = Math.min(3, Math.max(0, 3 - Math.floor(daysAgo / 7)));
+        weekBuckets[weekIdx].submissions += 1;
+        weekBuckets[weekIdx].totalScore += parseScore(sub.score);
+      } else if (!subTime && safeSubmissions.length > 0) {
+        weekBuckets[3].submissions += 1;
+        weekBuckets[3].totalScore += parseScore(sub.score);
+      }
+    });
+
+    return weekBuckets.map((b) => ({
+      label: b.label,
+      submissions: b.submissions,
+      avgScore: b.submissions > 0 ? Math.round(b.totalScore / b.submissions) : 0
     }));
   }, [timeframe, safeSubmissions]);
 
@@ -430,7 +393,7 @@ export const EducatorAnalyticsView = ({
   const chartWidth = svgWidth - paddingLeft - paddingRight;
   const chartHeight = svgHeight - paddingTop - paddingBottom;
 
-  const maxSubmissions = Math.max(...trendData.map((d) => d.submissions), 60);
+  const maxSubmissions = Math.max(...trendData.map((d) => d.submissions), 5);
 
   const chartPoints = useMemo(() => {
     return trendData.map((d, idx) => {
@@ -462,138 +425,47 @@ export const EducatorAnalyticsView = ({
 
   // Dynamic Trajectory and Peak Metrics
   const trajectoryMetric = useMemo(() => {
-    if (chartPoints.length < 2) return '+18.5%';
+    if (chartPoints.length < 2) return '0%';
     const first = chartPoints[0].submissions;
     const last = chartPoints[chartPoints.length - 1].submissions;
-    if (first === 0) return '+100%';
+    if (first === 0 && last === 0) return '0%';
+    if (first === 0) return `+${last} total`;
     const pct = Math.round(((last - first) / first) * 100);
     return pct >= 0 ? `+${pct}%` : `${pct}%`;
   }, [chartPoints]);
 
   const peakPoint = useMemo(() => {
     if (chartPoints.length === 0) return null;
-    return [...chartPoints].sort((a, b) => b.submissions - a.submissions)[0];
+    const sorted = [...chartPoints].sort((a, b) => b.submissions - a.submissions);
+    return sorted[0]?.submissions > 0 ? sorted[0] : null;
   }, [chartPoints]);
 
-  // Diagnostic items (Comprehensive question-level learning gap analysis)
+  // Diagnostic items (Comprehensive question-level learning gap analysis derived from real quizzes & attempts)
   const allDiagnosticItems = useMemo(() => {
     const items = [];
 
-    // Curated high-priority benchmark diagnostic items
-    const baseItems = [
-      {
-        id: 'diag-xss-1',
-        question: 'Which HTTP response header is specifically designed to mitigate Cross-Site Scripting (XSS)?',
-        quiz: 'Web Security & OWASP Top 10',
-        category: 'Cyber Security',
-        domain: 'Cyber Security',
-        difficulty: 'Medium',
-        failureRate: 42,
-        misconception: 'Often confused with X-Frame-Options or HSTS transport-level encryption.',
-        recommendation: 'Emphasize Content-Security-Policy directives and script-src restrictions in lab.',
-        options: [
-          'Content-Security-Policy (CSP)',
-          'Strict-Transport-Security (HSTS)',
-          'X-Frame-Options',
-          'Access-Control-Allow-Origin'
-        ],
-        correctIndex: 0,
-        explanation: 'Content-Security-Policy (CSP) restricts trusted source domains for scripts, preventing reflected and stored XSS.'
-      },
-      {
-        id: 'diag-qs-2',
-        question: 'What is the worst-case time complexity of standard QuickSort with an unbalanced pivot?',
-        quiz: 'Data Structures & Algorithms Mastery',
-        category: 'DSA',
-        domain: 'DSA',
-        difficulty: 'Hard',
-        failureRate: 38,
-        misconception: 'Frequently assumed to stay O(n log n) unconditionally regardless of pivot distribution.',
-        recommendation: 'Demonstrate degenerate recursion trees when sorting already-sorted inputs.',
-        options: ['O(n log n)', 'O(n)', 'O(n²)', 'O(log n)'],
-        correctIndex: 2,
-        explanation: 'If the chosen pivot is always the smallest or largest element, partitioning produces subarrays of sizes 0 and n-1, resulting in O(n²).'
-      },
-      {
-        id: 'diag-3nf-3',
-        question: 'Which normal form eliminates transitive functional dependencies on the primary key?',
-        quiz: 'Relational Database Systems & SQL',
-        category: 'Database Systems',
-        domain: 'Database Systems',
-        difficulty: 'Medium',
-        failureRate: 35,
-        misconception: 'Confused with 2NF partial dependency removal on composite primary keys.',
-        recommendation: 'Provide step-by-step table decomposition exercises for 2NF vs 3NF.',
-        options: ['First Normal Form (1NF)', 'Second Normal Form (2NF)', 'Third Normal Form (3NF)', 'BCNF'],
-        correctIndex: 2,
-        explanation: '3NF requires 2NF compliance and ensures that non-prime attributes are non-transitively dependent on any candidate key.'
-      },
-      {
-        id: 'diag-ml-4',
-        question: 'What problem occurs when a model performs exceptionally on training data but poorly on test data?',
-        quiz: 'Machine Learning Foundations',
-        category: 'Machine Learning',
-        domain: 'Machine Learning',
-        difficulty: 'Medium',
-        failureRate: 29,
-        misconception: 'Occasionally inverted with Underfitting or high bias.',
-        recommendation: 'Visualize training vs validation loss curves and introduce regularization.',
-        options: ['Underfitting', 'Overfitting', 'High bias', 'Feature leakage'],
-        correctIndex: 1,
-        explanation: 'Overfitting occurs when a high-capacity model memorizes random noise in the training set instead of learning the generalizable distribution.'
-      },
-      {
-        id: 'diag-cloud-5',
-        question: 'What is the primary difference between a Container and a Virtual Machine (VM)?',
-        quiz: 'Cloud Computing & DevOps CI/CD',
-        category: 'Cloud Computing',
-        domain: 'Cloud Computing',
-        difficulty: 'Hard',
-        failureRate: 31,
-        misconception: 'Students mistakenly believe containers also bundle guest OS kernels.',
-        recommendation: 'Review Linux namespaces, cgroups, and shared host kernel architecture.',
-        options: [
-          'Containers bundle a guest OS kernel; VMs do not',
-          'Containers share the host OS kernel; VMs run separate guest OSs',
-          'VMs are lighter and boot in milliseconds',
-          'Containers cannot run Linux binaries'
-        ],
-        correctIndex: 1,
-        explanation: 'Containers virtualize at the OS user space level sharing the host OS kernel, while VMs virtualize hardware and run isolated guest operating systems.'
-      },
-      {
-        id: 'diag-py-6',
-        question: 'What is the output data type of 4 / 2 in Python 3?',
-        quiz: 'Python Basics & OOP',
-        category: 'Programming',
-        domain: 'Programming',
-        difficulty: 'Easy',
-        failureRate: 22,
-        misconception: 'Assumed to return integer 2 because operands are integers (confused with Python 2 behavior).',
-        recommendation: 'Contrast true division (/) which always returns float with floor division (//).',
-        options: ['int', 'float', 'double', 'None'],
-        correctIndex: 1,
-        explanation: 'In Python 3, standard division (/) always yields a float (2.0), whereas floor division (//) yields an integer.'
-      }
-    ];
-
-    items.push(...baseItems);
-
-    // Extract questions from educator quizzes
+    // Extract actual questions from educator quizzes
     safeQuizzes.forEach((quiz) => {
       if (Array.isArray(quiz.questions)) {
+        const quizSubmissions = safeSubmissions.filter(
+          (s) =>
+            (s.quizId && String(s.quizId).toLowerCase() === String(quiz.id).toLowerCase()) ||
+            (s.quizTitle && s.quizTitle.toLowerCase().trim() === (quiz.title || '').toLowerCase().trim())
+        );
+
+        const totalAttempts = quizSubmissions.length;
+        const failedAttempts = quizSubmissions.filter((s) => {
+          const score = typeof s.score === 'number' ? s.score : parseFloat(String(s.score).replace('%', '')) || 0;
+          return score < 70;
+        }).length;
+
+        const failRate = totalAttempts > 0 ? Math.round((failedAttempts / totalAttempts) * 100) : 0;
+
         quiz.questions.forEach((q, qIdx) => {
           const exists = items.some(
             (it) => it.question.toLowerCase().trim() === (q.question || '').toLowerCase().trim()
           );
           if (!exists && q.question) {
-            const baseFail =
-              quiz.difficulty === 'Hard' ? 34 + (qIdx * 3) % 12 :
-              quiz.difficulty === 'Medium' ? 24 + (qIdx * 2.5) % 10 :
-              12 + (qIdx * 2) % 8;
-
-            const failRate = Math.min(55, Math.max(8, Math.round(baseFail)));
-
             items.push({
               id: `q-live-${quiz.id}-${q.id || qIdx}`,
               question: q.question,
@@ -602,11 +474,14 @@ export const EducatorAnalyticsView = ({
               domain: quiz.category || 'General',
               difficulty: quiz.difficulty || 'Medium',
               failureRate: failRate,
-              misconception: `Conceptual friction identified in ${(quiz.category || 'this domain').toLowerCase()} core topics.`,
-              recommendation: `Reinforce ${quiz.title} foundational examples and lecture practice tasks.`,
+              attempts: totalAttempts,
+              misconception: q.explanation
+                ? `Concept review: ${q.explanation.slice(0, 100)}...`
+                : `Identified learning friction in ${(quiz.category || 'core').toLowerCase()} topics.`,
+              recommendation: `Reinforce ${quiz.title} foundational principles and review student attempts.`,
               options: q.options || ['Option A', 'Option B', 'Option C', 'Option D'],
               correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
-              explanation: q.explanation || 'Refer to the curriculum lecture notes for in-depth derivation.'
+              explanation: q.explanation || 'Refer to the curriculum lecture notes for detailed concept breakdown.'
             });
           }
         });
@@ -614,7 +489,7 @@ export const EducatorAnalyticsView = ({
     });
 
     return items;
-  }, [safeQuizzes]);
+  }, [safeQuizzes, safeSubmissions]);
 
   // Filtered & Sorted Diagnostic Items
   const filteredDiagnosticItems = useMemo(() => {
