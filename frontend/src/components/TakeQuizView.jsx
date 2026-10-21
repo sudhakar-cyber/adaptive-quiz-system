@@ -41,20 +41,22 @@ export const TakeQuizView = ({
 
   const effectiveSearch = (externalSearch || localSearch).trim().toLowerCase();
 
-  const filteredQuizzes = quizzes.filter((quiz) => {
+  const filteredQuizzes = (quizzes || []).filter((quiz) => {
     let matchesCat = true;
     if (selectedCategory === 'Recommended') {
-      matchesCat = quiz.isRecommended === true;
+      const hasAnyRec = (quizzes || []).some((q) => q.isRecommended === true);
+      matchesCat = hasAnyRec ? quiz.isRecommended === true : true;
     } else if (selectedCategory !== 'All') {
-      matchesCat = quiz.category.toLowerCase() === selectedCategory.toLowerCase();
+      matchesCat = (quiz.category || '').toLowerCase() === selectedCategory.toLowerCase();
     }
 
+    const quizDiff = (quiz.difficulty || 'Medium').toLowerCase();
     const matchesDiff =
-      selectedDifficulty === 'All' || quiz.difficulty.toLowerCase() === selectedDifficulty.toLowerCase();
+      selectedDifficulty === 'All' || quizDiff === selectedDifficulty.toLowerCase();
     const matchesSearch =
       effectiveSearch === '' ||
-      quiz.title.toLowerCase().includes(effectiveSearch) ||
-      quiz.category.toLowerCase().includes(effectiveSearch) ||
+      (quiz.title || '').toLowerCase().includes(effectiveSearch) ||
+      (quiz.category || '').toLowerCase().includes(effectiveSearch) ||
       (quiz.description && quiz.description.toLowerCase().includes(effectiveSearch));
 
     return matchesCat && matchesDiff && matchesSearch;

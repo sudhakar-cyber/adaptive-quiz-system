@@ -1,6 +1,6 @@
 import { INITIAL_EDUCATOR_QUIZZES } from '../data/educatorData.js';
 import { QUIZ_CATALOG, INITIAL_NOTIFICATIONS } from '../data/quizData.js';
-import { db, collection, getDocs } from '../config/firebase.js';
+import { auth, db, collection, getDocs } from '../config/firebase.js';
 
 const STORAGE_KEY_STUDENTS = 'learnsmart_shared_students';
 const STORAGE_KEY_LEGACY = 'learnsmart_educator_students';
@@ -19,6 +19,160 @@ const EVENT_QUIZZES_UPDATED = 'learnsmart_quizzes_updated';
 export const EVENT_SUBMISSIONS_UPDATED = 'learnsmart_submissions_updated';
 
 const DEFAULT_SUBMISSIONS = [];
+
+// Helper: Resolve Authorization Bearer Token for Backend API
+export const getAuthToken = async () => {
+  try {
+    if (auth) {
+      if (typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken(false).catch(() => null);
+        if (token) return token;
+      }
+    }
+  } catch {}
+  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
+               (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role'));
+  if (role === 'admin') return 'admin-session-token';
+  if (role === 'educator') return 'educator-session-token';
+  return 'student-session-token';
+};
+
+// Sync quizzes from backend MySQL API into local store
+export const syncQuizzesFromBackend = async () => {
+  try {
+    const token = await getAuthToken();
+    const res = await fetch('/api/quizzes', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      const backendQuizzes = await res.json();
+      if (Array.isArray(backendQuizzes)) {
+        localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(backendQuizzes));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: backendQuizzes }));
+        }
+        return backendQuizzes;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync quizzes from backend MySQL:', err);
+  }
+  return loadStoredQuizzes();
+};
+
+// Sync live quiz submissions from backend MySQL database
+export const syncSubmissionsFromBackend = async () => {
+  try {
+    const token = await getAuthToken();
+    const res = await fetch('/api/results/submissions', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      const backendSubmissions = await res.json();
+      if (Array.isArray(backendSubmissions)) {
+        const formatted = backendSubmissions.map((s) => ({
+          id: s.id,
+          student: s.student || s.student_name,
+          studentEmail: s.studentEmail || s.student_email,
+          studentId: s.studentId || s.student_id,
+          quizId: s.quizId || s.quiz_id,
+          quizTitle: s.quizTitle || s.quiz_title,
+          category: s.category || 'General',
+          score: typeof s.score === 'string' && s.score.includes('%') ? s.score : `${Math.round(s.scoreValue ?? s.score ?? 0)}%`,
+          scoreValue: Number(s.scoreValue ?? (typeof s.score === 'string' ? parseFloat(s.score) : s.score) ?? 0),
+          totalQuestions: s.totalQuestions || s.total_questions || 0,
+          correctCount: s.correctCount || s.correct_count || 0,
+          status: s.status || (Number(s.scoreValue || 0) >= 70 ? 'Passed' : 'Failed'),
+          date: s.date ? (typeof s.date === 'string' && s.date.includes('T') ? new Date(s.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : s.date) : 'Today'
+        }));
+
+        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(formatted));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: formatted }));
+        }
+        return formatted;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync submissions from backend MySQL:', err);
+  }
+  return [];
+};
+
+// Sync live students from backend MySQL database
+export const syncStudentsFromBackend = async () => {
+  try {
+    const token = await getAuthToken();
+    const res = await fetch('/api/users/students', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      const backendStudents = await res.json();
+      if (Array.isArray(backendStudents)) {
+        const formatted = backendStudents
+          .filter((bs) => {
+            if (!bs || !bs.email) return false;
+            const em = (bs.email || '').toLowerCase();
+            const nm = (bs.name || '').toLowerCase();
+            const id = (bs.id || bs.uid || '').toLowerCase();
+            if (em.includes('stud-dev') || em.includes('demo') || em.includes('student@learnsmart.edu')) return false;
+            if (nm.includes('demo') || id.includes('stud-dev')) return false;
+            return true;
+          })
+          .map((bs) => ({
+            id: bs.id || bs.uid,
+            uid: bs.uid || bs.id,
+            studentId: bs.uid || bs.id,
+            name: bs.name,
+            email: bs.email,
+            role: bs.role || 'student',
+            department: bs.department || 'General',
+            isActive: bs.is_active !== undefined ? Boolean(bs.is_active) : true,
+            quizzesCompleted: 0,
+            avgScore: 0,
+            highestScore: 0,
+            topSubject: 'General',
+            status: 'On Track',
+            statusVariant: 'info',
+            lastActive: 'Active',
+            avatarInitials: getInitials(bs.name)
+          }));
+
+        persistStudents(formatted);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(EVENT_STUDENTS_UPDATED, { detail: formatted }));
+        }
+        return formatted;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync students from backend MySQL:', err);
+  }
+  return [];
+};
+
+// Sync all platform data from backend MySQL database for live tracking
+export const syncAllFromBackend = async () => {
+  const [quizzes, submissions, students] = await Promise.allSettled([
+    syncQuizzesFromBackend(),
+    syncSubmissionsFromBackend(),
+    syncStudentsFromBackend()
+  ]);
+  return {
+    quizzes: quizzes.status === 'fulfilled' ? quizzes.value : [],
+    submissions: submissions.status === 'fulfilled' ? submissions.value : [],
+    students: students.status === 'fulfilled' ? students.value : []
+  };
+};
 
 // Helper: Extract Initials from Full Name
 export const getInitials = (name = '') => {
@@ -68,27 +222,12 @@ const loadStoredStudents = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
-        let needsResave = false;
-        const cleaned = parsed.map((s, index) => {
-          let validId = s.studentId;
-          if (!validId || typeof validId !== 'string' || !validId.trim()) {
-            validId = `LS-2025-${1001 + index}`;
-            needsResave = true;
-          }
-          return {
-            ...s,
-            studentId: validId,
-            role: 'student',
-            isActive: s.isActive !== undefined ? s.isActive : true
-          };
+        return parsed.filter((s) => {
+          if (!s) return false;
+          const k = (s.uid || s.email || s.id || s.name || '').toLowerCase();
+          if (k.includes('stud-dev') || k.includes('demo') || k.includes('student@learnsmart.edu') || k.includes('alex morgan')) return false;
+          return true;
         });
-        if (needsResave) {
-          try {
-            localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(cleaned));
-            localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify(cleaned));
-          } catch (e) {}
-        }
-        return cleaned;
       }
     }
   } catch (err) {
@@ -275,76 +414,144 @@ const persistEducators = (educators) => {
 };
 
 // Storage Keys & Clean Slate Reset
-const STORAGE_KEY_CLEAN_SLATE = 'learnsmart_clean_slate_v3';
+const STORAGE_KEY_CLEAN_SLATE = 'learnsmart_clean_slate_v7';
 
-// Execute one-time clean slate reset to purge all default data while preserving educator and admin credentials
+// Execute one-time clean slate reset to purge all default student data and default quizzes while preserving educator and admin credentials
 const performCleanSlateReset = () => {
   try {
     if (typeof localStorage === 'undefined') return;
-    if (localStorage.getItem(STORAGE_KEY_CLEAN_SLATE) === 'true') return;
+    if (localStorage.getItem(STORAGE_KEY_CLEAN_SLATE) !== 'true') {
+      // 1. Wipe all default quizzes, submissions, students, and attempt mock data
+      localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify([]));
+      localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify([]));
+      localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
+      localStorage.setItem('learnsmart_student_streak', '0');
+      localStorage.setItem('learnsmart_educator_reports', JSON.stringify([]));
+      localStorage.setItem('learnsmart_shared_feedbacks', JSON.stringify([]));
+      localStorage.removeItem('learnsmart_student_profile');
+      localStorage.removeItem('learnsmart_active_quiz_attempt');
 
-    // 1. Wipe all default mock data
-    localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEY_ADMIN_NOTIFICATIONS, JSON.stringify([]));
-    localStorage.setItem(STORAGE_KEY_EDUCATOR_NOTIFICATIONS, JSON.stringify([]));
-    localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify([]));
-    localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
-    localStorage.setItem('learnsmart_student_streak', '0');
-    localStorage.setItem('learnsmart_educator_reports', JSON.stringify([]));
-    localStorage.setItem('learnsmart_shared_feedbacks', JSON.stringify([]));
+      // 2. Clear student auth session if previously stored
+      const activeRole = localStorage.getItem('learnsmart_role');
+      if (activeRole === 'student') {
+        localStorage.removeItem('learnsmart_user');
+        localStorage.removeItem('learnsmart_email');
+        localStorage.removeItem('learnsmart_uid');
+        localStorage.removeItem('learnsmart_role');
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.removeItem('learnsmart_user');
+          sessionStorage.removeItem('learnsmart_email');
+          sessionStorage.removeItem('learnsmart_uid');
+          sessionStorage.removeItem('learnsmart_role');
+        }
+      }
 
-    // 2. Preserve Educator credentials
-    const existingEducators = (() => {
+      // 3. Preserve Educator credentials
+      const existingEducators = (() => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY_EDUCATORS);
+          return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+      })();
+
+      if (!Array.isArray(existingEducators) || existingEducators.length === 0) {
+        localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(INITIAL_SEED_EDUCATORS));
+      } else {
+        const updatedEdu = existingEducators.map((e) => ({
+          ...e,
+          quizzesCreated: 0,
+          activeQuizzes: 0,
+          totalStudents: 0,
+          avgPerformance: 0
+        }));
+        localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(updatedEdu));
+      }
+
+      // 4. Preserve Admin credentials
+      const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
       try {
-        const raw = localStorage.getItem(STORAGE_KEY_EDUCATORS);
-        return raw ? JSON.parse(raw) : null;
-      } catch { return null; }
-    })();
+        const rawAdmin = localStorage.getItem(STORAGE_KEY_ADMIN);
+        if (!rawAdmin) {
+          localStorage.setItem(
+            STORAGE_KEY_ADMIN,
+            JSON.stringify({
+              name: 'System Administrator',
+              email: 'admin@learnsmart.edu',
+              password: 'Admin@123',
+              role: 'admin'
+            })
+          );
+        }
+      } catch {}
 
-    if (!Array.isArray(existingEducators) || existingEducators.length === 0) {
-      localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(INITIAL_SEED_EDUCATORS));
-    } else {
-      const updatedEdu = existingEducators.map((e) => ({
-        ...e,
-        quizzesCreated: 0,
-        activeQuizzes: 0,
-        totalStudents: 0,
-        avgPerformance: 0
-      }));
-      localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(updatedEdu));
+      localStorage.setItem(STORAGE_KEY_CLEAN_SLATE, 'true');
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: [] }));
+        window.dispatchEvent(new CustomEvent(EVENT_STUDENTS_UPDATED, { detail: [] }));
+        window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: [] }));
+        window.dispatchEvent(new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: [] }));
+        window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: [] }));
+        window.dispatchEvent(new Event('storage'));
+      }
     }
 
-    // 3. Preserve Admin credentials
-    const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
+    // Always sanitize stored quizzes against default / demo quizzes
     try {
-      const rawAdmin = localStorage.getItem(STORAGE_KEY_ADMIN);
-      if (!rawAdmin) {
-        localStorage.setItem(
-          STORAGE_KEY_ADMIN,
-          JSON.stringify({
-            name: 'Alex Vance',
-            email: 'admin@learnsmart.edu',
-            password: 'Admin@123',
-            role: 'admin'
-          })
-        );
+      const rawQuizzes = localStorage.getItem(STORAGE_KEY_QUIZZES);
+      if (rawQuizzes) {
+        const parsed = JSON.parse(rawQuizzes);
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.filter((q) => {
+            if (!q) return false;
+            const t = (q.title || '').toLowerCase();
+            const id = (q.id || '').toLowerCase();
+            if (
+              id.includes('python-basics') ||
+              id.includes('quiz-179251') ||
+              t.includes('python & programming') ||
+              t.includes('operating systems core') ||
+              t.includes('compiler design draft') ||
+              t.includes('draft quiz on operating')
+            ) return false;
+            return true;
+          });
+          if (sanitized.length !== parsed.length) {
+            localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(sanitized));
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: sanitized }));
+            }
+          }
+        }
       }
     } catch {}
 
-    localStorage.setItem(STORAGE_KEY_CLEAN_SLATE, 'true');
+    // Always sanitize stored students against demo data
+    try {
+      const rawStudents = localStorage.getItem(STORAGE_KEY_STUDENTS);
+      if (rawStudents) {
+        const parsed = JSON.parse(rawStudents);
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.filter((s) => {
+            if (!s) return false;
+            const k = (s.uid || s.email || s.id || s.name || '').toLowerCase();
+            if (k.includes('stud-dev') || k.includes('demo') || k.includes('student@learnsmart.edu') || k.includes('alex morgan')) return false;
+            return true;
+          });
+          if (sanitized.length !== parsed.length) {
+            localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(sanitized));
+            localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify(sanitized));
+          }
+        }
+      }
+    } catch {}
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: [] }));
-      window.dispatchEvent(new CustomEvent(EVENT_STUDENTS_UPDATED, { detail: [] }));
-      window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: [] }));
-      window.dispatchEvent(new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: [] }));
-      window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: [] }));
-      window.dispatchEvent(new Event('storage'));
-    }
+    // Synchronize live clean data from MySQL database
+    syncAllFromBackend().catch(() => {});
   } catch (e) {
     console.warn('Notice: Clean slate initialization skipped:', e);
   }
@@ -464,13 +671,18 @@ const notifyAdminSubscribers = () => {
 };
 
 export const sharedDatabase = {
+  syncQuizzesFromBackend: () => syncQuizzesFromBackend(),
+  syncSubmissionsFromBackend: () => syncSubmissionsFromBackend(),
+  syncStudentsFromBackend: () => syncStudentsFromBackend(),
+  syncAllFromBackend: () => syncAllFromBackend(),
+
   syncStudentsFromFirestore: (force = false) => {
-    return syncStudentsFromFirestore(force);
+    return syncStudentsFromBackend();
   },
 
   // Get active students list
   getStudents: () => {
-    syncStudentsFromFirestore().catch(() => {});
+    syncStudentsFromBackend().catch(() => {});
     const all = loadStoredStudents();
     return all.filter((s) => s.isActive !== false);
   },
@@ -663,6 +875,29 @@ export const sharedDatabase = {
 
     all.unshift(newStudent);
     persistStudents(all);
+
+    // Sync student creation to backend MySQL
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        await fetch('/api/users/students', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: fullName,
+            email: cleanEmail,
+            studentId: finalStudentId,
+            department: 'Computer Science'
+          })
+        });
+      } catch (err) {
+        console.warn('Backend student creation sync note:', err);
+      }
+    })();
+
     return newStudent;
   },
 
@@ -687,6 +922,21 @@ export const sharedDatabase = {
     });
 
     persistStudents(updated);
+
+    // Delete student and attempts in backend MySQL
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const targetParam = removedTarget?.email || removedTarget?.id || cleanId;
+        await fetch(`/api/users/students/${encodeURIComponent(targetParam)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        syncSubmissionsFromBackend().catch(() => {});
+      } catch (err) {
+        console.warn('Backend student deletion sync note:', err);
+      }
+    })();
 
     // Thoroughly clean up all submissions belonging to this deleted student
     try {
@@ -746,6 +996,21 @@ export const sharedDatabase = {
     } catch (e) {
       console.warn('Failed to clear students storage:', e);
     }
+
+    // Call backend cleanup endpoint
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        await fetch('/api/users/cleanup-default-students', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        syncAllFromBackend().catch(() => {});
+      } catch (err) {
+        console.warn('Backend cleanup sync note:', err);
+      }
+    })();
+
     return [];
   },
 
@@ -1017,14 +1282,60 @@ export const sharedDatabase = {
   },
 
   // Record a completed quiz attempt for a student
-  recordQuizAttempt: ({ studentName, studentEmail, quizTitle, score, category }) => {
+  recordQuizAttempt: ({
+    studentName,
+    studentEmail,
+    quizTitle,
+    score,
+    category,
+    answers = {},
+    quizId = null,
+    correctCount = null,
+    totalQuestions = null,
+    studentId = null
+  }) => {
+    let fbUser = null;
+    try {
+      fbUser = auth.currentUser;
+    } catch {}
+
+    const realUid =
+      studentId ||
+      fbUser?.uid ||
+      (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_uid')) ||
+      null;
+
+    const realEmail =
+      (studentEmail && studentEmail.trim()) ||
+      fbUser?.email ||
+      (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_email')) ||
+      '';
+
+    const realName =
+      (studentName && studentName.trim() && studentName !== 'Student') ||
+      fbUser?.displayName ||
+      (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_user')) ||
+      (realEmail ? realEmail.split('@')[0] : 'Learner');
+
     const all = loadStoredStudents();
-    const student =
-      (studentEmail && sharedDatabase.getStudentByEmail(studentEmail)) ||
-      (studentName && sharedDatabase.getStudentByUsername(studentName)) ||
-      all.find((s) => studentEmail && s.email && s.email.toLowerCase() === studentEmail.toLowerCase()) ||
-      all.find((s) => studentName && s.name && s.name.toLowerCase() === studentName.toLowerCase()) ||
-      (all.length > 0 ? all[0] : null);
+    let student =
+      (realEmail && sharedDatabase.getStudentByEmail(realEmail)) ||
+      (realUid && sharedDatabase.getStudentByUid(realUid)) ||
+      (realName && sharedDatabase.getStudentByUsername(realName)) ||
+      all.find((s) => realEmail && s.email && s.email.toLowerCase() === realEmail.toLowerCase()) ||
+      null;
+
+    // Register into local cache if not present (using genuine email and UID)
+    if (!student) {
+      student = sharedDatabase.registerStudent({
+        name: realName,
+        email: realEmail,
+        uid: realUid || '',
+        role: 'student'
+      });
+    } else if (realUid && !student.uid) {
+      sharedDatabase.updateStudent(student.id, { uid: realUid });
+    }
 
     if (student) {
       const prevTotal = student.quizzesCompleted || 0;
@@ -1032,11 +1343,12 @@ export const sharedDatabase = {
       const newTotal = prevTotal + 1;
       const newAvg = Math.round(((prevAvg * prevTotal + score) / newTotal) * 10) / 10;
       const newHigh = Math.max(student.highestScore || 0, score);
+      const passStatus = score >= 70 ? 'Passed' : 'Failed';
 
       // Determine subject domain for quiz
       const resolveSubject = (t = '', c = '') => {
         const text = `${t} ${c}`.toLowerCase();
-        if (text.includes('python')) return 'Python';
+        if (text.includes('python') || text.includes('programming') || text.includes('javascript')) return 'Python';
         if (text.includes('data structure') || text.includes('algorithm') || text.includes('tree') || text.includes('dsa')) {
           return 'Data Structures';
         }
@@ -1046,17 +1358,18 @@ export const sharedDatabase = {
         if (text.includes('security') || text.includes('owasp') || text.includes('cyber')) {
           return 'Web Security';
         }
-        return 'Others';
+        return category || 'Others';
       };
 
       const subName = resolveSubject(quizTitle, category);
 
       const newSubmission = {
-        id: `sub-${Date.now()}`,
+        id: `attempt_${quizId || 'quiz'}_${realUid || student.id}`,
+        quizId: quizId || null,
         title: quizTitle,
         category: category || subName || 'General',
         score: `${score}%`,
-        status: 'Completed',
+        status: passStatus,
         date: 'Today'
       };
 
@@ -1101,19 +1414,50 @@ export const sharedDatabase = {
         recentSubmissions: updatedSubmissions
       });
 
+      // Update quiz's own statistics in STORAGE_KEY_QUIZZES
+      try {
+        const allQuizzes = loadStoredQuizzes();
+        const quizIdx = allQuizzes.findIndex(
+          (q) => (quizId && String(q.id).toLowerCase() === String(quizId).toLowerCase()) ||
+                 (q.title && q.title.toLowerCase().trim() === quizTitle.toLowerCase().trim())
+        );
+        if (quizIdx !== -1) {
+          const targetQuiz = allQuizzes[quizIdx];
+          const prevSubCount = targetQuiz.submissionsCount || 0;
+          const prevQuizAvg = targetQuiz.avgScore || 0;
+          const newSubCount = prevSubCount + 1;
+          const newQuizAvg = Math.round(((prevQuizAvg * prevSubCount + score) / newSubCount) * 10) / 10;
+          const wasPassed = score >= 70 ? 1 : 0;
+          const prevPassedCount = Math.round(((targetQuiz.passRate || 0) / 100) * prevSubCount);
+          const newPassRate = Math.round(((prevPassedCount + wasPassed) / newSubCount) * 100);
+
+          allQuizzes[quizIdx] = {
+            ...targetQuiz,
+            submissionsCount: newSubCount,
+            avgScore: newQuizAvg,
+            passRate: newPassRate,
+            lastUpdated: 'Just now'
+          };
+          persistQuizzes(allQuizzes);
+        }
+      } catch (err) {
+        console.warn('Failed to update quiz aggregate stats:', err);
+      }
+
       // Also record in global submissions table
       try {
         const savedSubmissions = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
         const list = savedSubmissions ? JSON.parse(savedSubmissions) : DEFAULT_SUBMISSIONS;
         const newEntry = {
-          id: Date.now(),
-          student: student.name,
-          studentEmail: student.email,
-          studentId: student.id,
+          id: `attempt_${quizId || 'quiz'}_${realUid || student.id}`,
+          student: realName,
+          studentEmail: realEmail,
+          studentId: realUid || student.id,
+          quizId: quizId || null,
           quizTitle,
           category: category || subName,
           score: `${score}%`,
-          status: 'Completed',
+          status: passStatus,
           date: 'Just now'
         };
         const updatedList = [newEntry, ...list];
@@ -1126,6 +1470,54 @@ export const sharedDatabase = {
       } catch (e) {
         console.warn(e);
       }
+
+      // Sync attempt with backend API asynchronously
+      (async () => {
+        try {
+          const token = await getAuthToken();
+          const targetQuizId = quizId || `quiz-${encodeURIComponent(quizTitle.toLowerCase().replace(/\s+/g, '-'))}`;
+          
+          const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          };
+          if (realUid) headers['X-User-UID'] = realUid;
+          if (realEmail) headers['X-User-Email'] = realEmail;
+          if (realName) headers['X-User-Name'] = realName;
+
+          const res = await fetch(`/api/quizzes/${targetQuizId}/attempt`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              studentName: realName,
+              studentEmail: realEmail,
+              studentId: realUid || student.uid || student.id,
+              quizTitle,
+              category,
+              score,
+              correctCount,
+              totalQuestions,
+              answers
+            })
+          });
+          if (!res.ok) {
+            const errDetail = await res.text().catch(() => '');
+            if (res.status === 409) {
+              console.warn(`[LearnSmart] Duplicate submission prevented: ${errDetail}`);
+            } else {
+              console.warn(`[LearnSmart] Quiz attempt sync response: ${res.status} - ${errDetail}`);
+            }
+          } else {
+            const data = await res.json();
+            console.log('[LearnSmart] Genuine quiz attempt saved to MySQL database:', data);
+            // Trigger instant live tracking synchronization from MySQL
+            await syncSubmissionsFromBackend();
+            await syncQuizzesFromBackend();
+          }
+        } catch (apiErr) {
+          console.warn('[LearnSmart] Backend sync error (attempt saved locally):', apiErr);
+        }
+      })();
     }
   },
 
@@ -1479,13 +1871,22 @@ export const sharedDatabase = {
 
   /**
    * Returns all active/published quizzes for the student dashboard.
-   * Unified with educator & admin quizzes in the shared database.
+   * Drafts stay drafts and are NEVER visible to students.
+   * Inactive students receive an empty catalog.
    */
-  getPublishedQuizzes: () => {
+  getPublishedQuizzes: (studentUser = null) => {
+    // Enforce student eligibility: Deactivated accounts have zero quiz access
+    if (studentUser && studentUser.isActive === false) {
+      return [];
+    }
+
     const stored = loadStoredQuizzes();
-    const storedActive = stored.filter(
-      (q) => q.status === 'Active' || (!q.status && q.status !== 'Draft' && q.status !== 'Archived')
-    );
+    const storedActive = stored.filter((q) => {
+      const s = (q.status || '').toLowerCase().trim();
+      // Drafts and Archived are strictly excluded from students
+      if (s === 'draft' || s === 'archived') return false;
+      return s === 'active' || s === 'published' || !s;
+    });
 
     const seenIds = new Set();
     const seenTitles = new Set();
@@ -1502,6 +1903,7 @@ export const sharedDatabase = {
           isRecommended: q.isRecommended !== undefined ? q.isRecommended : true,
           questionsCount: q.questionsCount || (q.questions || []).length || 5,
           duration: q.duration || '15 mins',
+          difficulty: q.difficulty || 'Medium',
           recommendationReason: q.recommendationReason || 'Curriculum Assessment • Assigned by Instructor'
         });
       }
@@ -1523,7 +1925,11 @@ export const sharedDatabase = {
 
   addQuiz: (quizData) => {
     const all = loadStoredQuizzes();
-    const isPub = quizData.status === 'Active' || !quizData.status;
+    const rawStatus = (quizData.status || 'Active').trim();
+    const isDraft = rawStatus.toLowerCase() === 'draft';
+    const status = isDraft ? 'Draft' : 'Active';
+    const isPub = !isDraft;
+
     const newQuiz = {
       id: quizData.id || `quiz-${Date.now()}`,
       title: quizData.title || 'Untitled Quiz',
@@ -1533,9 +1939,9 @@ export const sharedDatabase = {
       difficulty: quizData.difficulty || 'Medium',
       diffBg: quizData.diffBg || '#FFEDD5',
       diffColor: quizData.diffColor || '#C2410C',
-      status: quizData.status || 'Active',
+      status: status,
       isRecommended: quizData.isRecommended !== undefined ? quizData.isRecommended : isPub,
-      recommendationReason: quizData.recommendationReason || 'Newly Published Assessment • Assigned by Instructor',
+      recommendationReason: quizData.recommendationReason || (isDraft ? 'Draft Assessment' : 'Newly Published Assessment • Assigned by Instructor'),
       questionsCount: (quizData.questions || []).length || 5,
       duration: quizData.duration || '15 mins',
       submissionsCount: 0,
@@ -1550,14 +1956,29 @@ export const sharedDatabase = {
     all.unshift(newQuiz);
     persistQuizzes(all);
 
+    // Sync with backend API asynchronously
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        await fetch('/api/quizzes', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(newQuiz)
+        });
+      } catch (e) {}
+    })();
+
     sharedDatabase.sendAdminNotification({
-      title: 'New Quiz Published',
-      message: `"${newQuiz.title}" created under ${newQuiz.category}.`,
+      title: isDraft ? 'Quiz Draft Created' : 'New Quiz Published',
+      message: `"${newQuiz.title}" ${isDraft ? 'saved as draft' : 'published'} under ${newQuiz.category}.`,
       category: 'quiz',
       type: 'info'
     });
 
-    // Notify students that a new quiz is published
+    // Notify students ONLY if published
     if (isPub) {
       sharedDatabase.sendStudentNotification({
         title: `New Quiz: ${newQuiz.title}`,
@@ -1576,6 +1997,22 @@ export const sharedDatabase = {
     if (idx !== -1) {
       all[idx] = { ...all[idx], ...updates, lastUpdated: 'Just now' };
       persistQuizzes(all);
+
+      // Sync with backend API asynchronously
+      (async () => {
+        try {
+          const token = await getAuthToken();
+          await fetch(`/api/quizzes/${id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(all[idx])
+          });
+        } catch (e) {}
+      })();
+
       return all[idx];
     }
     return null;
@@ -1604,84 +2041,20 @@ export const sharedDatabase = {
   // SUBMISSIONS
   // ==========================================
   getSubmissions: () => {
-    const allStudents = loadStoredStudents();
-    const validStudentIds = new Set();
-    const validStudentEmails = new Set();
-    const validStudentNames = new Set();
-
-    allStudents.forEach((student) => {
-      if (student.isActive !== false) {
-        if (student.id) validStudentIds.add(String(student.id).trim().toLowerCase());
-        if (student.studentId) validStudentIds.add(String(student.studentId).trim().toLowerCase());
-        if (student.email) validStudentEmails.add(String(student.email).trim().toLowerCase());
-        if (student.name) validStudentNames.add(String(student.name).trim().toLowerCase());
-      }
-    });
+    // Trigger asynchronous live synchronization with MySQL
+    syncSubmissionsFromBackend().catch(() => {});
 
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // If no active students exist at all, clear submissions
-          if (validStudentIds.size === 0 && validStudentEmails.size === 0 && validStudentNames.size === 0) {
-            if (parsed.length > 0) {
-              localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
-            }
-            return [];
-          }
-
-          // Filter out submissions belonging to deleted students
-          const validSubmissions = parsed.filter((sub) => {
-            const subId = String(sub.studentId || '').trim().toLowerCase();
-            const subEmail = String(sub.studentEmail || '').trim().toLowerCase();
-            const subName = String(sub.student || '').trim().toLowerCase();
-
-            if (subId && validStudentIds.has(subId)) return true;
-            if (subEmail && validStudentEmails.has(subEmail)) return true;
-            if (subName && validStudentNames.has(subName)) return true;
-
-            for (const validName of validStudentNames) {
-              if (validName && subName && (validName === subName || subName.includes(validName) || validName.includes(subName))) {
-                return true;
-              }
-            }
-
-            return false;
-          });
-
-          // Sync storage if orphan submissions were pruned
-          if (validSubmissions.length !== parsed.length) {
-            localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(validSubmissions));
-          }
-
-          return validSubmissions;
+          return parsed;
         }
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
-    // Fallback: Aggregate from active students' recentSubmissions
-    const aggregated = [];
-    allStudents.forEach((student) => {
-      if (student.isActive !== false && Array.isArray(student.recentSubmissions) && student.recentSubmissions.length > 0) {
-        student.recentSubmissions.forEach((sub, idx) => {
-          aggregated.push({
-            id: `sub-${student.id}-${idx}`,
-            student: student.name,
-            studentEmail: student.email,
-            studentId: student.id,
-            quizTitle: sub.title || sub.quizTitle,
-            category: sub.category || '',
-            score: sub.score,
-            status: sub.status || 'Completed',
-            date: sub.date || student.lastActive || 'Today'
-          });
-        });
-      }
-    });
-    return aggregated;
+    return [];
   },
 
   subscribeSubmissions: (callback) => {
@@ -1845,13 +2218,45 @@ export const sharedDatabase = {
 
     const liveTotalUsers = students.length + educators.length + 1;
     const liveTotalQuizzes = quizzes.length;
-    const liveActiveQuizzes = quizzes.filter((q) => q.status === 'Active' || !q.status).length;
+    const liveActiveQuizzes = quizzes.filter((q) => {
+      const s = (q.status || '').toLowerCase().trim();
+      return s === 'active' || s === 'published' || !s;
+    }).length;
     const liveCompleted = submissions.length;
 
-    const validScores = students.filter((s) => s.avgScore > 0);
-    const avgScore = validScores.length > 0
-      ? Math.round((validScores.reduce((acc, s) => acc + (s.avgScore || 0), 0) / validScores.length) * 10) / 10
-      : 0;
+    // Real Platform Average Score
+    let avgScore = 0;
+    if (submissions.length > 0) {
+      const sum = submissions.reduce((acc, sub) => {
+        const sc = typeof sub.score === 'number' ? sub.score : parseFloat(String(sub.score).replace('%', '')) || 0;
+        return acc + sc;
+      }, 0);
+      avgScore = Math.round((sum / submissions.length) * 10) / 10;
+    } else {
+      const validScores = students.filter((s) => (s.avgScore || 0) > 0);
+      if (validScores.length > 0) {
+        avgScore = Math.round((validScores.reduce((acc, s) => acc + s.avgScore, 0) / validScores.length) * 10) / 10;
+      }
+    }
+
+    // Real Pass Rate (Benchmark: >= 70%)
+    let passRate = '0%';
+    if (submissions.length > 0) {
+      const passed = submissions.filter((sub) => {
+        const sc = typeof sub.score === 'number' ? sub.score : parseFloat(String(sub.score).replace('%', '')) || 0;
+        return sc >= 70;
+      }).length;
+      passRate = `${Math.round((passed / submissions.length) * 100)}%`;
+    }
+
+    // Real Completion Rate
+    let completionRate = '0%';
+    if (liveCompleted > 0 && liveActiveQuizzes > 0 && students.length > 0) {
+      const pct = Math.min(100, Math.round((liveCompleted / (students.length * liveActiveQuizzes)) * 100));
+      completionRate = `${pct}%`;
+    } else if (liveCompleted > 0) {
+      completionRate = '100%';
+    }
 
     return {
       totalUsers: liveTotalUsers,
@@ -1862,7 +2267,8 @@ export const sharedDatabase = {
       totalEducators: educators.length,
       completedQuizzes: liveCompleted,
       avgScore: `${avgScore}%`,
-      completionRate: liveTotalQuizzes > 0 ? `${Math.round((liveCompleted / liveTotalQuizzes) * 100)}%` : '0%',
+      passRate,
+      completionRate,
       serverUptime: '99.98%',
       apiLatency: '42ms'
     };

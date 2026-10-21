@@ -13,6 +13,7 @@ import {
   ActivityIcon,
   SparklesIcon
 } from './Icons';
+import { getAuthToken } from '../services/sharedDatabase';
 
 export const AdminProfileView = ({
   adminUser = {},
@@ -34,7 +35,7 @@ export const AdminProfileView = ({
       console.warn(e);
     }
     return {
-      fullName: adminUser.fullName || adminUser.name || 'Alex Vance',
+      fullName: adminUser.fullName || adminUser.name || 'System Administrator',
       name: adminUser.name || 'Admin',
       title: adminUser.title || 'Senior Platform Administrator',
       email: adminUser.email || 'admin@learnsmart.edu',
@@ -88,7 +89,7 @@ export const AdminProfileView = ({
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target.result;
       const updated = { ...profile, avatarImage: dataUrl };
       setProfile(updated);
@@ -101,6 +102,28 @@ export const AdminProfileView = ({
         console.warn(err);
       }
 
+      // Automatically sync updated avatar to MySQL database
+      try {
+        const token = await getAuthToken();
+        await fetch('/api/users/me', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-User-UID': 'admin-system',
+            'X-User-Email': updated.email || 'admin@learnsmart.edu',
+            'X-User-Name': updated.fullName || 'System Administrator',
+            'X-User-Role': 'admin'
+          },
+          body: JSON.stringify({
+            name: updated.fullName,
+            avatar_url: dataUrl
+          })
+        });
+      } catch (apiErr) {
+        console.warn('MySQL admin avatar sync note:', apiErr);
+      }
+
       if (onUpdateProfile) onUpdateProfile(updated);
       if (showToast) showToast('Administrator profile photo updated!');
     };
@@ -108,7 +131,7 @@ export const AdminProfileView = ({
   };
 
   // Remove avatar photo
-  const handleRemoveAvatar = () => {
+  const handleRemoveAvatar = async () => {
     const updated = { ...profile, avatarImage: null };
     setProfile(updated);
     setFormData((prev) => ({ ...prev, avatarImage: null }));
@@ -120,12 +143,34 @@ export const AdminProfileView = ({
       console.warn(err);
     }
 
+    // Automatically sync avatar removal to MySQL database
+    try {
+      const token = await getAuthToken();
+      await fetch('/api/users/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-User-UID': 'admin-system',
+          'X-User-Email': updated.email || 'admin@learnsmart.edu',
+          'X-User-Name': updated.fullName || 'System Administrator',
+          'X-User-Role': 'admin'
+        },
+        body: JSON.stringify({
+          name: updated.fullName,
+          avatar_url: ''
+        })
+      });
+    } catch (apiErr) {
+      console.warn('MySQL admin avatar removal sync note:', apiErr);
+    }
+
     if (onUpdateProfile) onUpdateProfile(updated);
     if (showToast) showToast('Profile photo removed.');
   };
 
   // Handle saving profile changes
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
 
     const updated = {
@@ -154,6 +199,32 @@ export const AdminProfileView = ({
       }
     } catch (err) {
       console.warn(err);
+    }
+
+    // Automatically update administrator profile in MySQL database
+    try {
+      const token = await getAuthToken();
+      await fetch('/api/users/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-User-UID': 'admin-system',
+          'X-User-Email': updated.email || 'admin@learnsmart.edu',
+          'X-User-Name': updated.fullName,
+          'X-User-Role': 'admin'
+        },
+        body: JSON.stringify({
+          name: updated.fullName,
+          phone: updated.phone || '',
+          department: updated.department || '',
+          title: updated.title || '',
+          bio: updated.bio || '',
+          avatar_url: updated.avatarImage || null
+        })
+      });
+    } catch (apiErr) {
+      console.warn('Failed to automatically update admin profile in MySQL database:', apiErr);
     }
 
     if (onUpdateProfile) onUpdateProfile(updated);
@@ -387,7 +458,7 @@ export const AdminProfileView = ({
                       className="ad-input"
                       value={formData.fullName}
                       onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                      placeholder="e.g. Alex Vance"
+                      placeholder="e.g. System Administrator"
                       required
                     />
                   </div>

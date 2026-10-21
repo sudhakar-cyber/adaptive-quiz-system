@@ -16,7 +16,7 @@ import { AdminNotificationsView } from '../components/AdminNotificationsView';
 import { AdminProfileView } from '../components/AdminProfileView';
 import { AdminAddUserModal } from '../components/AdminAddUserModal';
 
-import { sharedDatabase } from '../services/sharedDatabase';
+import { sharedDatabase, getAuthToken } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
 import '../styles/adminDashboard.css';
 
@@ -106,7 +106,7 @@ export const AdminDashboard = ({ onLogout }) => {
       const authAdmin = authService.getCurrentUser();
       return {
         name: authAdmin?.name || 'Admin',
-        fullName: authAdmin?.fullName || authAdmin?.name || 'Alex Vance',
+        fullName: authAdmin?.fullName || authAdmin?.name || 'System Administrator',
         email: authAdmin?.email || 'admin@learnsmart.edu',
         role: 'Administrator',
         title: authAdmin?.title || 'Senior Platform Administrator',
@@ -123,7 +123,7 @@ export const AdminDashboard = ({ onLogout }) => {
     } catch {
       return {
         name: 'Admin',
-        fullName: 'Alex Vance',
+        fullName: 'System Administrator',
         email: 'admin@learnsmart.edu',
         role: 'Administrator',
         title: 'Senior Platform Administrator',
@@ -196,11 +196,53 @@ export const AdminDashboard = ({ onLogout }) => {
     window.addEventListener('learnsmart_submissions_updated', handleLiveEvents);
     window.addEventListener('storage', handleLiveEvents);
 
-    if (typeof sharedDatabase?.syncStudentsFromFirestore === 'function') {
-      sharedDatabase.syncStudentsFromFirestore(true).catch(() => {});
+    // Live tracking from MySQL database
+    if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
+      sharedDatabase.syncAllFromBackend().then(() => {
+        refreshData();
+      }).catch(() => {});
     }
 
+    // Fetch administrator profile from MySQL database
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const res = await fetch('/api/users/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-User-UID': 'admin-system',
+            'X-User-Email': 'admin@learnsmart.edu',
+            'X-User-Role': 'admin'
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.name) {
+            setAdminProfile((prev) => ({
+              ...prev,
+              fullName: data.name || prev.fullName,
+              phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
+              department: data.department || prev.department,
+              title: data.title || prev.title,
+              bio: data.bio || prev.bio,
+              avatarImage: data.avatar_url || prev.avatarImage
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Backend admin profile fetch note:', err);
+      }
+    })();
+
+    // Real-time periodic live tracking polling from MySQL
+    const liveTrackingTimer = setInterval(() => {
+      if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
+        sharedDatabase.syncAllFromBackend().catch(() => {});
+      }
+    }, 8000);
+
     return () => {
+      clearInterval(liveTrackingTimer);
       if (unsubAdmin) unsubAdmin();
       if (unsubStudents) unsubStudents();
       window.removeEventListener('learnsmart_students_updated', handleLiveEvents);
@@ -577,6 +619,7 @@ export const AdminDashboard = ({ onLogout }) => {
               educators={educators}
               quizzes={quizzes}
               stats={stats}
+              submissions={sharedDatabase.getSubmissions()}
             />
           )}
 

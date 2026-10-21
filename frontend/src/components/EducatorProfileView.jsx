@@ -9,6 +9,7 @@ import {
   LockIcon,
   XIcon
 } from './Icons';
+import { getAuthToken } from '../services/sharedDatabase';
 
 export const EducatorProfileView = ({
   profileData,
@@ -74,7 +75,7 @@ export const EducatorProfileView = ({
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const result = event.target.result;
       setAvatarImage(result);
       try {
@@ -82,6 +83,29 @@ export const EducatorProfileView = ({
       } catch (err) {
         console.warn(err);
       }
+
+      // Automatically sync educator avatar to MySQL database
+      try {
+        const token = await getAuthToken();
+        await fetch('/api/users/me', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-User-UID': profileData.facultyId || 'edu-201',
+            'X-User-Email': profileData.email || 'educator@learnsmart.com',
+            'X-User-Name': profileData.fullName || 'Dr. Sarah Jenkins',
+            'X-User-Role': 'educator'
+          },
+          body: JSON.stringify({
+            name: profileData.fullName,
+            avatar_url: result
+          })
+        });
+      } catch (apiErr) {
+        console.warn('MySQL educator avatar sync note:', apiErr);
+      }
+
       if (onUpdateProfile) {
         onUpdateProfile({ ...profileData, avatarImage: result });
       }
@@ -90,20 +114,43 @@ export const EducatorProfileView = ({
     reader.readAsDataURL(file);
   };
 
-  const handleRemovePhoto = () => {
+  const handleRemovePhoto = async () => {
     setAvatarImage(null);
     try {
       localStorage.removeItem('learnsmart_educator_avatar');
     } catch (err) {
       console.warn(err);
     }
+
+    // Automatically sync avatar removal to MySQL database
+    try {
+      const token = await getAuthToken();
+      await fetch('/api/users/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-User-UID': profileData.facultyId || 'edu-201',
+          'X-User-Email': profileData.email || 'educator@learnsmart.com',
+          'X-User-Name': profileData.fullName || 'Dr. Sarah Jenkins',
+          'X-User-Role': 'educator'
+        },
+        body: JSON.stringify({
+          name: profileData.fullName,
+          avatar_url: ''
+        })
+      });
+    } catch (apiErr) {
+      console.warn('MySQL educator avatar removal note:', apiErr);
+    }
+
     if (onUpdateProfile) {
       onUpdateProfile({ ...profileData, avatarImage: null });
     }
     if (showToast) showToast('Avatar removed.');
   };
 
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
     if (!formData.fullName.trim()) return;
 
@@ -119,6 +166,32 @@ export const EducatorProfileView = ({
       localStorage.setItem('learnsmart_educator_profile', JSON.stringify(updated));
     } catch (err) {
       console.warn(err);
+    }
+
+    // Automatically update educator profile details in MySQL database
+    try {
+      const token = await getAuthToken();
+      await fetch('/api/users/me', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-User-UID': updated.facultyId || 'edu-201',
+          'X-User-Email': updated.email || 'educator@learnsmart.com',
+          'X-User-Name': updated.fullName,
+          'X-User-Role': 'educator'
+        },
+        body: JSON.stringify({
+          name: updated.fullName,
+          phone: updated.phone || '',
+          department: updated.department || '',
+          title: updated.academicTitle || '',
+          bio: updated.bio || '',
+          avatar_url: avatarImage || null
+        })
+      });
+    } catch (apiErr) {
+      console.warn('Failed to automatically update educator profile in MySQL database:', apiErr);
     }
 
     setIsEditing(false);

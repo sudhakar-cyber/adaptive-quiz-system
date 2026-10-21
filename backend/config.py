@@ -23,5 +23,15 @@ class Config:
     OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", 5))
     OTP_MAX_HOURLY_RESENDS = int(os.getenv("OTP_MAX_HOURLY_RESENDS", 5))
 
+    # Database Configuration (Strictly MySQL Only)
+    DB_TYPE = "mysql"
+    MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1").strip()
+    MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
+    MYSQL_USER = os.getenv("MYSQL_USER", "root").strip()
+    MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "").strip()
+    MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "learnsmart").strip()
+
 
 config = Config()
+
+

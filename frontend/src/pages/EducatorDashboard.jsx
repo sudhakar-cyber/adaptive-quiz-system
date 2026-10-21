@@ -19,7 +19,7 @@ import {
   INITIAL_EDUCATOR_NOTIFICATIONS,
   INITIAL_EDUCATOR_PROFILE
 } from '../data/educatorData';
-import { sharedDatabase } from '../services/sharedDatabase';
+import { sharedDatabase, getAuthToken } from '../services/sharedDatabase';
 
 export const EducatorDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -221,11 +221,58 @@ export const EducatorDashboard = ({ onLogout }) => {
     window.addEventListener('learnsmart_educator_notifications_updated', handleEducatorNotifsUpdated);
     window.addEventListener('storage', handleStorageChange);
 
-    if (typeof sharedDatabase?.syncStudentsFromFirestore === 'function') {
-      sharedDatabase.syncStudentsFromFirestore(true).catch(() => {});
+    // Live tracking from MySQL database
+    if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
+      sharedDatabase.syncAllFromBackend().then(() => {
+        setStudents(sharedDatabase.getStudents());
+        setQuizzes(sharedDatabase.getQuizzes());
+        setSubmissions(sharedDatabase.getSubmissions());
+      }).catch(() => {});
     }
 
+    // Fetch educator profile from MySQL database
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const res = await fetch('/api/users/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-User-UID': 'edu-201',
+            'X-User-Email': 'educator@learnsmart.com',
+            'X-User-Role': 'educator'
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.name) {
+            setProfileData((prev) => ({
+              ...prev,
+              fullName: data.name || prev.fullName,
+              phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
+              department: data.department || prev.department,
+              academicTitle: data.title || prev.academicTitle,
+              bio: data.bio || prev.bio,
+              avatarImage: data.avatar_url || prev.avatarImage
+            }));
+            if (data.avatar_url) {
+              setAvatarImage(data.avatar_url);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Backend educator profile fetch note:', err);
+      }
+    })();
+
+    // Real-time periodic live tracking polling from MySQL
+    const liveTrackingTimer = setInterval(() => {
+      if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
+        sharedDatabase.syncAllFromBackend().catch(() => {});
+      }
+    }, 8000);
+
     return () => {
+      clearInterval(liveTrackingTimer);
       unsubStudents();
       unsubSubmissions();
       window.removeEventListener('learnsmart_students_updated', handleStudentsUpdated);
@@ -341,22 +388,21 @@ export const EducatorDashboard = ({ onLogout }) => {
   };
 
   const handleCreateQuiz = (newQuiz) => {
+    const rawStatus = (newQuiz.status || 'Active').trim();
+    const isDraft = rawStatus.toLowerCase() === 'draft';
+    const finalStatus = isDraft ? 'Draft' : 'Active';
+
     const quizToAdd = {
       ...newQuiz,
-      isRecommended: newQuiz.status === 'Active' || newQuiz.isRecommended !== false,
-      recommendationReason: newQuiz.recommendationReason || 'Newly Published Assessment • Assigned by Educator'
+      status: finalStatus,
+      isRecommended: !isDraft && (newQuiz.isRecommended !== false),
+      recommendationReason: newQuiz.recommendationReason || (isDraft ? 'Draft Assessment' : 'Newly Published Assessment • Assigned by Educator')
     };
-    const updated = [quizToAdd, ...quizzes];
-    handleUpdateQuizzes(updated);
-    if (quizToAdd.status === 'Active') {
-      sharedDatabase.sendStudentNotification({
-        title: `New Quiz: ${quizToAdd.title}`,
-        message: `A new ${quizToAdd.difficulty || 'Adaptive'} assessment in ${quizToAdd.category} has been published by your instructor. Test your knowledge now!`,
-        category: 'quiz',
-        type: 'info'
-      });
-    }
-    showToast(`New quiz "${newQuiz.title}" created & published successfully!`);
+
+    sharedDatabase.addQuiz(quizToAdd);
+    setQuizzes(sharedDatabase.getQuizzes());
+
+    showToast(isDraft ? `Quiz "${newQuiz.title}" saved as draft.` : `New quiz "${newQuiz.title}" created & published successfully!`);
     setActiveTab('Manage Quizzes');
   };
 
@@ -366,7 +412,10 @@ export const EducatorDashboard = ({ onLogout }) => {
   };
 
   // Dynamic Cohort Metrics
-  const activeQuizzesCount = quizzes.filter((q) => q.status === 'Active').length;
+  const activeQuizzesCount = quizzes.filter((q) => {
+    const s = (q.status || '').toLowerCase().trim();
+    return s === 'active' || s === 'published';
+  }).length;
   const topPerformersCount = students.filter(
     (s) => s.status === 'Top Performer' || (s.avgScore || 0) >= 85
   ).length;

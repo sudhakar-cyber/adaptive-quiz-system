@@ -21,14 +21,14 @@ export const OAuthVerification = ({
 
   // Fallback student details if loaded directly
   const student = registeredUser || {
-    firstName: 'Alex',
-    lastName: 'Morgan',
-    name: 'Alex Morgan',
-    email: 'alex.morgan@gmail.com',
+    firstName: '',
+    lastName: '',
+    name: '',
+    email: '',
     role: 'student'
   };
 
-  const fullName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Alex Morgan';
+  const fullName = student.name || `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Learner';
   const email = student.email || '';
 
   const userInitials = (() => {

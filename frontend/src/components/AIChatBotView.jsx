@@ -24,7 +24,8 @@ export const AIChatBotView = ({
 
   const [messages, setMessages] = useState(() => {
     // Initial welcome message from LearnSmart AI
-    const recommended = quizzes.filter((q) => q.isRecommended).slice(0, 3);
+    const recList = (quizzes || []).filter((q) => q.isRecommended);
+    const recommended = (recList.length > 0 ? recList : (quizzes || [])).slice(0, 3);
     return [
       {
         id: 'msg-welcome',
