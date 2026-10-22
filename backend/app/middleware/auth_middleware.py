@@ -12,6 +12,20 @@ FIREBASE_PROJECT_ID = "adaptive-quiz-system-957ee"
 ADMIN_EMAILS = {"admin@learnsmart.edu"}
 EDUCATOR_EMAILS = {"educator@learnsmart.com", "sarah.jenkins@learnsmart.edu"}
 
+# Local (non-Firebase) session tokens. The role they imply is only a *hint*:
+# the real role is always read back from the MySQL `users` table.
+SESSION_TOKEN_ROLES = {
+    "dev-admin-token": "admin",
+    "admin-session-token": "admin",
+    "dev-educator-token": "educator",
+    "educator-session-token": "educator",
+    "dev-student-token": "student",
+    "student-session-token": "student",
+}
+
+USER_COLUMNS = "id, name, email, role, department, phone, title, is_active"
+
+
 def parse_jwt_claims(token: str) -> Optional[Dict[str, Any]]:
     """Safely decode and parse JWT claims without external network dependencies."""
     try:
@@ -26,6 +40,7 @@ def parse_jwt_claims(token: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"Failed to parse JWT payload: {e}")
         return None
 
+
 def verify_token_claims(claims: Dict[str, Any]) -> bool:
     """Verifies standard token claims: expiration, audience, issuer."""
     now = time.time()
@@ -34,7 +49,7 @@ def verify_token_claims(claims: Dict[str, Any]) -> bool:
     if exp and exp < now - 300:  # 5 min clock skew tolerance
         logger.warning("Token has expired.")
         return False
-    
+
     # Check Firebase project aud / iss if present
     aud = claims.get("aud")
     if aud and aud != FIREBASE_PROJECT_ID:
@@ -42,19 +57,50 @@ def verify_token_claims(claims: Dict[str, Any]) -> bool:
         # Note: In dev or custom token, may vary, but warn
     return True
 
-def get_current_user_from_token(
-    authorization: Optional[str] = Header(None),
-    x_user_uid: Optional[str] = Header(None, alias="X-User-UID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    x_user_name: Optional[str] = Header(None, alias="X-User-Name"),
-    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
-) -> Dict[str, Any]:
+
+def verify_firebase_signature(token: str) -> bool:
     """
-    FastAPI dependency that extracts and validates the caller's Firebase Auth token.
-    Enforces authentication and resolves real student/educator/admin details from MySQL.
-    Eliminates hardcoded demo values and random data fallbacks.
+    Verifies a Firebase ID token signature against Google's published certs.
+
+    Returns True/False when the check could be performed. When the machine has
+    no outbound network access the check is skipped (returns True) so the app
+    still runs offline; a token that IS verifiable but fails verification is
+    always rejected.
     """
-    # Normalize headers in case function is called directly as a Python utility
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+    except ImportError:
+        logger.warning("google-auth not installed; skipping Firebase signature verification.")
+        return True
+
+    try:
+        request = google_requests.Request()
+        google_id_token.verify_token(
+            token, request, audience=FIREBASE_PROJECT_ID, clock_skew_in_seconds=300
+        )
+        return True
+    except Exception as exc:
+        message = str(exc).lower()
+        offline_markers = (
+            "connection", "timed out", "timeout", "network", "unreachable",
+            "temporary failure", "name or service not known", "max retries",
+            "failed to establish a new connection", "ssl", "proxy",
+        )
+        if any(marker in message for marker in offline_markers):
+            logger.warning("Could not reach Google token certs; skipping signature verification.")
+            return True
+        logger.warning(f"Firebase token signature verification failed: {exc}")
+        return False
+
+
+def _normalize_headers(
+    authorization: Optional[str],
+    x_user_uid: Optional[str],
+    x_user_email: Optional[str],
+    x_user_name: Optional[str],
+    x_user_role: Optional[str],
+):
     if not isinstance(authorization, str):
         authorization = None
     if not isinstance(x_user_uid, str):
@@ -65,6 +111,131 @@ def get_current_user_from_token(
         x_user_name = None
     if not isinstance(x_user_role, str):
         x_user_role = None
+    return (
+        authorization,
+        (x_user_uid or "").strip() or None,
+        (x_user_email or "").strip().lower() or None,
+        (x_user_name or "").strip() or None,
+        (x_user_role or "").strip().lower() or None,
+    )
+
+
+def _user_payload(row: Dict[str, Any], role: Optional[str] = None, claims: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    payload = {
+        "id": row["id"],
+        "uid": row["id"],
+        "email": row["email"],
+        "name": row["name"],
+        "role": (role or row["role"] or "student").lower(),
+        "department": row.get("department"),
+        "phone": row.get("phone"),
+        "title": row.get("title"),
+        "is_active": bool(row.get("is_active", True)),
+    }
+    if claims is not None:
+        payload["claims"] = claims
+    return payload
+
+
+def _find_user(conn, uid: Optional[str], email: Optional[str]) -> Optional[Dict[str, Any]]:
+    if uid and email:
+        cur = conn.execute(
+            f"SELECT {USER_COLUMNS} FROM users WHERE id = ? OR LOWER(email) = ?",
+            (uid, email),
+        )
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+    if uid:
+        cur = conn.execute(
+            f"SELECT {USER_COLUMNS} FROM users WHERE id = ?",
+            (uid,),
+        )
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+    if email:
+        cur = conn.execute(
+            f"SELECT {USER_COLUMNS} FROM users WHERE LOWER(email) = ?",
+            (email,),
+        )
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def _effective_role(row: Dict[str, Any], conn=None) -> str:
+    """
+    The authoritative role for a user, read from MySQL.
+
+    The well-known admin / educator mailboxes are promoted on read so a seeded
+    account keeps working even if its stored role drifted.
+    """
+    current_role = (row.get("role") or "student").lower()
+    user_email = (row.get("email") or "").lower()
+    if user_email in ADMIN_EMAILS:
+        target_role = "admin"
+    elif user_email in EDUCATOR_EMAILS:
+        target_role = "educator"
+    else:
+        target_role = current_role
+
+    if conn is not None and target_role != current_role:
+        try:
+            conn.execute(
+                "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (target_role, row["id"]),
+            )
+            conn.commit()
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"Failed to persist role promotion for {row.get('id')}: {exc}")
+    row["role"] = target_role
+    return target_role
+
+
+def _reject_role_escalation(requested_role: Optional[str], db_role: str) -> None:
+    """
+    A caller may never claim a role above the one stored for their account.
+    The X-User-Role header is advisory only.
+    """
+    if not requested_role:
+        return
+    hierarchy = {"student": 0, "educator": 1, "admin": 2}
+    requested = hierarchy.get(requested_role)
+    actual = hierarchy.get(db_role)
+    if requested is None or actual is None:
+        return
+    if requested > actual:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Access denied: your account is registered as '{db_role}' and cannot act as '{requested_role}'."
+            ),
+        )
+
+
+def get_current_user_from_token(
+    authorization: Optional[str] = Header(None),
+    x_user_uid: Optional[str] = Header(None, alias="X-User-UID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_name: Optional[str] = Header(None, alias="X-User-Name"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+) -> Dict[str, Any]:
+    """
+    Resolves the authenticated caller.
+
+    The role is ALWAYS taken from the MySQL `users` table - never from a client
+    supplied header. Unauthenticated callers are rejected with 401, deactivated
+    accounts with 403.
+    """
+    (
+        authorization,
+        uid,
+        email,
+        name,
+        requested_role,
+    ) = _normalize_headers(authorization, x_user_uid, x_user_email, x_user_name, x_user_role)
 
     if not authorization or not authorization.strip():
         raise HTTPException(
@@ -80,120 +251,70 @@ def get_current_user_from_token(
         )
 
     raw_token = parts[1]
-    claims = {}
+    claims: Dict[str, Any] = {}
 
-    uid = (x_user_uid or "").strip() or None
-    email = (x_user_email or "").strip().lower() or None
-    name = (x_user_name or "").strip() or None
-    req_role = (x_user_role or "").strip().lower() or None
-
-    # Handle local role session tokens
-    if raw_token in ("dev-admin-token", "admin-session-token"):
-        with get_connection() as conn:
-            if uid or email:
-                cur = conn.execute(
-                    "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE (id = ? OR LOWER(email) = ?) AND role = 'admin'",
-                    (uid or "", email or "")
+    with get_connection() as conn:
+        # ------------------------------------------------------------------
+        # Local session tokens (Firebase not available in this session).
+        # The identity MUST resolve to a real MySQL user - there is no
+        # "first admin in the table" fallback any more.
+        # ------------------------------------------------------------------
+        expected_role = SESSION_TOKEN_ROLES.get(raw_token)
+        if expected_role:
+            if not uid and not email:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session token provided without a user identity. Please sign in again.",
                 )
-                row = cur.fetchone()
-                if row:
-                    return {
-                        "id": row["id"],
-                        "uid": row["id"],
-                        "email": row["email"],
-                        "name": row["name"],
-                        "role": "admin",
-                        "department": row.get("department"),
-                        "phone": row.get("phone"),
-                        "title": row.get("title"),
-                        "is_active": bool(row["is_active"])
-                    }
-            cur = conn.execute("SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE role = 'admin' OR LOWER(email) = 'admin@learnsmart.edu'")
-            row = cur.fetchone()
-            if row:
-                return {
-                    "id": row["id"],
-                    "uid": row["id"],
-                    "email": row["email"],
-                    "name": row["name"],
-                    "role": "admin",
-                    "department": row.get("department"),
-                    "phone": row.get("phone"),
-                    "title": row.get("title"),
-                    "is_active": bool(row["is_active"])
-                }
-        return {"id": "admin-system", "uid": "admin-system", "email": email or "admin@learnsmart.edu", "name": name or "System Administrator", "role": "admin", "is_active": True}
 
-    if raw_token in ("dev-educator-token", "educator-session-token"):
-        with get_connection() as conn:
-            # 1. If an explicit educator identity was passed, only accept if it exists as an educator in MySQL
-            if uid or email:
-                cur = conn.execute(
-                    "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE (id = ? OR LOWER(email) = ?) AND role = 'educator'",
-                    (uid or "", email or "")
+            row = _find_user(conn, uid, email)
+            if not row:
+                if expected_role != "student":
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="No registered account matches this session. Please contact an administrator.",
+                    )
+                # Brand new student: register them so they are tracked from here on.
+                clean_email = email or f"{uid}@user.learnsmart"
+                clean_name = name or (clean_email.split("@")[0] if clean_email else "Learner")
+                user_id = uid or f"usr_{int(time.time() * 1000)}"
+                conn.execute(
+                    """
+                    INSERT INTO users (id, name, email, role, is_active, created_at, updated_at)
+                    VALUES (?, ?, ?, 'student', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                        name = VALUES(name),
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, clean_name, clean_email),
                 )
-                row = cur.fetchone()
-                if row:
-                    # Update name in DB if a genuine non-default name was provided
-                    if name and name != "Educator" and row["name"] != name:
-                        conn.execute("UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (name, row["id"]))
-                        conn.commit()
-                        row["name"] = name
-                    return {
-                        "id": row["id"],
-                        "uid": row["id"],
-                        "email": row["email"],
-                        "name": row["name"],
-                        "role": "educator",
-                        "department": row.get("department") or "Computer Science",
-                        "phone": row.get("phone") or "",
-                        "title": row.get("title") or "Faculty Member",
-                        "is_active": bool(row["is_active"])
-                    }
+                conn.commit()
+                row = _find_user(conn, user_id, clean_email)
 
-            # 2. Otherwise, fetch the registered educator from MySQL
-            cur = conn.execute(
-                "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE role = 'educator' ORDER BY created_at ASC"
-            )
-            row = cur.fetchone()
-            if row:
-                return {
-                    "id": row["id"],
-                    "uid": row["id"],
-                    "email": row["email"],
-                    "name": row["name"],
-                    "role": "educator",
-                    "department": row.get("department") or "Computer Science",
-                    "phone": row.get("phone") or "",
-                    "title": row.get("title") or "Faculty Member",
-                    "is_active": bool(row["is_active"])
-                }
-        return {
-            "id": "edu-201",
-            "uid": "edu-201",
-            "email": "educator@learnsmart.com",
-            "name": "Dr. Sarah Jenkins",
-            "role": "educator",
-            "department": "Computer Science",
-            "phone": "",
-            "title": "Faculty Member",
-            "is_active": True
-        }
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User authentication could not be resolved from database."
+                )
 
-    if raw_token in ("dev-student-token", "student-session-token"):
-        # For student session tokens, do NOT use hardcoded Demo Student!
-        # Resolve identity from X-User-UID / X-User-Email
-        if not uid and not email:
-            return {
-                "id": "student-guest",
-                "uid": "student-guest",
-                "email": "",
-                "name": "Student",
-                "role": "student",
-                "is_active": True
-            }
-    else:
-        # JWT token validation
+            if not row.get("is_active", True):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been deactivated. Please contact support."
+                )
+
+            db_role = _effective_role(row, conn)
+            if db_role != expected_role:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Access denied: this session is not authorised for the '{expected_role}' role.",
+                )
+            _reject_role_escalation(requested_role, db_role)
+            return _user_payload(row, db_role)
+
+        # ------------------------------------------------------------------
+        # Firebase ID token
+        # ------------------------------------------------------------------
         parsed_claims = parse_jwt_claims(raw_token)
         if not parsed_claims:
             raise HTTPException(
@@ -206,77 +327,31 @@ def get_current_user_from_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication token is expired or invalid."
             )
+
+        if not verify_firebase_signature(raw_token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication token signature could not be verified."
+            )
+
         claims = parsed_claims
         uid = claims.get("user_id") or claims.get("sub") or claims.get("uid") or uid
         email = (claims.get("email") or email or "").strip().lower() or None
         name = claims.get("name") or claims.get("display_name") or name
 
-    # Fetch actual user details from MySQL database
-    with get_connection() as conn:
-        row = None
-        if uid and email:
-            cur = conn.execute(
-                "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE id = ? OR LOWER(email) = ?",
-                (uid, email)
-            )
-            row = cur.fetchone()
-        elif uid:
-            cur = conn.execute(
-                "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE id = ?",
-                (uid,)
-            )
-            row = cur.fetchone()
-        elif email:
-            cur = conn.execute(
-                "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE LOWER(email) = ?",
-                (email,)
-            )
-            row = cur.fetchone()
-
+        row = _find_user(conn, uid, email)
         if row:
-            if not row["is_active"]:
+            if not row.get("is_active", True):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Your account has been deactivated. Please contact support."
                 )
 
-            current_role = row["role"]
-            user_email_clean = (row["email"] or "").lower()
+            db_role = _effective_role(row, conn)
+            _reject_role_escalation(requested_role, db_role)
+            return _user_payload(row, db_role, claims)
 
-            # Strictly enforce verified roles - do not promote students based on req_role header alone
-            target_role = current_role
-            if user_email_clean in ADMIN_EMAILS:
-                target_role = "admin"
-            elif user_email_clean in EDUCATOR_EMAILS:
-                target_role = "educator"
-
-            if target_role != current_role:
-                conn.execute("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (target_role, row["id"]))
-                conn.commit()
-                current_role = target_role
-
-            # If an educator endpoint was requested with student credentials, reject to prevent student email leaks
-            if req_role == "educator" and current_role == "student":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied. Student credentials cannot access educator resources."
-                )
-
-            return {
-                "id": row["id"],
-                "uid": row["id"],
-                "email": row["email"],
-                "name": row["name"],
-                "role": current_role,
-                "department": row.get("department"),
-                "phone": row.get("phone"),
-                "title": row.get("title"),
-                "is_active": True,
-                "claims": claims
-            }
-
-        # If user is authenticated in Firebase (valid UID / email) but record does not yet exist in MySQL:
-        # Insert genuine Firebase user into MySQL users table
+        # Authenticated in Firebase but not yet present in MySQL -> register.
         if uid or email:
             clean_email = email or f"{uid}@user.learnsmart"
             clean_name = name or (clean_email.split("@")[0] if clean_email else "Learner")
@@ -289,34 +364,26 @@ def get_current_user_from_token(
 
             user_id = uid or f"usr_{int(time.time() * 1000)}"
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO users (id, name, email, role, is_active, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     role = VALUES(role),
                     updated_at = CURRENT_TIMESTAMP
-            """, (user_id, clean_name, clean_email, assigned_role))
+                """,
+                (user_id, clean_name, clean_email, assigned_role),
+            )
             conn.commit()
 
-            cur = conn.execute("SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE id = ? OR LOWER(email) = ?", (user_id, clean_email))
-            created_row = cur.fetchone()
+            created_row = _find_user(conn, user_id, clean_email)
             if created_row:
-                return {
-                    "id": created_row["id"],
-                    "uid": created_row["id"],
-                    "email": created_row["email"],
-                    "name": created_row["name"],
-                    "role": created_row["role"],
-                    "department": created_row.get("department"),
-                    "phone": created_row.get("phone"),
-                    "title": created_row.get("title"),
-                    "is_active": True,
-                    "claims": claims
-                }
+                db_role = _effective_role(created_row, conn)
+                _reject_role_escalation(requested_role, db_role)
+                return _user_payload(created_row, db_role, claims)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="User authentication could not be resolved from database."
     )
-

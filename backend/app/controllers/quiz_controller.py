@@ -5,6 +5,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from app.db import get_connection
+from app.controllers import tracking_controller
+from app.notifications import notification_service
 
 logger = logging.getLogger("quiz_controller")
 
@@ -25,62 +27,81 @@ DIFFICULTY_STYLES = {
     "Hard": {"bg": "#FEE2E2", "color": "#B91C1C"},
 }
 
+def _serialize_quiz(conn, row: Dict[str, Any]) -> Dict[str, Any]:
+    """Turns a `quizzes` row into the shape the frontend consumes."""
+    q = dict(row)
+    q_cur = conn.execute(
+        "SELECT id, question_text, options_json, correct_index, explanation, order_index FROM questions WHERE quiz_id = ? ORDER BY order_index ASC",
+        (q["id"],)
+    )
+    questions = []
+    for q_row in q_cur.fetchall():
+        raw_opts = q_row["options_json"]
+        try:
+            opts = json.loads(raw_opts) if isinstance(raw_opts, str) else (raw_opts or [])
+        except Exception:
+            opts = []
+        questions.append({
+            "id": q_row["id"],
+            "question": q_row["question_text"],
+            "options": opts,
+            "correctIndex": q_row["correct_index"],
+            "explanation": q_row["explanation"] or ""
+        })
+
+    cat_st = CATEGORY_STYLES.get(q.get("category"), {"bg": "#E0F2FE", "color": "#0369A1"})
+    diff_st = DIFFICULTY_STYLES.get(q.get("difficulty"), {"bg": "#FFEDD5", "color": "#C2410C"})
+
+    q["questions"] = questions
+    q["questionsCount"] = len(questions) if questions else (q.get("questions_count") or 0)
+    q["isRecommended"] = bool(q.get("is_recommended", 1))
+    q["recommendationReason"] = q.get("recommendation_reason") or "Curriculum Assessment • Assigned by Educator"
+    q["categoryBg"] = cat_st["bg"]
+    q["categoryColor"] = cat_st["color"]
+    q["diffBg"] = diff_st["bg"]
+    q["diffColor"] = diff_st["color"]
+    q["submissionsCount"] = q.get("submissions_count") or 0
+    q["avgScore"] = q.get("avg_score") or 0.0
+    q["passRate"] = q.get("pass_rate") or 0.0
+    return q
+
+
 def get_all_quizzes(role: str = "student", current_user: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
     Returns list of quizzes.
     For students: ONLY returns Active/Published quizzes. Drafts and Archived are excluded.
-    For educators/admins: returns all quizzes including Drafts.
+    For educators: every published quiz, plus their own quizzes in any status.
+    For admins: every quiz including Drafts.
     """
+    role = (role or "student").lower()
     with get_connection() as conn:
-        if role.lower() == "student":
+        if role == "admin":
+            cur = conn.execute("SELECT * FROM quizzes ORDER BY created_at DESC")
+        elif role == "educator" and current_user:
+            educator_id = current_user.get("id") or current_user.get("uid") or ""
+            educator_name = current_user.get("name") or ""
+            cur = conn.execute(
+                """
+                SELECT * FROM quizzes
+                WHERE LOWER(status) IN ('active', 'published')
+                   OR author_id = ?
+                   OR LOWER(author_name) = LOWER(?)
+                ORDER BY created_at DESC
+                """,
+                (educator_id, educator_name),
+            )
+        else:
             cur = conn.execute(
                 "SELECT * FROM quizzes WHERE LOWER(status) IN ('active', 'published') ORDER BY created_at DESC"
             )
-        else:
-            cur = conn.execute("SELECT * FROM quizzes ORDER BY created_at DESC")
-        
+
         quizzes = []
         for row in cur.fetchall():
-            q = dict(row)
-            # Fetch question count and questions
-            q_cur = conn.execute(
-                "SELECT id, question_text, options_json, correct_index, explanation, order_index FROM questions WHERE quiz_id = ? ORDER BY order_index ASC",
-                (q["id"],)
-            )
-            questions = []
-            for q_row in q_cur.fetchall():
-                raw_opts = q_row["options_json"]
-                try:
-                    opts = json.loads(raw_opts) if isinstance(raw_opts, str) else (raw_opts or [])
-                except Exception:
-                    opts = []
-                questions.append({
-                    "id": q_row["id"],
-                    "question": q_row["question_text"],
-                    "options": opts,
-                    "correctIndex": q_row["correct_index"],
-                    "explanation": q_row["explanation"] or ""
-                })
-
-            cat_st = CATEGORY_STYLES.get(q.get("category"), {"bg": "#E0F2FE", "color": "#0369A1"})
-            diff_st = DIFFICULTY_STYLES.get(q.get("difficulty"), {"bg": "#FFEDD5", "color": "#C2410C"})
-
-            q["questions"] = questions
-            q["questionsCount"] = len(questions) if questions else (q.get("questions_count") or 0)
-            q["isRecommended"] = bool(q.get("is_recommended", 1))
-            q["recommendationReason"] = q.get("recommendation_reason") or "Curriculum Assessment • Assigned by Educator"
-            q["categoryBg"] = cat_st["bg"]
-            q["categoryColor"] = cat_st["color"]
-            q["diffBg"] = diff_st["bg"]
-            q["diffColor"] = diff_st["color"]
-            q["submissionsCount"] = q.get("submissions_count") or 0
-            q["avgScore"] = q.get("avg_score") or 0.0
-            q["passRate"] = q.get("pass_rate") or 0.0
-            quizzes.append(q)
-            
+            quizzes.append(_serialize_quiz(conn, dict(row)))
         return quizzes
 
-def get_quiz_by_id(quiz_id: str, role: str = "student") -> Optional[Dict[str, Any]]:
+
+def get_quiz_by_id(quiz_id: str, role: str = "student", current_user: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """Fetches a single quiz by ID, enforcing role visibility for drafts."""
     with get_connection() as conn:
         cur = conn.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,))
@@ -88,43 +109,13 @@ def get_quiz_by_id(quiz_id: str, role: str = "student") -> Optional[Dict[str, An
         if not row:
             return None
         q = dict(row)
-        if role.lower() == "student" and (q.get("status") or "").lower() not in ("active", "published"):
-            return None  # Drafts hidden from students
 
-        q_cur = conn.execute(
-            "SELECT id, question_text, options_json, correct_index, explanation, order_index FROM questions WHERE quiz_id = ? ORDER BY order_index ASC",
-            (quiz_id,)
-        )
-        questions = []
-        for q_row in q_cur.fetchall():
-            raw_opts = q_row["options_json"]
-            try:
-                opts = json.loads(raw_opts) if isinstance(raw_opts, str) else (raw_opts or [])
-            except Exception:
-                opts = []
-            questions.append({
-                "id": q_row["id"],
-                "question": q_row["question_text"],
-                "options": opts,
-                "correctIndex": q_row["correct_index"],
-                "explanation": q_row["explanation"] or ""
-            })
+        if (role or "student").lower() != "admin":
+            is_published = (q.get("status") or "").lower() in ("active", "published")
+            if not is_published and not tracking_controller.can_manage_quiz(q, current_user):
+                return None  # Drafts hidden from anyone but their author / an admin
 
-        cat_st = CATEGORY_STYLES.get(q.get("category"), {"bg": "#E0F2FE", "color": "#0369A1"})
-        diff_st = DIFFICULTY_STYLES.get(q.get("difficulty"), {"bg": "#FFEDD5", "color": "#C2410C"})
-
-        q["questions"] = questions
-        q["questionsCount"] = len(questions)
-        q["isRecommended"] = bool(q.get("is_recommended", 1))
-        q["recommendationReason"] = q.get("recommendation_reason") or "Curriculum Assessment • Assigned by Educator"
-        q["categoryBg"] = cat_st["bg"]
-        q["categoryColor"] = cat_st["color"]
-        q["diffBg"] = diff_st["bg"]
-        q["diffColor"] = diff_st["color"]
-        q["submissionsCount"] = q.get("submissions_count") or 0
-        q["avgScore"] = q.get("avg_score") or 0.0
-        q["passRate"] = q.get("pass_rate") or 0.0
-        return q
+        return _serialize_quiz(conn, q)
 
 def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any]) -> Dict[str, Any]:
     """Creates or updates a quiz in the database."""
@@ -134,21 +125,32 @@ def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any
     difficulty = str(quiz_data.get("difficulty") or "Medium").strip()
     duration = str(quiz_data.get("duration") or "15 mins").strip()
     raw_status = str(quiz_data.get("status") or "Active").strip()
-    status = "Draft" if raw_status.lower() == "draft" else "Active"
+    quiz_status = "Draft" if raw_status.lower() == "draft" else "Active"
     is_rec = 1 if quiz_data.get("isRecommended", True) else 0
     rec_reason = str(quiz_data.get("recommendationReason") or "Curriculum Assessment • Assigned by Educator").strip()
     desc = str(quiz_data.get("description") or "").strip()
-    author_id = current_user.get("uid") or current_user.get("id") or "educator"
-    # Prefer author_name from quiz_data (frontend sends real educator name), fallback to current_user
-    author_name = (
-        str(quiz_data.get("author_name") or "").strip() or
-        str(quiz_data.get("createdBy") or "").strip() or
-        str(current_user.get("name") or "").strip() or
-        "Educator"
-    )
     questions = quiz_data.get("questions") or []
 
     with get_connection() as conn:
+        # The author is always the authenticated account - never a client supplied field.
+        existing = conn.execute("SELECT id, title, status, author_id, author_name FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+        if existing:
+            if not tracking_controller.can_manage_quiz(dict(existing), current_user):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You can only edit quizzes that you created.",
+                )
+            author_id = existing["author_id"] or (current_user.get("uid") or current_user.get("id"))
+            author_name = existing["author_name"] or (current_user.get("name") or "Educator")
+        else:
+            author_id = current_user.get("uid") or current_user.get("id") or "educator"
+            author_name = (
+                str(current_user.get("name") or "").strip() or
+                str(quiz_data.get("author_name") or "").strip() or
+                str(quiz_data.get("createdBy") or "").strip() or
+                "Educator"
+            )
+
         conn.execute("""
             INSERT INTO quizzes (
                 id, title, category, difficulty, duration, status, is_recommended,
@@ -165,7 +167,7 @@ def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any
                 description = VALUES(description),
                 questions_count = VALUES(questions_count),
                 updated_at = CURRENT_TIMESTAMP
-        """, (quiz_id, title, category, difficulty, duration, status, is_rec, rec_reason, desc, len(questions), author_id, author_name))
+        """, (quiz_id, title, category, difficulty, duration, quiz_status, is_rec, rec_reason, desc, len(questions), author_id, author_name))
 
         # Re-populate questions
         conn.execute("DELETE FROM questions WHERE quiz_id = ?", (quiz_id,))
@@ -183,16 +185,100 @@ def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (q_id, quiz_id, q_text, json.dumps(options), c_idx, expl, idx))
 
+        quiz_row = conn.execute(
+            "SELECT id, title, status, author_id, author_name FROM quizzes WHERE id = ?",
+            (quiz_id,),
+        ).fetchone()
+
+        action = "quiz.updated" if existing else "quiz.created"
+        notification_service.log_activity(
+            conn,
+            current_user,
+            action=action,
+            entity_type="quiz",
+            entity_id=quiz_id,
+            summary=f"Quiz '{title}' was {'updated' if existing else 'created'} ({quiz_status})",
+            metadata={"category": category, "status": quiz_status},
+        )
         conn.commit()
 
-    return get_quiz_by_id(quiz_id, role="educator")
+        if quiz_row:
+            published = (quiz_row["status"] or "").lower() in ("active", "published")
+            was_published = bool(
+                existing and (existing["status"] or "").lower() in ("active", "published")
+            )
+            notification_service.notify_educators_of_quiz(
+                conn,
+                dict(quiz_row),
+                title=f"Quiz {'published' if published else 'updated'}: {title}",
+                message=(
+                    f"{current_user.get('name')} set '{title}' to {quiz_row['status']}. "
+                    f"It is now visible to students." if published
+                    else f"{current_user.get('name')} saved '{title}' as {quiz_row['status']}."
+                ),
+                category="quiz",
+                link="/educator-dashboard",
+                actor=current_user,
+            )
+            # Students are only notified when a quiz becomes visible for the
+            # first time, so editing a published quiz does not spam them.
+            if published and not was_published:
+                notification_service.notify_students_of_quiz(
+                    conn,
+                    dict(quiz_row),
+                    title=f"New Quiz: {title}",
+                    message=(
+                        f"A new {quiz_row.get('difficulty') or ''} assessment in "
+                        f"{quiz_row.get('category') or 'General'} has been published. Test your knowledge now!"
+                    ).strip(),
+                    category="quiz",
+                    link="/dashboard",
+                    actor=current_user,
+                )
+            conn.commit()
 
-def delete_quiz(quiz_id: str) -> bool:
+    return get_quiz_by_id(quiz_id, role=(current_user.get("role") or "educator"), current_user=current_user)
+
+
+def delete_quiz(quiz_id: str, current_user: Optional[Dict[str, Any]] = None) -> bool:
     """Deletes a quiz and cascade deletes its questions and attempts."""
     with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, title, author_id, author_name FROM quizzes WHERE id = ?",
+            (quiz_id,),
+        ).fetchone()
+        if not row:
+            return False
+
+        if current_user is not None and not tracking_controller.can_manage_quiz(dict(row), current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only delete quizzes that you created.",
+            )
+
         conn.execute("DELETE FROM questions WHERE quiz_id = ?", (quiz_id,))
         conn.execute("DELETE FROM quiz_attempts WHERE quiz_id = ?", (quiz_id,))
         cur = conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
+        conn.commit()
+
+        notification_service.log_activity(
+            conn,
+            current_user,
+            action="quiz.deleted",
+            entity_type="quiz",
+            entity_id=quiz_id,
+            summary=f"Quiz '{row['title']}' was deleted",
+        )
+        notification_service.notify_admins(
+            conn,
+            title=f"Quiz deleted: {row['title']}",
+            message=f"{current_user.get('name') if current_user else 'Someone'} deleted the quiz '{row['title']}'.",
+            category="quiz",
+            link="/admin-dashboard",
+            entity_type="quiz",
+            entity_id=quiz_id,
+            actor=current_user,
+        )
         conn.commit()
         return cur.rowcount > 0
 
@@ -365,6 +451,53 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
             WHERE id = ?
         """, (cnt, avg_sc, pass_rt, genuine_quiz_id))
 
+        # Pull the student into the educator's cohort so the educator dashboard
+        # starts tracking them from this attempt onwards.
+        tracking_controller.sync_cohort_from_attempt(
+            conn, {"id": genuine_quiz_id, "author_id": quiz.get("author_id"), "author_name": quiz.get("author_name")}, student_id
+        )
+
+        notification_service.log_activity(
+            conn,
+            {"id": student_id, "name": student_name, "role": "student"},
+            action="attempt.submitted",
+            entity_type="quiz",
+            entity_id=genuine_quiz_id,
+            summary=f"{student_name} submitted '{genuine_quiz_title}' and scored {int(score_pct)}% ({pass_status})",
+            metadata={"score": score_pct, "status": pass_status, "studentId": student_id},
+        )
+
+        # The educator who owns this quiz is notified straight away.
+        notification_service.notify_educators_of_quiz(
+            conn,
+            {"id": genuine_quiz_id, "author_id": quiz.get("author_id"), "author_name": quiz.get("author_name")},
+            title=f"{student_name} submitted '{genuine_quiz_title}'",
+            message=(
+                f"{student_name} scored {int(score_pct)}% ({correct_count}/{total_q} correct) - {pass_status}."
+            ),
+            category="attempt",
+            link="/educator-dashboard",
+            actor={"id": student_id, "name": student_name, "role": "student"},
+        )
+
+        # The student receives the receipt in their own notification centre.
+        if student_id:
+            notification_service.create_notification(
+                conn,
+                recipient_id=student_id,
+                recipient_role="student",
+                title=f"Quiz Completed: {genuine_quiz_title}",
+                message=(
+                    f"You scored {int(score_pct)}%! "
+                    f"{correct_count}/{total_q} correct - {pass_status}. "
+                    "Your dashboard stats and mastery level have been updated."
+                ),
+                category="quiz",
+                link="/dashboard",
+                entity_type="quiz",
+                entity_id=genuine_quiz_id,
+                actor={"id": student_id, "name": student_name, "role": "student"},
+            )
         conn.commit()
 
     return {
@@ -384,9 +517,37 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
     }
 
 def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Returns stored submissions/attempts. Filtered for student, full for educators/admins."""
+    """
+    Returns stored submissions/attempts.
+
+    Students  -> only their own attempts.
+    Educators -> attempts on their own quizzes plus attempts by their cohort.
+    Admins    -> every attempt on the platform.
+    """
+    role = (role or "student").lower()
     with get_connection() as conn:
-        if role.lower() == "student" and current_user:
+        if role == "admin":
+            cur = conn.execute("SELECT * FROM quiz_attempts ORDER BY submitted_at DESC")
+        elif role == "educator" and current_user:
+            quiz_ids = tracking_controller.educator_quiz_ids(conn, current_user)
+            cohort = tracking_controller.educator_cohort_ids(conn, current_user)
+            clauses = []
+            params: List[Any] = []
+            if quiz_ids:
+                placeholders = ", ".join(["?"] * len(quiz_ids))
+                clauses.append(f"quiz_id IN ({placeholders})")
+                params.extend(quiz_ids)
+            if cohort:
+                placeholders = ", ".join(["?"] * len(cohort))
+                clauses.append(f"student_id IN ({placeholders})")
+                params.extend(cohort)
+            if not clauses:
+                return []
+            cur = conn.execute(
+                f"SELECT * FROM quiz_attempts WHERE {' OR '.join(clauses)} ORDER BY submitted_at DESC",
+                tuple(params),
+            )
+        elif current_user:
             user_email = (current_user.get("email") or "").lower().strip()
             user_uid = current_user.get("uid") or current_user.get("id") or ""
             cur = conn.execute(
@@ -394,7 +555,7 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
                 (user_email, user_uid)
             )
         else:
-            cur = conn.execute("SELECT * FROM quiz_attempts ORDER BY submitted_at DESC")
+            return []
 
         submissions = []
         for row in cur.fetchall():

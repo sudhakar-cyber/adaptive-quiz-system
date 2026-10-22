@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import capIcon from '../assets/cap_icon.png';
 import {
   BellIcon,
@@ -8,6 +9,8 @@ import {
   LogoutIcon,
   SettingsIcon
 } from './Icons';
+import { PortalSwitcher } from './PortalSwitcher';
+import { authService } from '../services/authService';
 
 export const DashboardHeader = ({
   onToggleMobileMenu,
@@ -28,6 +31,7 @@ export const DashboardHeader = ({
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const profileMenuRef = useRef(null);
   const notifMenuRef = useRef(null);
+  const navigate = useNavigate();
 
   const educatorInitials = (() => {
     if (!educatorName) return 'ED';
@@ -232,6 +236,31 @@ export const DashboardHeader = ({
               >
                 <SettingsIcon size={16} color="#64748B" />
                 <span>Settings</span>
+              </button>
+              <div className="educator-dropdown-divider" />
+              <button
+                type="button"
+                className="educator-dropdown-item"
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  authService.switchPortal('student');
+                  navigate('/dashboard');
+                }}
+              >
+                <span style={{ fontSize: '15px', marginRight: '2px' }}>🎓</span>
+                <span>Student Dashboard</span>
+              </button>
+              <button
+                type="button"
+                className="educator-dropdown-item"
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  authService.switchPortal('admin');
+                  navigate('/admin-dashboard');
+                }}
+              >
+                <span style={{ fontSize: '15px', marginRight: '2px' }}>⚙️</span>
+                <span>Admin Dashboard</span>
               </button>
               <div className="educator-dropdown-divider" />
               <button

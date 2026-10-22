@@ -249,32 +249,52 @@ export const AdminNotificationsView = ({
             <CheckCircleIcon size={16} color="#6366F1" />
             <span>Mark All as Read</span>
           </button>
-
-          {notifications.length > 0 && (
-            <button
-              type="button"
-              className="admin-secondary-btn danger"
-              onClick={handleClearAll}
-              title="Delete all notifications"
-            >
-              <TrashIcon size={16} color="#DC2626" />
-              <span>Clear All</span>
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="notif-filter-tabs">
-        {['all', 'unread', 'announcement', 'user', 'quiz', 'system'].map((f) => (
+      {/* Filter Tabs & Clear All Toolbar Row */}
+      <div
+        className="notif-filter-tabs"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          marginBottom: '14px'
+        }}
+      >
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {['all', 'unread', 'announcement', 'user', 'quiz', 'system'].map((f) => (
+            <button
+              key={f}
+              className={`notif-filter-btn ${filter === f ? 'active' : ''}`}
+              onClick={() => setFilter(f)}
+            >
+              {f === 'announcement' ? 'Announcements' : f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {notifications.length > 0 && (
           <button
-            key={f}
-            className={`notif-filter-btn ${filter === f ? 'active' : ''}`}
-            onClick={() => setFilter(f)}
+            type="button"
+            className="educator-secondary-btn admin-secondary-btn danger"
+            onClick={handleClearAll}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: 'rgb(220, 38, 38)',
+              borderColor: 'rgb(254, 202, 202)',
+              marginLeft: 'auto'
+            }}
+            title="Delete all notifications"
           >
-            {f === 'announcement' ? 'Announcements' : f.charAt(0).toUpperCase() + f.slice(1)}
+            <TrashIcon size={15} color="#DC2626" />
+            <span>Clear All</span>
           </button>
-        ))}
+        )}
       </div>
 
       {/* Notifications List */}

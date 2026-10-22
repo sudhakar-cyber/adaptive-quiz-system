@@ -16,7 +16,6 @@ import { EducatorProfileView } from '../components/EducatorProfileView';
 import { EducatorSettingsView } from '../components/EducatorSettingsView';
 import {
   INITIAL_EDUCATOR_QUIZZES,
-  INITIAL_EDUCATOR_NOTIFICATIONS,
   INITIAL_EDUCATOR_PROFILE
 } from '../data/educatorData';
 import { sharedDatabase, getAuthToken } from '../services/sharedDatabase';
@@ -46,10 +45,12 @@ export const EducatorDashboard = ({ onLogout }) => {
 
   const [notifications, setNotifications] = useState(() => {
     try {
-      const saved = localStorage.getItem('learnsmart_educator_notifications');
-      return saved ? JSON.parse(saved) : INITIAL_EDUCATOR_NOTIFICATIONS;
+      if (typeof sharedDatabase?.getEducatorNotifications === 'function') {
+        return sharedDatabase.getEducatorNotifications() || [];
+      }
+      return [];
     } catch {
-      return INITIAL_EDUCATOR_NOTIFICATIONS;
+      return [];
     }
   });
 
@@ -149,6 +150,15 @@ export const EducatorDashboard = ({ onLogout }) => {
       localStorage.setItem('learnsmart_educator_profile', JSON.stringify(finalProfile));
       localStorage.setItem('learnsmart_email', activeEmail);
       localStorage.setItem('learnsmart_user', resolvedName);
+      localStorage.setItem('learnsmart_role', 'educator');
+      if (!localStorage.getItem('learnsmart_educator')) {
+        localStorage.setItem('learnsmart_educator', JSON.stringify({
+          educatorId: resolvedFacultyId || 'edu-201',
+          id: resolvedFacultyId || 'edu-201',
+          name: resolvedName,
+          email: activeEmail
+        }));
+      }
     } catch {
       // ignore
     }
@@ -175,7 +185,6 @@ export const EducatorDashboard = ({ onLogout }) => {
   useEffect(() => {
     const unsubStudents = sharedDatabase.subscribe((updatedStudents) => {
       setStudents(updatedStudents);
-      setSubmissions(sharedDatabase.getSubmissions());
     });
 
     const unsubSubmissions = sharedDatabase.subscribeSubmissions
@@ -203,12 +212,13 @@ export const EducatorDashboard = ({ onLogout }) => {
       }
       if (!e.key || e.key === 'learnsmart_shared_students' || e.key === 'learnsmart_educator_students') {
         setStudents(sharedDatabase.getStudents());
-        setSubmissions(sharedDatabase.getSubmissions());
       }
       if (!e.key || e.key === 'learnsmart_educator_notifications') {
         try {
-          const savedNotifs = localStorage.getItem('learnsmart_educator_notifications');
-          if (savedNotifs) setNotifications(JSON.parse(savedNotifs));
+          const cached = typeof sharedDatabase?.getEducatorNotifications === 'function'
+            ? sharedDatabase.getEducatorNotifications()
+            : [];
+          if (Array.isArray(cached)) setNotifications(cached);
         } catch {
           // ignore
         }
@@ -221,7 +231,9 @@ export const EducatorDashboard = ({ onLogout }) => {
     };
 
     const handleEducatorNotifsUpdated = (e) => {
-      const updated = e?.detail || JSON.parse(localStorage.getItem('learnsmart_educator_notifications') || '[]');
+      const updated = e?.detail || (typeof sharedDatabase?.getEducatorNotifications === 'function'
+        ? sharedDatabase.getEducatorNotifications()
+        : []);
       if (Array.isArray(updated)) {
         setNotifications(updated);
       }
@@ -230,7 +242,6 @@ export const EducatorDashboard = ({ onLogout }) => {
     const handleStudentsUpdated = (e) => {
       const updated = e?.detail || sharedDatabase.getStudents();
       setStudents(updated);
-      setSubmissions(sharedDatabase.getSubmissions());
     };
 
     window.addEventListener('learnsmart_students_updated', handleStudentsUpdated);
@@ -238,7 +249,15 @@ export const EducatorDashboard = ({ onLogout }) => {
     window.addEventListener('learnsmart_quizzes_updated', handleQuizzesUpdated);
     window.addEventListener('learnsmart_student_reset', handleStudentReset);
     window.addEventListener('learnsmart_educator_notifications_updated', handleEducatorNotifsUpdated);
+    window.addEventListener('learnsmart_notifications_updated', handleEducatorNotifsUpdated);
     window.addEventListener('storage', handleStorageChange);
+
+    // Keep the notification centre in sync with MySQL.
+    const notificationTimer = setInterval(() => {
+      if (typeof sharedDatabase?.syncNotificationsFromBackend === 'function') {
+        sharedDatabase.syncNotificationsFromBackend(true);
+      }
+    }, 30000);
 
     // Live tracking from MySQL database
     if (typeof sharedDatabase?.syncAllFromBackend === 'function') {
@@ -246,6 +265,10 @@ export const EducatorDashboard = ({ onLogout }) => {
         setStudents(sharedDatabase.getStudents());
         setQuizzes(sharedDatabase.getQuizzes());
         setSubmissions(sharedDatabase.getSubmissions());
+        const cached = typeof sharedDatabase?.getEducatorNotifications === 'function'
+          ? sharedDatabase.getEducatorNotifications()
+          : [];
+        if (Array.isArray(cached)) setNotifications(cached);
       }).catch(() => {});
     }
 
@@ -345,11 +368,15 @@ export const EducatorDashboard = ({ onLogout }) => {
       window.removeEventListener('learnsmart_quizzes_updated', handleQuizzesUpdated);
       window.removeEventListener('learnsmart_student_reset', handleStudentReset);
       window.removeEventListener('learnsmart_educator_notifications_updated', handleEducatorNotifsUpdated);
+      window.removeEventListener('learnsmart_notifications_updated', handleEducatorNotifsUpdated);
       window.removeEventListener('storage', handleStorageChange);
+      clearInterval(notificationTimer);
     };
   }, []);
 
-  const unreadNotifCount = notifications.filter((n) => n.unread).length;
+  const unreadNotifCount = Array.isArray(notifications)
+    ? notifications.filter((n) => n.unread).length
+    : 0;
 
   const showToast = (message) => {
     setToastMessage(message);
@@ -396,9 +423,15 @@ export const EducatorDashboard = ({ onLogout }) => {
   };
 
   const handleUpdateNotifications = (updated) => {
-    setNotifications(updated);
+    const list = Array.isArray(updated)
+      ? updated
+      : (typeof sharedDatabase?.getEducatorNotifications === 'function'
+        ? sharedDatabase.getEducatorNotifications()
+        : []);
+    setNotifications(list);
     try {
-      localStorage.setItem('learnsmart_educator_notifications', JSON.stringify(updated));
+      localStorage.setItem('learnsmart_educator_notifications', JSON.stringify(list));
+      localStorage.setItem('learnsmart_notifications', JSON.stringify(list));
     } catch (err) {
       console.warn(err);
     }

@@ -171,14 +171,16 @@ export const QuizModal = ({
       }, 0);
       const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
 
-      // Save feedback into shared database
+      // Save the feedback in MySQL (the backend notifies the educator).
       try {
-        sharedDatabase.saveQuizFeedback({
-          ...feedbackPayload,
-          score: `${scorePercentage}%`,
-          correctCount,
-          totalQuestions
-        });
+        Promise.resolve(
+          sharedDatabase.saveQuizFeedback({
+            ...feedbackPayload,
+            score: `${scorePercentage}%`,
+            correctCount,
+            totalQuestions
+          })
+        ).catch((err) => console.warn('Failed to save quiz feedback:', err));
       } catch (e) {
         console.warn('Failed to save quiz feedback:', e);
       }

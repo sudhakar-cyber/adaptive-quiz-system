@@ -12,6 +12,7 @@ import {
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
+import { apiPost } from '../services/apiClient';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { GoogleEmailVerificationModal } from './GoogleEmailVerificationModal';
 
@@ -75,8 +76,40 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
       let resolvedProfile = null;
       let resolvedName = '';
 
+      // 0. MySQL is the source of truth: verify the credentials against the
+      //    backend first. Accounts that only live in Firebase (for example a
+      //    Google account) fall through to the Firebase flow below.
+      try {
+        const backendAuth = await apiPost(
+          '/api/auth/login',
+          { identifier: trimmedUser, password },
+          { auth: false }
+        );
+
+        if (backendAuth?.success && backendAuth.user) {
+          const profile = backendAuth.user;
+          if (profile.isActive === false) {
+            setIsLoading(false);
+            setErrorMessage('This account has been deactivated. Please contact your administrator.');
+            return;
+          }
+          resolvedRole = profile.role || 'student';
+          resolvedProfile = profile;
+          resolvedName = profile.name || 'Learner';
+        }
+      } catch (backendErr) {
+        if (backendErr?.status === 403) {
+          setIsLoading(false);
+          setErrorMessage('This account has been deactivated. Please contact your administrator.');
+          return;
+        }
+        if (backendErr?.status !== 401) {
+          console.warn('Backend login check failed, falling back to Firebase:', backendErr.message);
+        }
+      }
+
       // 1. If username format looks like an email, attempt Firebase Authentication
-      if (trimmedUser.includes('@')) {
+      if (!resolvedProfile && trimmedUser.includes('@')) {
         const fbRes = await authService.loginWithFirebase(trimmedUser, password);
         if (fbRes && fbRes.success && fbRes.user) {
           const authUser = fbRes.user;

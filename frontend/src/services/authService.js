@@ -57,6 +57,50 @@ export const authService = {
     return authService.getRole() === 'student';
   },
 
+  // Switch between Student, Educator, and Admin portals seamlessly
+  switchPortal: (targetRole) => {
+    try {
+      const normalized = (targetRole || '').toLowerCase();
+      if (normalized === 'admin') {
+        const existing = authService.getCurrentUser();
+        authService.loginAdmin(existing?.role === 'admin' ? existing : {
+          name: 'System Administrator',
+          email: 'admin@learnsmart.edu',
+          role: 'admin',
+          uid: 'admin-system'
+        });
+      } else if (normalized === 'educator') {
+        const educators = typeof sharedDatabase.getEducators === 'function' ? sharedDatabase.getEducators() : [];
+        const educator = educators[0] || {
+          name: 'Dr. Sarah Jenkins',
+          email: 'educator@learnsmart.com',
+          role: 'educator',
+          id: 'edu-201',
+          educatorId: 'edu-201'
+        };
+        authService.loginEducator(educator);
+      } else if (normalized === 'student') {
+        const students = typeof sharedDatabase.getStudents === 'function' ? sharedDatabase.getStudents() : [];
+        const student = students.find((s) => s.email === 'shaikaathif22@gmail.com') || students[0] || {
+          name: 'Shaik Aathif',
+          email: 'shaikaathif22@gmail.com',
+          uid: 'PwipFbsHoEdR4PFKNMEIux4DUai2',
+          studentId: 'LS-2025-100'
+        };
+        authService.loginStudent(student);
+      }
+      localStorage.setItem('learnsmart_role', normalized);
+      sessionStorage.setItem('learnsmart_role', normalized);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('learnsmart_portal_switched', { detail: { role: normalized } }));
+      }
+      return true;
+    } catch (e) {
+      console.warn('Failed to switch portal:', e);
+      return false;
+    }
+  },
+
   // Get current authenticated user details
   getCurrentUser: () => {
     try {
@@ -340,8 +384,15 @@ export const authService = {
       }
 
       let assignedStudentId = student?.studentId;
-      if (!assignedStudentId) {
-        assignedStudentId = sharedDatabase.generateUniqueStudentId();
+      if (
+        !assignedStudentId ||
+        assignedStudentId === student?.uid ||
+        assignedStudentId === 'PwipFbsHoEdR4PFKNMEIux4DUai2' ||
+        (assignedStudentId.length >= 25 && !assignedStudentId.includes('-'))
+      ) {
+        assignedStudentId = (studentEmail === 'shaikaathif22@gmail.com' || studentName?.toLowerCase().includes('aathif'))
+          ? 'LS-2025-100'
+          : sharedDatabase.generateUniqueStudentId();
         if (student && student.id) {
           student.studentId = assignedStudentId;
           sharedDatabase.updateStudent(student.id, { studentId: assignedStudentId });

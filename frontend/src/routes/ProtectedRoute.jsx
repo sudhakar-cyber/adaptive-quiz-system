@@ -37,6 +37,17 @@ const useAuthStatus = () => {
   });
 
   useEffect(() => {
+    const handlePortalChange = () => {
+      setStatus({
+        isLoading: false,
+        user: auth.currentUser,
+        role: authService.getRole()
+      });
+    };
+
+    window.addEventListener('learnsmart_portal_switched', handlePortalChange);
+    window.addEventListener('storage', handlePortalChange);
+
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       setStatus({
         isLoading: false,
@@ -44,7 +55,12 @@ const useAuthStatus = () => {
         role: authService.getRole()
       });
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('learnsmart_portal_switched', handlePortalChange);
+      window.removeEventListener('storage', handlePortalChange);
+    };
   }, []);
 
   return status;
@@ -56,11 +72,12 @@ const useAuthStatus = () => {
 export const AdminRoute = ({ children }) => {
   const { isLoading, user, role } = useAuthStatus();
 
-  if (isLoading) {
+  if (isLoading && !role && !authService.getRole()) {
     return <RouteLoader />;
   }
 
-  if (role === 'admin' || (user && role === 'admin')) {
+  const effectiveRole = role || authService.getRole();
+  if (effectiveRole === 'admin' || (user && effectiveRole === 'admin') || authService.isAdmin()) {
     return children;
   }
 
@@ -68,16 +85,23 @@ export const AdminRoute = ({ children }) => {
 };
 
 // Route Guard for Educator Dashboard:
-// - Allowed: Educator
+// - Allowed: Educator or Admin
 // - Blocked / Unauthenticated: Redirect to /login
 export const EducatorRoute = ({ children }) => {
   const { isLoading, user, role } = useAuthStatus();
 
-  if (isLoading) {
+  if (isLoading && !role && !authService.getRole()) {
     return <RouteLoader />;
   }
 
-  if (role === 'educator' || (user && role === 'educator')) {
+  const effectiveRole = role || authService.getRole();
+  if (
+    effectiveRole === 'educator' ||
+    effectiveRole === 'admin' ||
+    (user && (effectiveRole === 'educator' || effectiveRole === 'admin')) ||
+    authService.isEducator() ||
+    authService.isAdmin()
+  ) {
     return children;
   }
 
@@ -85,17 +109,25 @@ export const EducatorRoute = ({ children }) => {
 };
 
 // Route Guard for Student Dashboard:
-// - Allowed: Student with valid Firebase auth or active student session
+// - Allowed: Student with valid Firebase auth or active student session (also permits Educator and Admin cross-navigation)
 // - Blocked / Unauthenticated: Redirect to /login
 export const StudentRoute = ({ children }) => {
   const { isLoading, user, role } = useAuthStatus();
 
-  if (isLoading) {
+  if (isLoading && !role && !user && !authService.getRole()) {
     return <RouteLoader />;
   }
 
-  const effectiveRole = role || (user ? 'student' : null);
-  if (effectiveRole === 'student' && (user || authService.isStudent())) {
+  const effectiveRole = role || authService.getRole() || (user ? 'student' : null);
+  if (
+    effectiveRole === 'student' ||
+    effectiveRole === 'educator' ||
+    effectiveRole === 'admin' ||
+    user ||
+    authService.isStudent() ||
+    authService.isEducator() ||
+    authService.isAdmin()
+  ) {
     return children;
   }
 

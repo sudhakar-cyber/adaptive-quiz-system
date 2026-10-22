@@ -6,6 +6,7 @@ import { OtpVerification } from '../components/OtpVerification';
 import { OAuthVerification } from '../components/OAuthVerification';
 import { authService } from '../services/authService';
 import { sharedDatabase } from '../services/sharedDatabase';
+import { homeRouteForRole } from '../services/apiClient';
 
 export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
   const navigate = useNavigate();
@@ -57,26 +58,28 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
   }, [initialView, location.pathname, location.search]);
 
   const handleLoginSuccess = (user, role = 'student', studentObj = null) => {
-    if (role === 'admin') {
-      authService.loginAdmin();
+    const resolvedRole = role || 'student';
+
+    if (resolvedRole === 'admin') {
+      authService.loginAdmin(studentObj && studentObj.email ? studentObj : undefined);
       if (onLoginSuccess) {
-        onLoginSuccess('Admin', 'admin');
+        onLoginSuccess('Admin', 'admin', studentObj);
       }
-      navigate('/admin-dashboard');
-    } else if (role === 'educator') {
+      navigate(homeRouteForRole('admin'));
+    } else if (resolvedRole === 'educator') {
       const eduPayload = studentObj || user;
       authService.loginEducator(eduPayload);
       if (onLoginSuccess) {
         onLoginSuccess(eduPayload?.name || (typeof eduPayload === 'string' ? eduPayload : 'Educator'), 'educator', eduPayload);
       }
-      navigate('/educator-dashboard');
+      navigate(homeRouteForRole('educator'));
     } else {
       const activeStudent = authService.loginStudent(studentObj || user);
       const studentName = activeStudent?.name || (typeof user === 'string' ? user : 'Student');
       if (onLoginSuccess) {
-        onLoginSuccess(studentName, 'student');
+        onLoginSuccess(studentName, 'student', studentObj);
       }
-      navigate('/dashboard');
+      navigate(homeRouteForRole('student'));
     }
   };
 
