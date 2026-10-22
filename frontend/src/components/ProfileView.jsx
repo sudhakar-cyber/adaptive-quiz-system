@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   UserIcon,
@@ -22,6 +23,15 @@ import {
 } from './Icons';
 import { sharedDatabase, getAuthToken } from '../services/sharedDatabase';
 import { auth, updateProfile } from '../config/firebase';
+import { authService } from '../services/authService';
+
+const isCleanStudentId = (id) => {
+  if (!id || typeof id !== 'string') return false;
+  const s = id.trim();
+  if (s.length >= 25 && !s.includes('-')) return false;
+  if (s.toLowerCase().includes('pwipfbsh') || s === 'LS-2025-XXXX') return false;
+  return s.length > 0;
+};
 
 export const ProfileView = ({
   displayName = 'Student',
@@ -53,15 +63,21 @@ export const ProfileView = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
-          resolvedStudentId = parsed.studentId || '';
+          if (isCleanStudentId(parsed.studentId)) {
+            resolvedStudentId = parsed.studentId;
+          }
+          if (parsed.fullName && parsed.fullName.trim() && !parsed.fullName.includes('@') && parsed.fullName !== 'Student') {
+            savedName = parsed.fullName.trim();
+          }
           if (!resolvedStudentId) {
             const student =
               (userEmail ? sharedDatabase.getStudentByEmail(userEmail) : null) ||
               (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
-            resolvedStudentId = student?.studentId || sharedDatabase.generateUniqueStudentId();
-          }
-          if (parsed.fullName && parsed.fullName.trim() && !parsed.fullName.includes('@') && parsed.fullName !== 'Student') {
-            savedName = parsed.fullName.trim();
+            if (student && isCleanStudentId(student.studentId)) {
+              resolvedStudentId = student.studentId;
+            } else {
+              resolvedStudentId = 'LS-2025-100';
+            }
           }
           return {
             fullName: savedName || (displayName !== 'Student' ? displayName : '') || parsed.fullName || 'Student',
@@ -82,7 +98,7 @@ export const ProfileView = ({
     const student =
       (userEmail ? sharedDatabase.getStudentByEmail(userEmail) : null) ||
       (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
-    resolvedStudentId = student?.studentId || sharedDatabase.generateUniqueStudentId();
+    resolvedStudentId = (student && isCleanStudentId(student.studentId)) ? student.studentId : 'LS-2025-100';
 
     const storedUser = localStorage.getItem('learnsmart_user');
     const fallbackName =
@@ -106,7 +122,7 @@ export const ProfileView = ({
   });
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
-  // Sync with prop if email or uid changes without overwriting saved custom name
+  // Sync with prop and fresh profile from backend MySQL without overwriting saved custom name
   useEffect(() => {
     let savedName = '';
     try {
@@ -118,14 +134,14 @@ export const ProfileView = ({
 
     setFormData((prev) => {
       let currentId = prev.studentId;
-      if (!currentId) {
+      if (!isCleanStudentId(currentId)) {
         const student =
           (userEmail ? sharedDatabase.getStudentByEmail(userEmail) : null) ||
           (displayName ? sharedDatabase.getStudentByUsername(displayName) : null);
-        if (student?.studentId) {
+        if (student && isCleanStudentId(student.studentId)) {
           currentId = student.studentId;
         } else {
-          currentId = sharedDatabase.generateUniqueStudentId();
+          currentId = 'LS-2025-100';
           if (student) {
             sharedDatabase.updateStudent(student.id, { studentId: currentId });
           }
@@ -150,7 +166,38 @@ export const ProfileView = ({
         uid: uid || prev.uid || ''
       };
     });
-  }, [userEmail, uid]);
+
+    // Fetch fresh profile from backend MySQL to synchronize official student ID
+    const fetchFreshProfile = async () => {
+      try {
+        const token = await getAuthToken();
+        const res = await fetch('/api/users/me', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-User-Email': userEmail || '',
+            'X-User-UID': uid || ''
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.studentId && isCleanStudentId(data.studentId)) {
+            setFormData((prev) => ({
+              ...prev,
+              studentId: data.studentId
+            }));
+            try {
+              const current = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
+              current.studentId = data.studentId;
+              localStorage.setItem('learnsmart_student_profile', JSON.stringify(current));
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('Backend student profile sync note:', err);
+      }
+    };
+    fetchFreshProfile();
+  }, [userEmail, uid, displayName]);
 
   // Handle external trigger to open edit modal (e.g. from dropdown)
   useEffect(() => {
@@ -295,6 +342,7 @@ export const ProfileView = ({
         },
         body: JSON.stringify({
           name: trimmedName,
+          studentId: updatedData.studentId || 'LS-2025-100',
           phone: updatedData.phone || '',
           department: updatedData.major || 'Computer Science',
           bio: updatedData.bio || '',
@@ -615,23 +663,21 @@ export const ProfileView = ({
                   <div className="form-row-2col">
                     <div className="form-group-field">
                       <div className="field-label-row">
-                        <label className="field-label">Student ID</label>
-                        <span className="field-locked-pill" title="Unique Student ID is permanent and non-editable">
-                          <LockIcon size={11} color="#64748B" />
-                          <span>Non-editable</span>
+                        <label className="field-label">Student ID *</label>
+                        <span className="field-id-badge" style={{ fontSize: '0.74rem', color: '#10B981', fontWeight: 700 }}>
+                          Official ID
                         </span>
                       </div>
                       <input
                         type="text"
-                        className="field-text-input input-field-readonly"
+                        className="field-text-input"
                         value={formData.studentId}
-                        readOnly
-                        disabled
-                        tabIndex={-1}
-                        title="Student ID is permanently assigned by LearnSmart and cannot be modified."
-                        placeholder="LS-2025-XXXX"
+                        onChange={(e) => handleInputChange('studentId', e.target.value)}
+                        placeholder="e.g. LS-2025-100"
+                        title="Your assigned institutional Student ID"
+                        required
                       />
-                      <span className="field-hint-text">Assigned unique student identification number.</span>
+                      <span className="field-hint-text">Official student identification number (e.g. LS-2025-100).</span>
                     </div>
 
                     <div className="form-group-field">
@@ -756,6 +802,7 @@ export const ProfileDropdownMenu = ({
   onNavigate,
   onLogout
 }) => {
+  const navigate = useNavigate();
   return (
     <div className="profile-dropdown-menu" role="menu">
       <div className="profile-dropdown-header">
@@ -835,6 +882,32 @@ export const ProfileDropdownMenu = ({
         >
           <AwardIcon size={16} />
           <span>Personalized Learning Path</span>
+        </button>
+
+        <button
+          type="button"
+          className="dropdown-menu-link"
+          onClick={() => {
+            onClose();
+            authService.switchPortal('educator');
+            navigate('/educator-dashboard');
+          }}
+        >
+          <span style={{ fontSize: '15px' }}>👨‍🏫</span>
+          <span>Educator Dashboard</span>
+        </button>
+
+        <button
+          type="button"
+          className="dropdown-menu-link"
+          onClick={() => {
+            onClose();
+            authService.switchPortal('admin');
+            navigate('/admin-dashboard');
+          }}
+        >
+          <span style={{ fontSize: '15px' }}>⚙️</span>
+          <span>Admin Dashboard</span>
         </button>
       </div>
 

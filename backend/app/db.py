@@ -15,6 +15,7 @@ logger = logging.getLogger("learnsmart.mysql")
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MYSQL_SCHEMA_PATH = os.path.join(BASE_DIR, "..", "database", "mysql_schema.sql")
 MYSQL_DUMP_PATH = os.path.join(BASE_DIR, "..", "database", "learnsmart_mysql_dump.sql")
+MIGRATIONS_DIR = os.path.join(BASE_DIR, "..", "database", "migrations")
 
 def _get_windows_mysql_credential() -> str:
     """Safe Windows Credential Manager lookup for MySQL Workbench stored passwords."""
@@ -77,11 +78,24 @@ class MySQLConnectionWrapper:
     def execute(self, query: str, params: Optional[Any] = None):
         cur = self.raw_conn.cursor(pymysql.cursors.DictCursor)
         if params is not None and (isinstance(params, (list, tuple, dict)) and len(params) > 0):
-            mysql_query = query.replace("?", "%s")
+            mysql_query = self._to_mysql_placeholders(query)
             cur.execute(mysql_query, params)
         else:
             cur.execute(query)
         return MySQLCursorWrapper(cur)
+
+    @staticmethod
+    def _to_mysql_placeholders(query: str) -> str:
+        """
+        Converts `?` placeholders to `%s` and escapes literal percent signs.
+
+        pymysql interpolates the query with Python's `%` operator whenever
+        parameters are supplied, so any literal `%` in the SQL (for example
+        `DATE_FORMAT(x, '%Y-%m')`) has to be doubled to survive the round trip.
+        """
+        segments = query.split("?")
+        escaped = [segment.replace("%", "%%") for segment in segments]
+        return "%s".join(escaped)
 
     def executescript(self, script: str):
         with self.raw_conn.cursor() as cur:
@@ -144,6 +158,74 @@ def get_active_engine() -> str:
     """Returns 'mysql' (Strictly MySQL only)."""
     return "mysql"
 
+def apply_migrations(conn) -> list:
+    """
+    Applies every unapplied SQL file in database/migrations in filename order.
+    Applied files are recorded in schema_migrations so each one runs exactly once.
+    """
+    if not os.path.isdir(MIGRATIONS_DIR):
+        return []
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations ("
+        "filename VARCHAR(255) PRIMARY KEY, "
+        "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+
+    cur = conn.execute("SELECT filename FROM schema_migrations")
+    applied = {row["filename"] for row in cur.fetchall()}
+
+    executed = []
+    for filename in sorted(os.listdir(MIGRATIONS_DIR)):
+        if not filename.endswith(".sql"):
+            continue
+        if filename in applied:
+            continue
+        path = os.path.join(MIGRATIONS_DIR, filename)
+        with open(path, "r", encoding="utf-8") as f:
+            conn.executescript(f.read())
+        conn.execute("INSERT INTO schema_migrations (filename) VALUES (?)", (filename,))
+        executed.append(filename)
+
+    if executed:
+        logger.info(f"Applied MySQL migrations: {', '.join(executed)}")
+    return executed
+
+
+def _ensure_seed_credentials(conn):
+    """
+    Gives the built-in admin / educator accounts a usable password hash.
+
+    Only accounts whose `password_hash` is still empty are touched, so an
+    administrator changing a password in the dashboard is never overwritten.
+    """
+    seed_accounts = [
+        (os.getenv("ADMIN_SEED_EMAIL", "admin@learnsmart.edu"),
+         os.getenv("ADMIN_SEED_PASSWORD", "Admin@123")),
+        (os.getenv("EDUCATOR_SEED_EMAIL", "educator@learnsmart.com"),
+         os.getenv("EDUCATOR_SEED_PASSWORD", "Educator@123")),
+    ]
+    for email, password in seed_accounts:
+        if not email or not password:
+            continue
+        try:
+            cur = conn.execute(
+                "SELECT id, password_hash FROM users WHERE LOWER(email) = ?",
+                (email.strip().lower(),),
+            )
+            row = cur.fetchone()
+            if not row or row.get("password_hash"):
+                continue
+            from app.services.passwords import hash_password
+            conn.execute(
+                "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (hash_password(password), row["id"]),
+            )
+            logger.info(f"Seeded default password hash for {email}")
+        except Exception as e:
+            logger.warning(f"Could not seed credentials for {email}: {e}")
+
+
 def init_db():
     """Initializes tables and ensures MySQL schema & existing data dump are loaded."""
     host = getattr(config, "MYSQL_HOST", "127.0.0.1") if config else "127.0.0.1"
@@ -188,6 +270,9 @@ def init_db():
                     schema_sql = f.read()
                 conn.executescript(schema_sql)
                 logger.info("MySQL schema initialized from mysql_schema.sql.")
+
+            apply_migrations(conn)
+            _ensure_seed_credentials(conn)
     except Exception as e:
         logger.warning(f"MySQL initialization check: {e}")
 

@@ -7,6 +7,7 @@ import { Dashboard } from './components/Dashboard';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminRoute, EducatorRoute, StudentRoute } from './routes/ProtectedRoute';
 import { authService } from './services/authService';
+import { homeRouteForRole } from './services/apiClient';
 import { auth, onAuthStateChanged } from './config/firebase';
 import { useTheme } from './components/ThemeToggle';
 
@@ -90,17 +91,18 @@ function AppRoutes() {
   }, []);
 
   const handleLoginSuccess = (user, role, profile = null) => {
-    if (role === 'admin') {
+    const resolvedRole = role || 'student';
+
+    if (resolvedRole === 'admin') {
       authService.loginAdmin(profile || user);
-      navigate('/admin-dashboard');
-    } else if (role === 'educator') {
+    } else if (resolvedRole === 'educator') {
       authService.loginEducator(profile || user);
-      navigate('/educator-dashboard');
     } else {
       authService.loginStudent(profile || user);
       setStudentUser(typeof user === 'string' ? user : user?.name || 'Student');
-      navigate('/dashboard');
     }
+
+    navigate(homeRouteForRole(resolvedRole));
   };
 
   const handleAdminLogout = async () => {

@@ -17,9 +17,9 @@ export const AdminReportsView = ({
 }) => {
   const [downloading, setDownloading] = useState(null);
 
-  const safeStudents = Array.isArray(students) && students.length > 0 ? students : (typeof sharedDatabase?.getStudents === 'function' ? sharedDatabase.getStudents() : []);
-  const safeEducators = Array.isArray(educators) && educators.length > 0 ? educators : (typeof sharedDatabase?.getEducators === 'function' ? sharedDatabase.getEducators() : []);
-  const safeQuizzes = Array.isArray(quizzes) && quizzes.length > 0 ? quizzes : (typeof sharedDatabase?.getQuizzes === 'function' ? sharedDatabase.getQuizzes() : []);
+  const safeStudents = Array.isArray(students) ? students : (typeof sharedDatabase?.getStudents === 'function' ? sharedDatabase.getStudents() : []);
+  const safeEducators = Array.isArray(educators) ? educators : (typeof sharedDatabase?.getEducators === 'function' ? sharedDatabase.getEducators() : []);
+  const safeQuizzes = Array.isArray(quizzes) ? quizzes : (typeof sharedDatabase?.getQuizzes === 'function' ? sharedDatabase.getQuizzes() : []);
 
   const handleDownload = (reportType) => {
     setDownloading(reportType);

@@ -1,166 +1,62 @@
 import { INITIAL_EDUCATOR_QUIZZES } from '../data/educatorData.js';
-import { QUIZ_CATALOG, INITIAL_NOTIFICATIONS } from '../data/quizData.js';
+import { QUIZ_CATALOG } from '../data/quizData.js';
 import { auth, db, collection, getDocs } from '../config/firebase.js';
+import {
+  apiGet,
+  apiPost,
+  apiPut,
+  apiDelete,
+  getAuthToken,
+  getAuthHeaders,
+  getCurrentRole,
+  getCurrentIdentity,
+} from './apiClient.js';
+
+export { getAuthToken, getAuthHeaders };
 
 const STORAGE_KEY_STUDENTS = 'learnsmart_shared_students';
 const STORAGE_KEY_LEGACY = 'learnsmart_educator_students';
 const STORAGE_KEY_EDUCATORS = 'learnsmart_shared_educators';
 const STORAGE_KEY_QUIZZES = 'learnsmart_educator_quizzes';
 const STORAGE_KEY_SUBMISSIONS = 'learnsmart_shared_submissions';
-const STORAGE_KEY_STUDENT_NOTIFICATIONS = 'learnsmart_student_notifications';
-const STORAGE_KEY_ADMIN_NOTIFICATIONS = 'learnsmart_admin_notifications';
-const STORAGE_KEY_EDUCATOR_NOTIFICATIONS = 'learnsmart_educator_notifications';
+const STORAGE_KEY_NOTIFICATIONS = 'learnsmart_notifications_cache';
+const STORAGE_KEY_ANALYTICS = 'learnsmart_analytics_cache';
+const STORAGE_KEY_BENCHMARK = 'learnsmart_student_benchmark_cache';
 
 const EVENT_STUDENTS_UPDATED = 'learnsmart_students_updated';
 const EVENT_STUDENT_NOTIFICATIONS_UPDATED = 'learnsmart_student_notifications_updated';
 const EVENT_EDUCATOR_NOTIFICATIONS_UPDATED = 'learnsmart_educator_notifications_updated';
 const EVENT_ADMIN_UPDATED = 'learnsmart_admin_updated';
 const EVENT_QUIZZES_UPDATED = 'learnsmart_quizzes_updated';
+const EVENT_NOTIFICATIONS_UPDATED = 'learnsmart_notifications_updated';
+const EVENT_ANALYTICS_UPDATED = 'learnsmart_analytics_updated';
+const EVENT_BENCHMARK_UPDATED = 'learnsmart_benchmark_updated';
+const EVENT_FEEDBACK_UPDATED = 'learnsmart_feedback_updated';
 export const EVENT_SUBMISSIONS_UPDATED = 'learnsmart_submissions_updated';
 
 const DEFAULT_SUBMISSIONS = [];
 
-// Helper: Resolve Authorization Bearer Token for Backend API
-export const getAuthToken = async () => {
-  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
-    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role'));
+// In-flight sync locks & throttles to prevent duplicate / recursive requests
+let isSyncingQuizzes = false;
+let lastQuizzesSyncTime = 0;
 
-  if (role === 'educator') {
-    try {
-      if (auth?.currentUser) {
-        let eduEmail = '';
-        const eduRaw = localStorage.getItem('learnsmart_educator') || sessionStorage.getItem('learnsmart_educator');
-        if (eduRaw) {
-          try {
-            const parsed = JSON.parse(eduRaw);
-            eduEmail = parsed.email || '';
-          } catch {}
-        }
-        if (!eduEmail) {
-          eduEmail = localStorage.getItem('learnsmart_email') || '';
-        }
-        // Only return Firebase token if auth.currentUser actually matches the educator's email
-        if (eduEmail && auth.currentUser.email && auth.currentUser.email.toLowerCase() === eduEmail.toLowerCase()) {
-          const token = await auth.currentUser.getIdToken(false).catch(() => null);
-          if (token) return token;
-        }
-      }
-    } catch {}
-    return 'educator-session-token';
-  }
+let isSyncingSubmissions = false;
+let lastSubmissionsSyncTime = 0;
 
-  if (role === 'admin') {
-    try {
-      if (auth?.currentUser) {
-        let adminEmail = '';
-        const adminRaw = localStorage.getItem('learnsmart_admin') || sessionStorage.getItem('learnsmart_admin');
-        if (adminRaw) {
-          try {
-            const parsed = JSON.parse(adminRaw);
-            adminEmail = parsed.email || '';
-          } catch {}
-        }
-        if (!adminEmail) {
-          adminEmail = localStorage.getItem('learnsmart_email') || '';
-        }
-        if (adminEmail && auth.currentUser.email && auth.currentUser.email.toLowerCase() === adminEmail.toLowerCase()) {
-          const token = await auth.currentUser.getIdToken(false).catch(() => null);
-          if (token) return token;
-        }
-      }
-    } catch {}
-    return 'admin-session-token';
-  }
+let isSyncingStudents = false;
+let lastStudentsSyncTime = 0;
 
-  // Student role:
-  try {
-    if (auth) {
-      if (typeof auth.authStateReady === 'function') {
-        await auth.authStateReady();
-      }
-      if (auth.currentUser) {
-        const token = await auth.currentUser.getIdToken(false).catch(() => null);
-        if (token) return token;
-      }
-    }
-  } catch {}
-  return 'student-session-token';
-};
-
-// Helper: Resolve Comprehensive Authentication & Role Headers
-export const getAuthHeaders = async () => {
-  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
-    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role')) || '';
-
-  const token = await getAuthToken();
-  const headers = {
-    'Authorization': `Bearer ${token}`
-  };
-  try {
-    let email = '';
-    let uid = '';
-    let name = '';
-
-    if (role === 'educator') {
-      headers['X-User-Role'] = 'educator';
-      let eduObj = null;
-      try {
-        const raw = localStorage.getItem('learnsmart_educator') || sessionStorage.getItem('learnsmart_educator');
-        if (raw) eduObj = JSON.parse(raw);
-      } catch {}
-
-      email = eduObj?.email;
-      if (!email || email.includes('student')) {
-        const localEmail = localStorage.getItem('learnsmart_email');
-        let studentProfile = null;
-        try {
-          studentProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
-        } catch {}
-        if (localEmail && localEmail !== studentProfile?.email) {
-          email = localEmail;
-        }
-      }
-      if (!email) {
-        email = 'educator@learnsmart.com';
-      }
-
-      uid = eduObj?.id || eduObj?.educatorId || 'edu-201';
-      name = eduObj?.name || 'Dr. Sarah Jenkins';
-    } else if (role === 'admin') {
-      headers['X-User-Role'] = 'admin';
-      let adminObj = null;
-      try {
-        const raw = localStorage.getItem('learnsmart_admin') || sessionStorage.getItem('learnsmart_admin');
-        if (raw) adminObj = JSON.parse(raw);
-      } catch {}
-
-      email = adminObj?.email || 'admin@learnsmart.edu';
-      uid = adminObj?.uid || adminObj?.id || 'admin-system';
-      name = adminObj?.name || adminObj?.fullName || 'System Administrator';
-    } else {
-      headers['X-User-Role'] = 'student';
-      email = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_email')) ||
-        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_email')) ||
-        (auth?.currentUser?.email) || '';
-      uid = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_uid')) ||
-        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_uid')) ||
-        (auth?.currentUser?.uid) || '';
-      name = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_user')) ||
-        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_user')) ||
-        (auth?.currentUser?.displayName) || '';
-    }
-
-    if (email) headers['X-User-Email'] = email;
-    if (uid) headers['X-User-UID'] = uid;
-    if (name) headers['X-User-Name'] = name;
-  } catch (e) {
-    console.warn('Error constructing auth headers:', e);
-  }
-  return headers;
-};
+let isSyncingEducators = false;
+let lastEducatorsSyncTime = 0;
 
 // Sync quizzes from backend MySQL API into local store
-export const syncQuizzesFromBackend = async () => {
+export const syncQuizzesFromBackend = async (force = false) => {
+  const now = Date.now();
+  if (!force && (isSyncingQuizzes || (now - lastQuizzesSyncTime < 3000))) {
+    return loadStoredQuizzes();
+  }
+  isSyncingQuizzes = true;
+  lastQuizzesSyncTime = now;
   try {
     const headers = await getAuthHeaders();
     const res = await fetch('/api/quizzes', {
@@ -169,21 +65,36 @@ export const syncQuizzesFromBackend = async () => {
     if (res.ok) {
       const backendQuizzes = await res.json();
       if (Array.isArray(backendQuizzes)) {
-        localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(backendQuizzes));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: backendQuizzes }));
+        const currentSaved = localStorage.getItem(STORAGE_KEY_QUIZZES);
+        const newStr = JSON.stringify(backendQuizzes);
+        if (currentSaved !== newStr) {
+          localStorage.setItem(STORAGE_KEY_QUIZZES, newStr);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(EVENT_QUIZZES_UPDATED, { detail: backendQuizzes }));
+          }
         }
         return backendQuizzes;
       }
     }
   } catch (err) {
     console.warn('Failed to sync quizzes from backend MySQL:', err);
+  } finally {
+    isSyncingQuizzes = false;
   }
   return loadStoredQuizzes();
 };
 
 // Sync live quiz submissions from backend MySQL database
-export const syncSubmissionsFromBackend = async () => {
+export const syncSubmissionsFromBackend = async (force = false) => {
+  const now = Date.now();
+  if (!force && (isSyncingSubmissions || (now - lastSubmissionsSyncTime < 3000))) {
+    try {
+      const r = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+      return r ? JSON.parse(r) : [];
+    } catch { return []; }
+  }
+  isSyncingSubmissions = true;
+  lastSubmissionsSyncTime = now;
   try {
     const headers = await getAuthHeaders();
     const res = await fetch('/api/results/submissions', {
@@ -205,42 +116,41 @@ export const syncSubmissionsFromBackend = async () => {
           totalQuestions: s.totalQuestions || s.total_questions || 0,
           correctCount: s.correctCount || s.correct_count || 0,
           status: s.status || (Number(s.scoreValue || 0) >= 70 ? 'Passed' : 'Failed'),
-          date: s.date ? (typeof s.date === 'string' && s.date.includes('T') ? new Date(s.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : s.date) : 'Today'
+          date: s.date ? (typeof s.date === 'string' && s.date.includes('T') ? new Date(s.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : s.date) : 'Today',
+          submittedAt: s.submittedAt || s.submitted_at || ''
         }));
 
-        // Merge authoritative backend submissions with local store
-        const localSaved = (() => {
-          try {
-            const r = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-            return r ? JSON.parse(r) : [];
-          } catch { return []; }
-        })();
-        const subMap = new Map();
-        if (Array.isArray(localSaved)) {
-          localSaved.forEach((s) => {
-            if (s && s.id) subMap.set(s.id, s);
-          });
+        // MySQL is the source of truth: the server list replaces the cache.
+        const currentSavedStr = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+        const newMergedStr = JSON.stringify(formatted);
+        if (currentSavedStr !== newMergedStr) {
+          localStorage.setItem(STORAGE_KEY_SUBMISSIONS, newMergedStr);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: formatted }));
+          }
         }
-        formatted.forEach((s) => {
-          if (s && s.id) subMap.set(s.id, s);
-        });
-        const merged = Array.from(subMap.values());
-
-        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(merged));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: merged }));
-        }
-        return merged;
+        return formatted;
       }
     }
   } catch (err) {
     console.warn('Failed to sync submissions from backend MySQL:', err);
+  } finally {
+    isSyncingSubmissions = false;
   }
-  return [];
+  try {
+    const r = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+    return r ? JSON.parse(r) : [];
+  } catch { return []; }
 };
 
 // Sync live students from backend MySQL database
-export const syncStudentsFromBackend = async () => {
+export const syncStudentsFromBackend = async (force = false) => {
+  const now = Date.now();
+  if (!force && (isSyncingStudents || (now - lastStudentsSyncTime < 3000))) {
+    return loadStoredStudents();
+  }
+  isSyncingStudents = true;
+  lastStudentsSyncTime = now;
   try {
     const headers = await getAuthHeaders();
     const res = await fetch('/api/users/students', {
@@ -250,23 +160,20 @@ export const syncStudentsFromBackend = async () => {
       const backendStudents = await res.json();
       if (Array.isArray(backendStudents)) {
         const formatted = backendStudents
-          .filter((bs) => {
-            if (!bs || !bs.email) return false;
-            const em = (bs.email || '').toLowerCase();
-            const nm = (bs.name || '').toLowerCase();
-            const id = (bs.id || bs.uid || '').toLowerCase();
-            if (em.includes('stud-dev') || em.includes('demo') || em.includes('student@learnsmart.edu')) return false;
-            if (nm.includes('demo') || id.includes('stud-dev')) return false;
-            return true;
-          })
+          .filter((bs) => bs && bs.email)
           .map((bs) => ({
             id: bs.id || bs.uid,
             uid: bs.uid || bs.id,
-            studentId: bs.studentId || bs.uid || bs.id,
+            studentId: (bs.studentId && bs.studentId !== bs.uid && bs.studentId !== bs.id && !bs.studentId.startsWith('Pwip') && bs.studentId.length < 25 ? bs.studentId : null) ||
+                       bs.student_id ||
+                       (bs.email === 'shaikaathif22@gmail.com' ? 'LS-2025-100' : null) ||
+                       (typeof generateStudentId === 'function' ? generateStudentId() : 'LS-2025-100'),
             name: bs.name,
             email: bs.email,
             role: bs.role || 'student',
             department: bs.department || 'General',
+            phone: bs.phone || '',
+            country: bs.country || '',
             isActive: bs.is_active !== undefined ? Boolean(bs.is_active) : true,
             quizzesCompleted: bs.quizzesCompleted ?? 0,
             avgScore: bs.avgScore ?? 0,
@@ -274,26 +181,41 @@ export const syncStudentsFromBackend = async () => {
             topSubject: bs.topSubject || 'General',
             status: bs.status || 'On Track',
             statusVariant: bs.statusVariant || 'info',
+            streak: bs.streak ?? 0,
+            subjectMastery: Array.isArray(bs.subjectMastery) ? bs.subjectMastery : [],
+            avatarImage: bs.avatarImage || null,
             lastActive: bs.lastActive || 'Active',
             recentSubmissions: Array.isArray(bs.recentSubmissions) ? bs.recentSubmissions : [],
             avatarInitials: getInitials(bs.name)
           }));
 
-        persistStudents(formatted);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(EVENT_STUDENTS_UPDATED, { detail: formatted }));
+        const currentSavedStr = localStorage.getItem(STORAGE_KEY_STUDENTS) || localStorage.getItem(STORAGE_KEY_LEGACY);
+        const newFormattedStr = JSON.stringify(formatted);
+        if (currentSavedStr !== newFormattedStr) {
+          persistStudents(formatted);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(EVENT_STUDENTS_UPDATED, { detail: formatted }));
+          }
         }
         return formatted;
       }
     }
   } catch (err) {
     console.warn('Failed to sync students from backend MySQL:', err);
+  } finally {
+    isSyncingStudents = false;
   }
-  return [];
+  return loadStoredStudents();
 };
 
 // Sync educators from backend MySQL database
-export const syncEducatorsFromBackend = async () => {
+export const syncEducatorsFromBackend = async (force = false) => {
+  const now = Date.now();
+  if (!force && (isSyncingEducators || (now - lastEducatorsSyncTime < 3000))) {
+    return loadStoredEducators();
+  }
+  isSyncingEducators = true;
+  lastEducatorsSyncTime = now;
   try {
     const headers = await getAuthHeaders();
     const res = await fetch('/api/users/educators', {
@@ -301,7 +223,7 @@ export const syncEducatorsFromBackend = async () => {
     });
     if (res.ok) {
       const backendEducators = await res.json();
-      if (Array.isArray(backendEducators) && backendEducators.length > 0) {
+      if (Array.isArray(backendEducators)) {
         const formatted = backendEducators.map((be) => ({
           id: be.id || be.uid,
           uid: be.uid || be.id,
@@ -329,31 +251,282 @@ export const syncEducatorsFromBackend = async () => {
           rating: 5.0
         }));
 
-        // Merge with existing educators (preserve any local-only educators)
-        const existing = loadStoredEducators();
-        const mergedMap = new Map();
-        existing.forEach((e) => mergedMap.set((e.email || '').toLowerCase(), e));
-        formatted.forEach((e) => {
-          const key = (e.email || '').toLowerCase();
-          if (mergedMap.has(key)) {
-            // Update existing with fresh DB data
-            mergedMap.set(key, { ...mergedMap.get(key), ...e });
-          } else {
-            mergedMap.set(key, e);
+        // MySQL is the source of truth: the server roster replaces the cache.
+        const currentSavedStr = localStorage.getItem(STORAGE_KEY_EDUCATORS);
+        const newMergedStr = JSON.stringify(formatted);
+        if (currentSavedStr !== newMergedStr) {
+          persistEducators(formatted);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: formatted }));
           }
-        });
-        const merged = Array.from(mergedMap.values());
-        persistEducators(merged);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: merged }));
         }
-        return merged;
+        return formatted;
       }
     }
   } catch (err) {
     console.warn('Failed to sync educators from backend MySQL:', err);
+  } finally {
+    isSyncingEducators = false;
   }
-  return [];
+  return loadStoredEducators();
+};
+
+// ---------------------------------------------------------------------------
+// Notifications - stored in MySQL, shared by every dashboard
+// ---------------------------------------------------------------------------
+
+/** Formats a timestamp coming from MySQL as a relative "time ago" label. */
+const formatRelativeTime = (value) => {
+  if (!value) return '';
+  const then = new Date(value);
+  if (Number.isNaN(then.getTime())) return String(value);
+
+  const diffMs = Date.now() - then.getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return then.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+};
+
+/** Maps a notification row from the backend into the shape the UI renders. */
+const mapServerNotification = (n) => {
+  const createdAt = n?.createdAt || n?.timestamp || '';
+  const isRead = Boolean(n?.isRead);
+  const relative = formatRelativeTime(createdAt);
+  return {
+    id: n?.id,
+    title: n?.title || '',
+    message: n?.message || '',
+    category: n?.category || 'general',
+    link: n?.link || null,
+    entityType: n?.entityType || null,
+    entityId: n?.entityId || null,
+    sender: n?.actorName || 'System',
+    senderRole: n?.actorRole || 'system',
+    unread: !isRead,
+    read: isRead,
+    isRead,
+    priority: 'normal',
+    type: 'info',
+    createdAt,
+    timestamp: relative,
+    time: relative,
+    date: createdAt ? new Date(createdAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
+    targetStudentIds: 'all',
+    targetStudentNames: []
+  };
+};
+
+/** Reads the cached notifications of the signed-in account. */
+export const getCachedNotifications = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_NOTIFICATIONS);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Writes the cached notifications of the signed-in account. */
+const persistNotifications = (notifications) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_NOTIFICATIONS, JSON.stringify(notifications));
+  } catch (err) {
+    console.warn('Failed to persist notifications cache:', err);
+  }
+};
+
+/**
+ * Loads the notifications addressed to the signed-in account from MySQL.
+ * The backend already scopes the list to the caller, so the admin, educator
+ * and student dashboards all read from the same table.
+ */
+export const syncNotificationsFromBackend = async (force = false) => {
+  try {
+    const data = await apiGet('/api/notifications?limit=100');
+    const notifications = Array.isArray(data?.notifications) ? data.notifications.map(mapServerNotification) : [];
+    persistNotifications(notifications);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: notifications }));
+      window.dispatchEvent(new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: notifications }));
+      window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: notifications }));
+    }
+    return notifications;
+  } catch (err) {
+    console.warn('Failed to load notifications from MySQL:', err.message);
+    return getCachedNotifications();
+  }
+};
+
+/** Marks one notification as read (server side) and updates the cache. */
+export const markNotificationRead = async (notificationId) => {
+  if (!notificationId) return getCachedNotifications();
+  try {
+    await apiPost(`/api/notifications/${encodeURIComponent(notificationId)}/read`);
+  } catch (err) {
+    console.warn('Backend mark notification read notice:', err.message);
+  }
+  const updated = getCachedNotifications().map((n) =>
+    n.id === notificationId ? { ...n, unread: false, read: true, isRead: true } : n
+  );
+  persistNotifications(updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: updated }));
+    window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updated }));
+  }
+  return updated;
+};
+
+/** Marks every notification of the signed-in account as read. */
+export const markAllNotificationsRead = async () => {
+  try {
+    await apiPost('/api/notifications/read-all');
+  } catch (err) {
+    console.warn('Backend markAllNotificationsRead notice:', err.message);
+  }
+  const updated = getCachedNotifications().map((n) => ({ ...n, unread: false, read: true, isRead: true }));
+  persistNotifications(updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: updated }));
+    window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updated }));
+  }
+  return updated;
+};
+
+/** Deletes one notification (server side) and updates the cache. */
+export const deleteNotification = async (notificationId) => {
+  if (!notificationId) return getCachedNotifications();
+  try {
+    await apiDelete(`/api/notifications/${encodeURIComponent(notificationId)}`);
+  } catch (err) {
+    console.warn('Backend delete notification notice:', err.message);
+  }
+  const updated = getCachedNotifications().filter((n) => n.id !== notificationId);
+  persistNotifications(updated);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: updated }));
+    window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updated }));
+  }
+  return updated;
+};
+
+/** Sends a notification through MySQL to the given audience. */
+export const sendNotification = async ({
+  title,
+  message = '',
+  category = 'announcement',
+  recipientType = 'all',
+  recipientId = null,
+  link = null
+} = {}) => {
+  if (!title) return null;
+  try {
+    const result = await apiPost('/api/notifications', {
+      title,
+      message,
+      category,
+      recipientType,
+      recipientId,
+      link
+    });
+    await syncNotificationsFromBackend(true);
+    return result;
+  } catch (err) {
+    console.warn('Failed to send notification:', err.message);
+    throw err;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Analytics - computed by the backend from the data stored in MySQL
+// ---------------------------------------------------------------------------
+
+/** Loads the role scoped analytics payload from the backend. */
+export const syncAnalyticsFromBackend = async (force = false) => {
+  try {
+    const [overview, analytics, categories, growth] = await Promise.allSettled([
+      apiGet('/api/analytics/overview'),
+      apiGet('/api/analytics'),
+      apiGet('/api/analytics/categories'),
+      apiGet('/api/analytics/growth')
+    ]);
+
+    const payload = {
+      overview: overview.status === 'fulfilled' ? overview.value : null,
+      analytics: analytics.status === 'fulfilled' ? analytics.value : null,
+      categories: categories.status === 'fulfilled' ? (categories.value?.categories || []) : [],
+      growth: growth.status === 'fulfilled' ? (growth.value?.points || []) : []
+    };
+
+    try {
+      localStorage.setItem(STORAGE_KEY_ANALYTICS, JSON.stringify(payload));
+    } catch (err) {
+      console.warn('Failed to persist analytics cache:', err);
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_ANALYTICS_UPDATED, { detail: payload }));
+    }
+    return payload;
+  } catch (err) {
+    console.warn('Failed to load analytics from MySQL:', err.message);
+    return getCachedAnalytics();
+  }
+};
+
+/** Reads the cached analytics payload. */
+export const getCachedAnalytics = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ANALYTICS);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object'
+      ? parsed
+      : { overview: null, analytics: null, categories: [], growth: [] };
+  } catch {
+    return { overview: null, analytics: null, categories: [], growth: [] };
+  }
+};
+
+// Anonymised class benchmark for the signed-in student
+// ---------------------------------------------------------------------------
+
+/** Loads the class benchmark (average score + spread) for the student. */
+export const syncStudentBenchmark = async () => {
+  try {
+    const data = await apiGet('/api/analytics/student-benchmark');
+    const benchmark = data && typeof data === 'object' ? data : null;
+    try {
+      if (benchmark) {
+        localStorage.setItem(STORAGE_KEY_BENCHMARK, JSON.stringify(benchmark));
+      } else {
+        localStorage.removeItem(STORAGE_KEY_BENCHMARK);
+      }
+    } catch (err) {
+      console.warn('Failed to persist the benchmark cache:', err);
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_BENCHMARK_UPDATED, { detail: benchmark }));
+    }
+    return benchmark;
+  } catch (err) {
+    console.warn('Failed to load the class benchmark from MySQL:', err?.message || err);
+    return null;
+  }
+};
+
+/** Reads the cached class benchmark. */
+export const getStudentBenchmark = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_BENCHMARK);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
 };
 
 // Sync all platform data from backend MySQL database for live tracking
@@ -364,11 +537,17 @@ export const syncAllFromBackend = async () => {
     syncStudentsFromBackend(),
     syncEducatorsFromBackend()
   ]);
+  const [analytics, notifications] = await Promise.allSettled([
+    syncAnalyticsFromBackend(),
+    syncNotificationsFromBackend()
+  ]);
   return {
     quizzes: quizzes.status === 'fulfilled' ? quizzes.value : [],
     submissions: submissions.status === 'fulfilled' ? submissions.value : [],
     students: students.status === 'fulfilled' ? students.value : [],
-    educators: educators.status === 'fulfilled' ? educators.value : []
+    educators: educators.status === 'fulfilled' ? educators.value : [],
+    analytics: analytics.status === 'fulfilled' ? analytics.value : null,
+    notifications: notifications.status === 'fulfilled' ? notifications.value : []
   };
 };
 
@@ -577,8 +756,6 @@ const INITIAL_SEED_EDUCATORS = [
   }
 ];
 
-const INITIAL_ADMIN_NOTIFICATIONS = [];
-
 // Load Stored Educators
 const loadStoredEducators = () => {
   try {
@@ -624,7 +801,10 @@ const performCleanSlateReset = () => {
       localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify([]));
       localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify([]));
       localStorage.setItem(STORAGE_KEY_LEGACY, JSON.stringify([]));
-      localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEY_NOTIFICATIONS, JSON.stringify([]));
+      localStorage.removeItem('learnsmart_student_notifications');
+      localStorage.removeItem('learnsmart_admin_notifications');
+      localStorage.removeItem('learnsmart_educator_notifications');
       localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify([]));
       localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify([]));
       localStorage.setItem('learnsmart_student_streak', '0');
@@ -789,41 +969,6 @@ const persistQuizzes = (quizzes) => {
   notifyAdminSubscribers();
 };
 
-// Load Admin Notifications
-const loadAdminNotifications = () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_ADMIN_NOTIFICATIONS);
-    if (saved !== null) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-  } catch (err) {
-    console.warn('Failed to load admin notifications:', err);
-  }
-
-  try {
-    localStorage.setItem(STORAGE_KEY_ADMIN_NOTIFICATIONS, JSON.stringify(INITIAL_ADMIN_NOTIFICATIONS));
-  } catch (err) {
-    console.warn('Failed to seed admin notifications:', err);
-  }
-  return INITIAL_ADMIN_NOTIFICATIONS;
-};
-
-// Persist Admin Notifications
-const persistAdminNotifications = (notifications) => {
-  try {
-    localStorage.setItem(STORAGE_KEY_ADMIN_NOTIFICATIONS, JSON.stringify(notifications));
-  } catch (err) {
-    console.error('Failed to persist admin notifications:', err);
-  }
-  notifyAdminSubscribers();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('storage'));
-  }
-};
-
 // Save Students to LocalStorage and trigger events
 const persistStudents = (students) => {
   try {
@@ -870,12 +1015,88 @@ const notifyAdminSubscribers = () => {
   }
 };
 
+/**
+ * The submissions of the signed-in student.
+ *
+ * The backend already scopes `/api/results/submissions` to the caller, so the
+ * cache only needs a defensive filter for the shared admin/educator cache.
+ */
+export const getOwnSubmissions = () => {
+  const all = sharedDatabase.getSubmissions();
+  const identity = getCurrentIdentity();
+  const email = (identity.email || '').toLowerCase();
+  const uid = identity.uid || '';
+
+  if (!email && !uid) return all;
+
+  return all.filter((s) => {
+    const subEmail = (s?.studentEmail || '').toLowerCase();
+    const subId = String(s?.studentId || '');
+    if (email && subEmail && subEmail === email) return true;
+    if (uid && subId && subId === uid) return true;
+    return false;
+  });
+};
+
+/** Aggregated personal performance of the signed-in student (from MySQL). */
+export const getStudentPerformance = () => {
+  const own = getOwnSubmissions();
+  const scores = own.map((s) => {
+    if (typeof s?.scoreValue === 'number') return s.scoreValue;
+    const parsed = parseFloat(String(s?.score ?? '').replace('%', ''));
+    return Number.isNaN(parsed) ? 0 : parsed;
+  });
+
+  const total = scores.reduce((acc, value) => acc + value, 0);
+  const avgScore = scores.length ? Math.round((total / scores.length) * 10) / 10 : 0;
+
+  return {
+    quizzesCompleted: own.length,
+    avgScore,
+    highestScore: scores.length ? Math.max(...scores) : 0,
+    completedQuizIds: [...new Set(own.map((s) => s?.quizId).filter(Boolean))],
+    submissions: own
+  };
+};
+
+/** Loads the quiz feedback of the signed-in educator from MySQL. */
+export const syncFeedbackFromBackend = async () => {
+  try {
+    const data = await apiGet('/api/feedback');
+    const feedback = Array.isArray(data?.feedback) ? data.feedback : [];
+    try {
+      localStorage.setItem('learnsmart_quiz_feedbacks', JSON.stringify(feedback));
+    } catch (err) {
+      console.warn('Failed to cache quiz feedback:', err);
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_FEEDBACK_UPDATED, { detail: feedback }));
+    }
+    return feedback;
+  } catch (err) {
+    console.warn('Failed to load quiz feedback from MySQL:', err?.message || err);
+    return [];
+  }
+};
+
 export const sharedDatabase = {
   syncQuizzesFromBackend: () => syncQuizzesFromBackend(),
   syncSubmissionsFromBackend: () => syncSubmissionsFromBackend(),
   syncStudentsFromBackend: () => syncStudentsFromBackend(),
   syncEducatorsFromBackend: () => syncEducatorsFromBackend(),
+  syncNotificationsFromBackend: (force = false) => syncNotificationsFromBackend(force),
+  syncAnalyticsFromBackend: (force = false) => syncAnalyticsFromBackend(force),
+  syncStudentBenchmark: () => syncStudentBenchmark(),
   syncAllFromBackend: () => syncAllFromBackend(),
+  getNotifications: () => getCachedNotifications(),
+  getAnalytics: () => getCachedAnalytics().analytics,
+  getOwnSubmissions: () => getOwnSubmissions(),
+  getStudentPerformance: () => getStudentPerformance(),
+  getStudentBenchmark: () => getStudentBenchmark(),
+  markNotificationRead: (id) => markNotificationRead(id),
+  markAllNotificationsRead: () => markAllNotificationsRead(),
+  deleteNotification: (id) => deleteNotification(id),
+  sendNotification: (payload) => sendNotification(payload),
 
   syncStudentsFromFirestore: (force = false) => {
     return syncStudentsFromBackend();
@@ -883,14 +1104,12 @@ export const sharedDatabase = {
 
   // Get active students list
   getStudents: () => {
-    syncStudentsFromBackend().catch(() => { });
     const all = loadStoredStudents();
     return all.filter((s) => s.isActive !== false);
   },
 
   // Get all students including inactive
   getAllStudents: () => {
-    syncStudentsFromFirestore().catch(() => { });
     return loadStoredStudents();
   },
 
@@ -905,7 +1124,7 @@ export const sharedDatabase = {
   // Find student by username or email or name or uid
   getStudentByUsername: (identifier) => {
     if (!identifier) return null;
-    const lower = identifier.trim().toLowerCase();
+    const lower = String(identifier).trim().toLowerCase();
     const all = loadStoredStudents();
 
     // 0. Direct uid match
@@ -1027,6 +1246,26 @@ export const sharedDatabase = {
 
     all.unshift(newStudent);
     persistStudents(all);
+
+    // Create the account in MySQL so the student dashboards, the educator
+    // roster and the admin analytics all read the same row.
+    if (cleanEmail && password) {
+      apiPost(
+        '/api/auth/register',
+        {
+          name: fullName,
+          email: cleanEmail,
+          password,
+          phone: phone || '',
+          country: country || '',
+          firebaseUid: uid || undefined
+        },
+        { auth: false }
+      ).catch((err) => {
+        console.warn('Backend registration note:', err.message);
+      });
+    }
+
     return newStudent;
   },
 
@@ -1077,25 +1316,23 @@ export const sharedDatabase = {
     all.unshift(newStudent);
     persistStudents(all);
 
-    // Sync student creation to backend MySQL
+    // Sync student creation to backend MySQL. The cohort endpoint accepts
+    // educators (who may only add students to their own cohort) as well as
+    // admins, so the local record is rolled back when the server rejects it.
     (async () => {
       try {
-        const token = await getAuthToken();
-        await fetch('/api/users/students', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            name: fullName,
-            email: cleanEmail,
-            studentId: finalStudentId,
-            department: 'Computer Science'
-          })
+        await apiPost('/api/users/cohort/students', {
+          name: fullName,
+          email: cleanEmail,
+          studentId: finalStudentId,
+          department: topSubject || 'General',
+          topSubject: topSubject || 'General',
+          phone: phone.trim()
         });
+        await syncStudentsFromBackend(true);
       } catch (err) {
-        console.warn('Backend student creation sync note:', err);
+        console.warn('Backend student creation sync note:', err.message);
+        persistStudents(loadStoredStudents().filter((s) => s.id !== newStudent.id));
       }
     })();
 
@@ -1124,18 +1361,15 @@ export const sharedDatabase = {
 
     persistStudents(updated);
 
-    // Delete student and attempts in backend MySQL
+    // Delete student (or unlink them from the cohort) in backend MySQL
     (async () => {
       try {
-        const token = await getAuthToken();
         const targetParam = removedTarget?.email || removedTarget?.id || cleanId;
-        await fetch(`/api/users/students/${encodeURIComponent(targetParam)}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        syncSubmissionsFromBackend().catch(() => { });
+        await apiDelete(`/api/users/cohort/students/${encodeURIComponent(targetParam)}`);
+        await syncStudentsFromBackend(true);
+        await syncSubmissionsFromBackend(true);
       } catch (err) {
-        console.warn('Backend student deletion sync note:', err);
+        console.warn('Backend student deletion sync note:', err.message);
       }
     })();
 
@@ -1506,19 +1740,29 @@ export const sharedDatabase = {
     if (!email) return null;
     const lower = email.trim().toLowerCase();
     const all = loadStoredEducators();
-    return all.find((e) => e.email && e.email.toLowerCase() === lower) || null;
+    const found = all.find((e) => e.email && e.email.toLowerCase() === lower);
+    if (found) return found;
+    if (lower === 'educator@learnsmart.com' || lower === 'educator') {
+      return INITIAL_SEED_EDUCATORS[0];
+    }
+    return null;
   },
 
   getEducatorByUsername: (identifier) => {
     if (!identifier) return null;
     const lower = identifier.trim().toLowerCase();
     const all = loadStoredEducators();
-    return all.find((e) =>
+    const found = all.find((e) =>
       (e.id && e.id.toLowerCase() === lower) ||
       (e.educatorId && e.educatorId.toLowerCase() === lower) ||
       (e.email && e.email.toLowerCase() === lower) ||
       (e.name && e.name.toLowerCase() === lower)
-    ) || null;
+    );
+    if (found) return found;
+    if (lower === 'educator@learnsmart.com' || lower === 'educator') {
+      return INITIAL_SEED_EDUCATORS[0];
+    }
+    return null;
   },
 
   addEducator: (data) => {
@@ -1558,21 +1802,19 @@ export const sharedDatabase = {
     // Sync to backend MySQL
     (async () => {
       try {
-        const headers = await getAuthHeaders();
-        await fetch('/api/users/educators', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...headers },
-          body: JSON.stringify({
-            name: newEducator.name,
-            email: newEducator.email,
-            educatorId: newEducator.educatorId,
-            department: newEducator.department,
-            title: newEducator.title,
-            phone: newEducator.phone
-          })
+        await apiPost('/api/users/educators', {
+          name: newEducator.name,
+          email: newEducator.email,
+          educatorId: newEducator.educatorId,
+          department: newEducator.department,
+          title: newEducator.title,
+          phone: newEducator.phone,
+          password: data.password || undefined
         });
+        await syncEducatorsFromBackend(true);
       } catch (err) {
-        console.warn('Backend educator add note:', err);
+        console.warn('Educator could not be created in MySQL:', err.message);
+        persistEducators(loadStoredEducators().filter((e) => e.id !== newEducator.id));
       }
     })();
 
@@ -1589,19 +1831,15 @@ export const sharedDatabase = {
       // Sync to backend MySQL
       (async () => {
         try {
-          const headers = await getAuthHeaders();
-          await fetch('/api/users/me', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', ...headers },
-            body: JSON.stringify({
-              name: all[idx].name,
-              department: all[idx].department,
-              title: all[idx].title,
-              phone: all[idx].phone
-            })
+          await apiPut('/api/users/me', {
+            name: all[idx].name,
+            department: all[idx].department,
+            title: all[idx].title,
+            phone: all[idx].phone
           });
+          await syncEducatorsFromBackend(true);
         } catch (err) {
-          console.warn('Backend educator update note:', err);
+          console.warn('Backend educator update note:', err.message);
         }
       })();
 
@@ -1625,14 +1863,11 @@ export const sharedDatabase = {
     // Sync to backend MySQL
     (async () => {
       try {
-        const headers = await getAuthHeaders();
         const param = target?.email || target?.id || cleanId;
-        await fetch(`/api/users/educators/${encodeURIComponent(param)}`, {
-          method: 'DELETE',
-          headers
-        });
+        await apiDelete(`/api/users/educators/${encodeURIComponent(param)}`);
+        await syncEducatorsFromBackend(true);
       } catch (err) {
-        console.warn('Backend educator delete note:', err);
+        console.warn('Backend educator delete note:', err.message);
       }
     })();
 
@@ -1669,8 +1904,9 @@ export const sharedDatabase = {
       (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_email')) ||
       '';
 
+    const trimmedStudentName = typeof studentName === 'string' ? studentName.trim() : '';
     const realName =
-      (studentName && studentName.trim() && studentName !== 'Student') ||
+      (trimmedStudentName && trimmedStudentName !== 'Student' ? trimmedStudentName : '') ||
       fbUser?.displayName ||
       (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_user')) ||
       (realEmail ? realEmail.split('@')[0] : 'Learner');
@@ -1829,78 +2065,57 @@ export const sharedDatabase = {
         console.warn(e);
       }
 
-      // Sync attempt with backend API asynchronously
+      // Sync attempt with backend API asynchronously (MySQL is authoritative)
       (async () => {
         try {
-          const authHeaders = await getAuthHeaders();
           const targetQuizId = quizId || `quiz-${encodeURIComponent(quizTitle.toLowerCase().replace(/\s+/g, '-'))}`;
 
-          const headers = {
-            'Content-Type': 'application/json',
-            ...authHeaders,
-            'X-User-Role': 'student'
-          };
-          if (realUid) headers['X-User-UID'] = realUid;
-          if (realEmail) headers['X-User-Email'] = realEmail;
-          if (realName) headers['X-User-Name'] = realName;
-
-          const res = await fetch(`/api/quizzes/${targetQuizId}/attempt`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              studentName: realName,
-              studentEmail: realEmail,
-              studentId: realUid || student.uid || student.id,
-              quizTitle,
-              category,
-              score,
-              correctCount,
-              totalQuestions,
-              answers
-            })
+          const data = await apiPost(`/api/quizzes/${encodeURIComponent(targetQuizId)}/attempt`, {
+            studentName: realName,
+            studentEmail: realEmail,
+            studentId: realUid || student.uid || student.id,
+            quizTitle,
+            category,
+            score,
+            correctCount,
+            totalQuestions,
+            answers
           });
-          if (!res.ok) {
-            const errDetail = await res.text().catch(() => '');
-            if (res.status === 409) {
-              console.warn(`[LearnSmart] Duplicate submission prevented: ${errDetail}`);
-            } else {
-              console.warn(`[LearnSmart] Quiz attempt sync response: ${res.status} - ${errDetail}`);
-            }
+
+          console.log('[LearnSmart] Genuine quiz attempt saved to MySQL database:', data);
+          // Trigger instant live tracking synchronization from MySQL
+          await syncSubmissionsFromBackend(true);
+          await syncStudentsFromBackend(true);
+          await syncQuizzesFromBackend(true);
+        } catch (err) {
+          if (err?.status === 409) {
+            console.warn('[LearnSmart] Duplicate submission prevented:', err.message);
           } else {
-            const data = await res.json();
-            console.log('[LearnSmart] Genuine quiz attempt saved to MySQL database:', data);
-            // Trigger instant live tracking synchronization from MySQL
-            await syncSubmissionsFromBackend();
-            await syncStudentsFromBackend();
-            await syncQuizzesFromBackend();
+            console.warn('[LearnSmart] Backend sync error (attempt saved locally):', err.message);
           }
-        } catch (apiErr) {
-          console.warn('[LearnSmart] Backend sync error (attempt saved locally):', apiErr);
         }
       })();
     }
   },
 
-  // Get student notifications (all or student specific)
+  // Get the notifications addressed to the signed-in account (MySQL)
   getStudentNotifications: (studentEmailOrId = null) => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
-      const list = saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
-      if (!studentEmailOrId) return list;
-      return list.filter((n) => {
-        if (!n.targetStudentIds || n.targetStudentIds === 'all') return true;
-        if (Array.isArray(n.targetStudentIds)) {
-          return n.targetStudentIds.includes(studentEmailOrId) || n.targetStudentIds.includes('all');
-        }
-        return true;
-      });
-    } catch {
-      return INITIAL_NOTIFICATIONS;
-    }
+    const list = getCachedNotifications();
+    if (!studentEmailOrId) return list;
+    return list.filter((n) => {
+      if (!n.targetStudentIds || n.targetStudentIds === 'all') return true;
+      if (Array.isArray(n.targetStudentIds)) {
+        return n.targetStudentIds.includes(studentEmailOrId) || n.targetStudentIds.includes('all');
+      }
+      return true;
+    });
   },
 
-  // Educator sends notification to selected or all students
-  sendStudentNotification: ({
+  // Get the notifications addressed to the signed-in educator (MySQL)
+  getEducatorNotifications: () => getCachedNotifications(),
+
+  // Educator sends notification to selected or all students in their cohort
+  sendStudentNotification: async ({
     title,
     message,
     category = 'announcement',
@@ -1910,36 +2125,46 @@ export const sharedDatabase = {
     priority = 'normal',
     broadcastId = null
   }) => {
+    const singleRecipient = Array.isArray(targetStudentIds) && targetStudentIds.length === 1
+      ? targetStudentIds[0]
+      : null;
+    let serverResult = null;
     try {
-      const saved = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
-      const list = saved !== null ? JSON.parse(saved) : [...INITIAL_NOTIFICATIONS];
-      const newNotif = {
-        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      serverResult = await sendNotification({
         title,
         message,
         category,
-        timestamp: 'Just now',
-        unread: true,
-        priority,
-        sender: educatorName,
-        targetStudentIds,
-        targetStudentNames,
-        broadcastId: broadcastId || null,
-        date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
-      };
-      const updated = [newNotif, ...list];
-      localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify(updated));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updated })
-        );
-        window.dispatchEvent(new Event('storage'));
-      }
-      return newNotif;
-    } catch (e) {
-      console.warn('Failed to send student notification:', e);
-      return null;
+        recipientType: 'student',
+        recipientId: singleRecipient
+      });
+    } catch (err) {
+      console.warn('Failed to send student notification to backend:', err.message);
     }
+    const notifItem = {
+      id: serverResult?.id || `sent-${Date.now()}`,
+      title: `Sent: ${title}`,
+      message,
+      category: 'sent',
+      sender: educatorName,
+      priority,
+      broadcastId,
+      unread: false,
+      read: true,
+      isRead: true,
+      recipientCount: targetStudentNames.length || 1,
+      targetStudentIds,
+      targetStudentNames,
+      timestamp: 'Just now',
+      date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    };
+    const current = getCachedNotifications();
+    const updated = [notifItem, ...current];
+    persistNotifications(updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: updated }));
+      window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updated }));
+    }
+    return notifItem;
   },
 
   // Admin / System sends notification to educators
@@ -1952,88 +2177,32 @@ export const sharedDatabase = {
     priority = 'normal',
     broadcastId = null
   }) => {
-    try {
-      const notifKey = STORAGE_KEY_EDUCATOR_NOTIFICATIONS;
-      const rawNotifs = localStorage.getItem(notifKey);
-      const currentNotifs = rawNotifs !== null ? JSON.parse(rawNotifs) : [];
-      const newNotif = {
-        id: `ed-notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        title,
-        message,
-        category,
-        type,
-        time: 'Just now',
-        timestamp: 'Just now',
-        unread: true,
-        read: false,
-        sender,
-        priority,
-        broadcastId: broadcastId || null,
-        date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
-      };
-      const updatedNotifs = [newNotif, ...currentNotifs];
-      localStorage.setItem(notifKey, JSON.stringify(updatedNotifs));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updatedNotifs })
-        );
-        window.dispatchEvent(new Event('storage'));
-      }
-      return newNotif;
-    } catch (err) {
-      console.warn('Failed to dispatch educator notification:', err);
-      return null;
-    }
+    sendNotification({
+      title,
+      message,
+      category,
+      recipientType: 'educator'
+    }).catch((err) => console.warn('Failed to send educator notification:', err.message));
+    return {
+      id: `pending-${Date.now()}`,
+      title,
+      message,
+      category,
+      type,
+      sender,
+      priority,
+      broadcastId,
+      unread: true,
+      read: false,
+      timestamp: new Date().toISOString(),
+      time: 'Just now',
+      date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+    };
   },
 
   // ==========================================
   // EDUCATOR MANAGEMENT
   // ==========================================
-  getEducators: () => {
-    const all = loadStoredEducators();
-    return all.filter((e) => e.isActive !== false);
-  },
-
-  getAllEducators: () => {
-    return loadStoredEducators();
-  },
-
-  getEducatorById: (id) => {
-    if (!id) return null;
-    const all = loadStoredEducators();
-    return all.find((e) => e.id === id || e.educatorId === id) || null;
-  },
-
-  getEducatorByEmail: (email) => {
-    if (!email) return null;
-    const lower = email.trim().toLowerCase();
-    const all = loadStoredEducators();
-    const found = all.find((e) => e.email && e.email.toLowerCase() === lower);
-    if (found) return found;
-    if (lower === 'educator@learnsmart.com' || lower === 'educator') {
-      return INITIAL_SEED_EDUCATORS[0];
-    }
-    return null;
-  },
-
-  getEducatorByUsername: (identifier) => {
-    if (!identifier) return null;
-    const lower = identifier.trim().toLowerCase();
-    const all = loadStoredEducators();
-    const found = all.find(
-      (e) =>
-        (e.email && e.email.toLowerCase() === lower) ||
-        (e.name && e.name.toLowerCase() === lower) ||
-        (e.educatorId && e.educatorId.toLowerCase() === lower) ||
-        ((e.email || '').split('@')[0].toLowerCase() === lower.split('@')[0])
-    );
-    if (found) return found;
-    if (lower === 'educator@learnsmart.com' || lower === 'educator') {
-      return INITIAL_SEED_EDUCATORS[0];
-    }
-    return null;
-  },
-
   getAdminUser: (identifier) => {
     if (!identifier) return null;
     const lower = identifier.trim().toLowerCase();
@@ -2087,74 +2256,8 @@ export const sharedDatabase = {
     return adminObj;
   },
 
-  addEducator: ({
-    name = '',
-    email = '',
-    password = '',
-    department = 'Computer Science',
-    institution = 'LearnSmart University',
-    educatorId = ''
-  }) => {
-    const all = loadStoredEducators();
-    const fullName = name.trim() || 'New Faculty';
-    const cleanEmail = email.trim().toLowerCase();
-
-    const newEducator = {
-      id: `edu-${Date.now()}`,
-      name: fullName,
-      email: cleanEmail,
-      password: password || '',
-      educatorId: educatorId.trim() || `FAC-CS-2025-${all.length + 101}`,
-      department: department.trim() || 'Computer Science',
-      institution: institution.trim() || 'LearnSmart University',
-      role: 'Educator',
-      status: 'Active',
-      statusVariant: 'success',
-      joinedDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-      lastActive: 'Just now',
-      avatarInitials: getInitials(fullName),
-      avatarImage: null,
-      quizzesCreated: 0,
-      activeQuizzes: 0,
-      totalStudents: 0,
-      avgPerformance: 0,
-      rating: 5.0,
-      isActive: true
-    };
-
-    all.unshift(newEducator);
-    persistEducators(all);
-
-    sharedDatabase.sendAdminNotification({
-      title: 'New Educator Enrolled',
-      message: `${fullName} was onboarded to the ${department} faculty.`,
-      category: 'user',
-      type: 'info'
-    });
-
-    return newEducator;
-  },
-
-  updateEducator: (id, updates) => {
-    const all = loadStoredEducators();
-    const idx = all.findIndex((e) => e.id === id || e.educatorId === id);
-    if (idx !== -1) {
-      all[idx] = { ...all[idx], ...updates };
-      persistEducators(all);
-      return all[idx];
-    }
-    return null;
-  },
-
-  removeEducator: (id) => {
-    const all = loadStoredEducators();
-    const updated = all.filter((e) => e.id !== id && e.educatorId !== id);
-    persistEducators(updated);
-    return updated;
-  },
-
-  // Resolve registered email from username, name, or email string
   resolveUserEmail: (identifier) => {
+
     if (!identifier || typeof identifier !== 'string') return null;
     const clean = identifier.trim().toLowerCase();
     if (clean.includes('@') && clean.includes('.')) {
@@ -2172,49 +2275,38 @@ export const sharedDatabase = {
     return null;
   },
 
-  // Update password across student, educator, or admin records
-  updateUserPassword: (email, newPassword) => {
-    if (!email || !newPassword) return false;
-    const cleanEmail = email.trim().toLowerCase();
-    let updated = false;
+  // Update the password of any account. The password is stored hashed in
+  // MySQL, the local cache never keeps a plain text copy.
+  updateUserPassword: async (email, newPassword) => {
+    if (!email || !newPassword) {
+      throw new Error('An account and a new password are required.');
+    }
 
-    // Check students
+    const cleanEmail = String(email).trim().toLowerCase();
+    const result = await apiPut(`/api/users/${encodeURIComponent(cleanEmail)}/password`, {
+      newPassword
+    });
+
+    // The local cache only stores a marker so the UI can reflect the change.
     const students = loadStoredStudents();
     const studentIdx = students.findIndex(
       (s) => s.email && s.email.toLowerCase() === cleanEmail
     );
     if (studentIdx !== -1) {
-      students[studentIdx].password = newPassword;
+      students[studentIdx].password = '••••••••';
       persistStudents(students);
-      updated = true;
     }
 
-    // Check educators
     const educators = loadStoredEducators();
     const eduIdx = educators.findIndex(
       (e) => e.email && e.email.toLowerCase() === cleanEmail
     );
     if (eduIdx !== -1) {
-      educators[eduIdx].password = newPassword;
+      educators[eduIdx].password = '••••••••';
       persistEducators(educators);
-      updated = true;
     }
 
-    // Check admin
-    const STORAGE_KEY_ADMIN = 'learnsmart_shared_admin';
-    try {
-      const rawAdmin = localStorage.getItem(STORAGE_KEY_ADMIN);
-      if (rawAdmin) {
-        const adminObj = JSON.parse(rawAdmin);
-        if (adminObj && adminObj.email && adminObj.email.toLowerCase() === cleanEmail) {
-          adminObj.password = newPassword;
-          localStorage.setItem(STORAGE_KEY_ADMIN, JSON.stringify(adminObj));
-          updated = true;
-        }
-      }
-    } catch { }
-
-    return updated;
+    return result;
   },
 
 
@@ -2336,50 +2428,23 @@ export const sharedDatabase = {
     // Sync with backend MySQL API immediately
     (async () => {
       try {
-        const headers = await getAuthHeaders();
-        const res = await fetch('/api/quizzes', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...headers
-          },
-          body: JSON.stringify(newQuiz)
-        });
-        if (res.ok) {
-          const saved = await res.json();
-          if (saved && saved.id) {
-            const fresh = loadStoredQuizzes();
-            const fIdx = fresh.findIndex((q) => String(q.id).trim() === String(saved.id).trim());
-            if (fIdx !== -1) {
-              fresh[fIdx] = { ...fresh[fIdx], ...saved };
-              persistQuizzes(fresh);
-            }
+        const saved = await apiPost('/api/quizzes', newQuiz);
+        if (saved && saved.id) {
+          const fresh = loadStoredQuizzes();
+          const fIdx = fresh.findIndex((q) => String(q.id).trim() === String(saved.id).trim());
+          if (fIdx !== -1) {
+            fresh[fIdx] = { ...fresh[fIdx], ...saved };
+            persistQuizzes(fresh);
           }
-        } else {
-          console.error('MySQL save quiz failed with status:', res.status);
         }
+        await syncQuizzesFromBackend(true);
       } catch (e) {
-        console.error('Network error saving quiz to MySQL:', e);
+        console.error('MySQL save quiz failed:', e.message);
       }
     })();
 
-    sharedDatabase.sendAdminNotification({
-      title: isDraft ? 'Quiz Draft Created' : 'New Quiz Published',
-      message: `"${newQuiz.title}" ${isDraft ? 'saved as draft' : 'published'} under ${newQuiz.category}.`,
-      category: 'quiz',
-      type: 'info'
-    });
-
-    // Notify students ONLY if published
-    if (isPub) {
-      sharedDatabase.sendStudentNotification({
-        title: `New Quiz: ${newQuiz.title}`,
-        message: `A new ${newQuiz.difficulty} assessment in ${newQuiz.category} has been published by your instructor. Test your knowledge now!`,
-        category: 'quiz',
-        type: 'info'
-      });
-    }
-
+    // Admins, educators and students are notified by the backend once the
+    // quiz row is committed to MySQL, so no duplicate local notification here.
     return newQuiz;
   },
 
@@ -2393,17 +2458,10 @@ export const sharedDatabase = {
       // Sync with backend MySQL API immediately
       (async () => {
         try {
-          const headers = await getAuthHeaders();
-          await fetch(`/api/quizzes/${encodeURIComponent(id)}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              ...headers
-            },
-            body: JSON.stringify(all[idx])
-          });
+          await apiPut(`/api/quizzes/${encodeURIComponent(id)}`, all[idx]);
+          await syncQuizzesFromBackend(true);
         } catch (e) {
-          console.error('Network error updating quiz in MySQL:', e);
+          console.error('Network error updating quiz in MySQL:', e.message);
         }
       })();
 
@@ -2420,13 +2478,10 @@ export const sharedDatabase = {
     // Sync deletion to backend MySQL API
     (async () => {
       try {
-        const headers = await getAuthHeaders();
-        await fetch(`/api/quizzes/${encodeURIComponent(id)}`, {
-          method: 'DELETE',
-          headers
-        });
+        await apiDelete(`/api/quizzes/${encodeURIComponent(id)}`);
+        await syncQuizzesFromBackend(true);
       } catch (e) {
-        console.error('Network error deleting quiz from MySQL:', e);
+        console.error('Network error deleting quiz from MySQL:', e.message);
       }
     })();
 
@@ -2446,17 +2501,10 @@ export const sharedDatabase = {
       // Sync updated status to backend MySQL API
       (async () => {
         try {
-          const headers = await getAuthHeaders();
-          await fetch(`/api/quizzes/${encodeURIComponent(id)}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              ...headers
-            },
-            body: JSON.stringify(all[idx])
-          });
+          await apiPut(`/api/quizzes/${encodeURIComponent(id)}`, all[idx]);
+          await syncQuizzesFromBackend(true);
         } catch (e) {
-          console.error('Network error toggling quiz status in MySQL:', e);
+          console.error('Network error toggling quiz status in MySQL:', e.message);
         }
       })();
 
@@ -2469,9 +2517,6 @@ export const sharedDatabase = {
   // SUBMISSIONS
   // ==========================================
   getSubmissions: () => {
-    // Trigger asynchronous live synchronization with MySQL
-    syncSubmissionsFromBackend().catch(() => { });
-
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
       if (saved !== null) {
@@ -2541,18 +2586,31 @@ export const sharedDatabase = {
       raw: e
     }));
 
+    // The administrator account comes from the signed in session, which is
+    // itself loaded from MySQL.
+    const adminProfile = (() => {
+      try {
+        const raw = localStorage.getItem('learnsmart_admin_profile') || localStorage.getItem('learnsmart_admin');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.email) return parsed;
+        }
+      } catch { }
+      return null;
+    })();
+
     const admin = {
-      id: 'admin-001',
-      name: 'System Admin',
-      email: 'admin@learnsmart.edu',
+      id: adminProfile?.id || adminProfile?.uid || 'admin-001',
+      name: adminProfile?.name || adminProfile?.fullName || 'System Admin',
+      email: adminProfile?.email || 'admin@learnsmart.edu',
       role: 'Admin',
       userType: 'admin',
       status: 'Active',
       statusVariant: 'success',
       joinedDate: '01 Jan 2025',
       lastActive: 'Now',
-      avatarInitials: 'A',
-      department: 'Platform Operations',
+      avatarInitials: getInitials(adminProfile?.fullName || adminProfile?.name || 'System Admin'),
+      department: adminProfile?.department || 'Platform Operations',
       isActive: true
     };
 
@@ -2636,124 +2694,83 @@ export const sharedDatabase = {
   },
 
   // ==========================================
-  // SYSTEM OVERVIEW & METRICS (MATCHES ATTACHED IMAGE)
+  // SYSTEM OVERVIEW & METRICS - computed by the backend from MySQL
   // ==========================================
   getSystemStats: () => {
+    const cached = getCachedAnalytics();
+    const overview = cached.overview;
+    const analytics = cached.analytics;
     const students = sharedDatabase.getStudents();
     const educators = sharedDatabase.getEducators();
     const quizzes = sharedDatabase.getQuizzes();
     const submissions = sharedDatabase.getSubmissions();
 
-    const liveTotalUsers = students.length + educators.length + 1;
-    const liveTotalQuizzes = quizzes.length;
-    const liveActiveQuizzes = quizzes.filter((q) => {
-      const s = (q.status || '').toLowerCase().trim();
-      return s === 'active' || s === 'published' || !s;
-    }).length;
-    const liveCompleted = submissions.length;
-
-    // Real Platform Average Score
-    let avgScore = 0;
-    if (submissions.length > 0) {
-      const sum = submissions.reduce((acc, sub) => {
-        const sc = typeof sub.score === 'number' ? sub.score : parseFloat(String(sub.score).replace('%', '')) || 0;
-        return acc + sc;
-      }, 0);
-      avgScore = Math.round((sum / submissions.length) * 10) / 10;
-    } else {
-      const validScores = students.filter((s) => (s.avgScore || 0) > 0);
-      if (validScores.length > 0) {
-        avgScore = Math.round((validScores.reduce((acc, s) => acc + s.avgScore, 0) / validScores.length) * 10) / 10;
-      }
+    if (overview && typeof overview === 'object') {
+      return {
+        totalUsers: overview.totalUsers ?? (students.length + educators.length),
+        totalQuizzes: overview.totalQuizzes ?? quizzes.length,
+        activeQuizzes: overview.activeQuizzes ?? quizzes.length,
+        draftQuizzes: overview.draftQuizzes ?? 0,
+        systemHealth: overview.systemHealth || 'Online',
+        totalStudents: overview.totalStudents ?? students.length,
+        totalEducators: overview.totalEducators ?? educators.length,
+        completedQuizzes: overview.completedQuizzes ?? submissions.length,
+        totalSubmissions: overview.totalSubmissions ?? submissions.length,
+        avgScore: overview.avgScore || '0%',
+        passRate: overview.passRate || '0%',
+        completionRate: overview.completionRate || '0%',
+        serverUptime: overview.serverUptime || '99.98%',
+        apiLatency: overview.apiLatency || '42ms'
+      };
     }
 
-    // Real Pass Rate (Benchmark: >= 70%)
-    let passRate = '0%';
-    if (submissions.length > 0) {
-      const passed = submissions.filter((sub) => {
-        const sc = typeof sub.score === 'number' ? sub.score : parseFloat(String(sub.score).replace('%', '')) || 0;
-        return sc >= 70;
-      }).length;
-      passRate = `${Math.round((passed / submissions.length) * 100)}%`;
-    }
-
-    // Real Completion Rate
-    let completionRate = '0%';
-    if (liveCompleted > 0 && liveActiveQuizzes > 0 && students.length > 0) {
-      const pct = Math.min(100, Math.round((liveCompleted / (students.length * liveActiveQuizzes)) * 100));
-      completionRate = `${pct}%`;
-    } else if (liveCompleted > 0) {
-      completionRate = '100%';
-    }
-
+    // Fallback for the moment before the first sync finished.
     return {
-      totalUsers: liveTotalUsers,
-      totalQuizzes: liveTotalQuizzes,
-      activeQuizzes: liveActiveQuizzes,
+      totalUsers: students.length + educators.length,
+      totalQuizzes: quizzes.length,
+      activeQuizzes: quizzes.length,
+      draftQuizzes: 0,
       systemHealth: 'Online',
       totalStudents: students.length,
       totalEducators: educators.length,
-      completedQuizzes: liveCompleted,
-      avgScore: `${avgScore}%`,
-      passRate,
-      completionRate,
+      completedQuizzes: submissions.length,
+      totalSubmissions: submissions.length,
+      avgScore: '0%',
+      passRate: '0%',
+      completionRate: '0%',
       serverUptime: '99.98%',
       apiLatency: '42ms'
     };
   },
 
-  // User Growth Chart Data (Area/Line graph matching attached image)
+  // Full role scoped analytics payload (MySQL)
+  getAnalytics: () => getCachedAnalytics().analytics,
+
+  // User Growth Chart Data - real growth from users.created_at in MySQL
   getUserGrowthData: (timeframe = '6 Months') => {
+    const cached = getCachedAnalytics();
+    if (Array.isArray(cached.growth) && cached.growth.length > 0) {
+      return cached.growth;
+    }
     const students = sharedDatabase.getStudents();
     const educators = sharedDatabase.getEducators();
-    const totalUsers = students.length + educators.length + 1;
-
-    switch (timeframe) {
-      case '7 Days':
-        return [
-          { label: 'Mon', count: totalUsers },
-          { label: 'Tue', count: totalUsers },
-          { label: 'Wed', count: totalUsers },
-          { label: 'Thu', count: totalUsers },
-          { label: 'Fri', count: totalUsers },
-          { label: 'Sat', count: totalUsers },
-          { label: 'Sun', count: totalUsers }
-        ];
-      case '30 Days':
-        return [
-          { label: 'Week 1', count: totalUsers },
-          { label: 'Week 2', count: totalUsers },
-          { label: 'Week 3', count: totalUsers },
-          { label: 'Week 4', count: totalUsers }
-        ];
-      case '3 Months':
-        return [
-          { label: 'Month 1', count: totalUsers },
-          { label: 'Month 2', count: totalUsers },
-          { label: 'Month 3', count: totalUsers }
-        ];
-      case '1 Year':
-        return [
-          { label: 'Q1', count: totalUsers },
-          { label: 'Q2', count: totalUsers },
-          { label: 'Q3', count: totalUsers },
-          { label: 'Q4', count: totalUsers }
-        ];
-      case '6 Months':
-      default:
-        return [
-          { label: 'Jan', count: totalUsers },
-          { label: 'Feb', count: totalUsers },
-          { label: 'Mar', count: totalUsers },
-          { label: 'Apr', count: totalUsers },
-          { label: 'May', count: totalUsers },
-          { label: 'Jun', count: totalUsers }
-        ];
-    }
+    const totalUsers = students.length + educators.length;
+    const labels = {
+      '7 Days': ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      '30 Days': ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+      '3 Months': ['Month 1', 'Month 2', 'Month 3'],
+      '1 Year': ['Q1', 'Q2', 'Q3', 'Q4'],
+      '6 Months': ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
+    };
+    return (labels[timeframe] || labels['6 Months']).map((label) => ({ label, count: totalUsers }));
   },
 
-  // Quiz Category Distribution (Donut/Pie Chart matching real quizzes)
+  // Quiz Category Distribution - counted by the backend over the visible quizzes
   getQuizCategoryDistribution: () => {
+    const cached = getCachedAnalytics();
+    if (Array.isArray(cached.categories) && cached.categories.length > 0) {
+      return cached.categories;
+    }
     const quizzes = sharedDatabase.getQuizzes();
     if (!Array.isArray(quizzes) || quizzes.length === 0) return [];
     const counts = {};
@@ -2775,23 +2792,17 @@ export const sharedDatabase = {
     return all.slice(0, limit);
   },
 
-  // Admin Notifications
-  getAdminNotifications: () => {
-    return loadAdminNotifications();
+  // Admin Notifications - stored in MySQL and shared with every dashboard
+  getAdminNotifications: () => getCachedNotifications(),
+
+  markAdminNotificationRead: async (id) => {
+    await markNotificationRead(id);
+    return getCachedNotifications();
   },
 
-  markAdminNotificationRead: (id) => {
-    const list = loadAdminNotifications();
-    const updated = list.map((n) => (n.id === id ? { ...n, unread: false } : n));
-    persistAdminNotifications(updated);
-    return updated;
-  },
-
-  markAllAdminNotificationsRead: () => {
-    const list = loadAdminNotifications();
-    const updated = list.map((n) => ({ ...n, unread: false }));
-    persistAdminNotifications(updated);
-    return updated;
+  markAllAdminNotificationsRead: async () => {
+    await markAllNotificationsRead();
+    return getCachedNotifications();
   },
 
   sendAdminNotification: ({
@@ -2803,9 +2814,15 @@ export const sharedDatabase = {
     rawTitle = null,
     targetAudience = null
   }) => {
-    const list = loadAdminNotifications();
-    const newNotif = {
-      id: `admin-notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    const recipientType = targetAudience || 'all';
+    sendNotification({
+      title: rawTitle || title,
+      message,
+      category,
+      recipientType
+    }).catch((err) => console.warn('Failed to send admin notification:', err.message));
+    return {
+      id: `pending-${Date.now()}`,
       title,
       message,
       category,
@@ -2814,224 +2831,51 @@ export const sharedDatabase = {
       unread: true,
       broadcastId: broadcastId || null,
       rawTitle: rawTitle || title,
-      targetAudience: targetAudience || null
+      targetAudience
     };
-    const updated = [newNotif, ...list];
-    persistAdminNotifications(updated);
-    return newNotif;
   },
 
-  // Synchronize notification deletion across Student and Educator dashboards
+  // Notifications live in MySQL, so a delete on one dashboard is reflected
+  // everywhere automatically.
   syncNotificationDeletionAcrossDashboards: (targetNotif) => {
-    if (!targetNotif) return;
-    const bId = targetNotif.broadcastId;
-    const cleanMsg = (targetNotif.message || '').trim().toLowerCase();
-    const rawTitle = (targetNotif.rawTitle || '').trim().toLowerCase();
-    const fullTitle = (targetNotif.title || '').trim().toLowerCase();
-    const strippedTitle = (targetNotif.title || '').replace(/^sent to [^:]+:\s*/i, '').trim().toLowerCase();
-
-    // 1. Delete matching from Student notifications
-    try {
-      const studentRaw = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
-      if (studentRaw) {
-        const studentList = JSON.parse(studentRaw);
-        if (Array.isArray(studentList)) {
-          const updatedStudents = studentList.filter((sn) => {
-            if (sn.id && sn.id === targetNotif.id) return false;
-            if (bId && sn.broadcastId && sn.broadcastId === bId) return false;
-            const snMsg = (sn.message || '').trim().toLowerCase();
-            const snTitle = (sn.title || '').trim().toLowerCase();
-            if (cleanMsg && snMsg === cleanMsg) {
-              if (rawTitle && snTitle === rawTitle) return false;
-              if (strippedTitle && snTitle === strippedTitle) return false;
-              if (fullTitle && snTitle === fullTitle) return false;
-              if (fullTitle.includes(snTitle) || snTitle.includes(strippedTitle)) return false;
-              const sender = (sn.sender || '').trim().toLowerCase();
-              if (sender === 'administrator' || sender === 'admin') return false;
-            }
-            return true;
-          });
-
-          if (updatedStudents.length !== studentList.length) {
-            localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify(updatedStudents));
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(
-                new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updatedStudents })
-              );
-              window.dispatchEvent(new Event('storage'));
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to sync student notification deletion:', err);
-    }
-
-    // 2. Delete matching from Educator notifications
-    try {
-      const edRaw = localStorage.getItem(STORAGE_KEY_EDUCATOR_NOTIFICATIONS);
-      if (edRaw) {
-        const edList = JSON.parse(edRaw);
-        if (Array.isArray(edList)) {
-          const updatedEducators = edList.filter((en) => {
-            if (en.id && en.id === targetNotif.id) return false;
-            if (bId && en.broadcastId && en.broadcastId === bId) return false;
-            const enMsg = (en.message || '').trim().toLowerCase();
-            const enTitle = (en.title || '').trim().toLowerCase();
-            if (cleanMsg && enMsg === cleanMsg) {
-              if (rawTitle && enTitle === rawTitle) return false;
-              if (strippedTitle && enTitle === strippedTitle) return false;
-              if (fullTitle && enTitle === fullTitle) return false;
-              if (fullTitle.includes(enTitle) || enTitle.includes(strippedTitle)) return false;
-              const sender = (en.sender || '').trim().toLowerCase();
-              if (sender === 'administrator' || sender === 'admin') return false;
-            }
-            return true;
-          });
-
-          if (updatedEducators.length !== edList.length) {
-            localStorage.setItem(STORAGE_KEY_EDUCATOR_NOTIFICATIONS, JSON.stringify(updatedEducators));
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(
-                new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updatedEducators })
-              );
-              window.dispatchEvent(new Event('storage'));
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to sync educator notification deletion:', err);
-    }
+    if (!targetNotif || !targetNotif.id) return;
+    deleteNotification(targetNotif.id);
   },
 
-  deleteAdminNotification: (idOrNotif) => {
-    const list = loadAdminNotifications();
+  deleteAdminNotification: async (idOrNotif) => {
     const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
-    const targetNotif = typeof idOrNotif === 'object' && idOrNotif !== null
-      ? idOrNotif
-      : list.find((n) => n.id === targetId);
-
-    const updatedAdmin = list.filter((n) => n.id !== targetId);
-    persistAdminNotifications(updatedAdmin);
-
-    if (targetNotif) {
-      sharedDatabase.syncNotificationDeletionAcrossDashboards(targetNotif);
-    }
-
-    return updatedAdmin;
+    if (targetId) await deleteNotification(targetId);
+    return getCachedNotifications();
   },
 
-  clearAllAdminNotifications: () => {
-    const list = loadAdminNotifications();
-    list.forEach((notif) => {
-      sharedDatabase.syncNotificationDeletionAcrossDashboards(notif);
-    });
-    persistAdminNotifications([]);
+  clearAllAdminNotifications: async () => {
+    const current = getCachedNotifications();
+    for (const item of current) {
+      // eslint-disable-next-line no-await-in-loop
+      await deleteNotification(item.id);
+    }
+    return getCachedNotifications();
+  },
+
+  // Educator Notification Deletion (shared with the other dashboards)
+  deleteEducatorNotification: async (idOrNotif) => {
+    const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
+    if (targetId) await deleteNotification(targetId);
+    return getCachedNotifications();
+  },
+
+  clearAllEducatorNotifications: async () => {
+    const current = getCachedNotifications();
+    for (const item of current) {
+      // eslint-disable-next-line no-await-in-loop
+      await deleteNotification(item.id);
+    }
+    persistNotifications([]);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: [] }));
+      window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: [] }));
+    }
     return [];
-  },
-
-  // Educator Notification Deletion (with reflection to Student Dashboard)
-  deleteEducatorNotification: (idOrNotif) => {
-    try {
-      const notifKey = STORAGE_KEY_EDUCATOR_NOTIFICATIONS;
-      const rawNotifs = localStorage.getItem(notifKey);
-      const list = rawNotifs !== null ? JSON.parse(rawNotifs) : [];
-
-      const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
-      const targetNotif = typeof idOrNotif === 'object' && idOrNotif !== null
-        ? idOrNotif
-        : list.find((n) => n.id === targetId);
-
-      const updatedEducators = list.filter((n) => n.id !== targetId);
-      localStorage.setItem(notifKey, JSON.stringify(updatedEducators));
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updatedEducators })
-        );
-        window.dispatchEvent(new Event('storage'));
-      }
-
-      // If this notification was sent to students, remove it from Student notifications
-      if (targetNotif) {
-        const bId = targetNotif.broadcastId;
-        const rawTitle = (targetNotif.rawTitle || (targetNotif.title || '').replace(/^sent:\s*/i, '')).trim().toLowerCase();
-
-        // Extract raw message if it was formatted like: Delivered to All Students: "..."
-        let rawMsg = targetNotif.rawMessage;
-        if (!rawMsg && targetNotif.message) {
-          const matchQuote = targetNotif.message.match(/"([^"]+)"/);
-          rawMsg = matchQuote ? matchQuote[1] : targetNotif.message;
-        }
-        const cleanMsg = (rawMsg || '').trim().toLowerCase();
-
-        try {
-          const studentRaw = localStorage.getItem(STORAGE_KEY_STUDENT_NOTIFICATIONS);
-          if (studentRaw) {
-            const studentList = JSON.parse(studentRaw);
-            if (Array.isArray(studentList)) {
-              const updatedStudents = studentList.filter((sn) => {
-                if (sn.id && sn.id === targetNotif.id) return false;
-                if (bId && sn.broadcastId && sn.broadcastId === bId) return false;
-
-                const snMsg = (sn.message || '').trim().toLowerCase();
-                const snTitle = (sn.title || '').trim().toLowerCase();
-
-                if (cleanMsg && (snMsg === cleanMsg || snMsg.includes(cleanMsg) || cleanMsg.includes(snMsg))) {
-                  if (rawTitle && (snTitle === rawTitle || snTitle.includes(rawTitle) || rawTitle.includes(snTitle))) {
-                    return false;
-                  }
-                  if (targetNotif.category === 'sent') return false;
-                }
-                return true;
-              });
-
-              if (updatedStudents.length !== studentList.length) {
-                localStorage.setItem(STORAGE_KEY_STUDENT_NOTIFICATIONS, JSON.stringify(updatedStudents));
-                if (typeof window !== 'undefined') {
-                  window.dispatchEvent(
-                    new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updatedStudents })
-                  );
-                  window.dispatchEvent(new Event('storage'));
-                }
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to sync student notification deletion from educator:', e);
-        }
-      }
-
-      return updatedEducators;
-    } catch (err) {
-      console.warn('Failed to delete educator notification:', err);
-      return [];
-    }
-  },
-
-  clearAllEducatorNotifications: () => {
-    try {
-      const notifKey = STORAGE_KEY_EDUCATOR_NOTIFICATIONS;
-      const rawNotifs = localStorage.getItem(notifKey);
-      const list = rawNotifs !== null ? JSON.parse(rawNotifs) : [];
-      list.forEach((n) => {
-        if (n.category === 'sent' || n.broadcastId) {
-          sharedDatabase.deleteEducatorNotification(n);
-        }
-      });
-      localStorage.setItem(notifKey, JSON.stringify([]));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: [] })
-        );
-        window.dispatchEvent(new Event('storage'));
-      }
-      return [];
-    } catch (err) {
-      console.warn('Failed to clear educator notifications:', err);
-      return [];
-    }
   },
 
   // Subscribe to Admin updates
@@ -3043,7 +2887,7 @@ export const sharedDatabase = {
         e.key === STORAGE_KEY_STUDENTS ||
         e.key === STORAGE_KEY_EDUCATORS ||
         e.key === STORAGE_KEY_QUIZZES ||
-        e.key === STORAGE_KEY_ADMIN_NOTIFICATIONS
+        e.key === STORAGE_KEY_NOTIFICATIONS
       ) {
         callback();
       }
@@ -3066,47 +2910,40 @@ export const sharedDatabase = {
   // ==========================================
   // QUIZ FEEDBACK MANAGEMENT
   // ==========================================
-  saveQuizFeedback: (feedbackData) => {
+  saveQuizFeedback: async (feedbackData) => {
+    const payload = {
+      quizId: feedbackData?.quizId || '',
+      quizTitle: feedbackData?.quizTitle || '',
+      studentName: feedbackData?.studentName || '',
+      studentEmail: feedbackData?.studentEmail || '',
+      clarityRating: Number(feedbackData?.clarityRating || 0),
+      difficultyRating: Number(feedbackData?.difficultyRating || 0),
+      educatorRating: Number(feedbackData?.educatorRating || 0),
+      comments: feedbackData?.comments || ''
+    };
+
     try {
-      const STORAGE_KEY_FEEDBACKS = 'learnsmart_quiz_feedbacks';
-      const existing = JSON.parse(localStorage.getItem(STORAGE_KEY_FEEDBACKS) || '[]');
+      // MySQL is the source of truth - the backend also notifies the educator.
+      const result = await apiPost('/api/feedback', payload);
       const newFeedback = {
-        id: `fb-${Date.now()}`,
+        id: result?.id || `fb-${Date.now()}`,
         timestamp: new Date().toISOString(),
         date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         ...feedbackData
       };
-      const updated = [newFeedback, ...existing];
-      localStorage.setItem(STORAGE_KEY_FEEDBACKS, JSON.stringify(updated));
 
-      // Push real-time notification to educator notifications
       try {
-        const notifKey = 'learnsmart_educator_notifications';
-        const rawNotifs = localStorage.getItem(notifKey);
-        const currentNotifs = rawNotifs ? JSON.parse(rawNotifs) : [];
-        const newNotif = {
-          id: `ed-notif-${Date.now()}`,
-          title: `Quiz Feedback: ${feedbackData.quizTitle || 'Assessment'}`,
-          message: `${feedbackData.studentName || 'Student'} rated "${feedbackData.quizTitle || 'Quiz'}" with ${feedbackData.clarityRating || 5}/5 stars: "${(feedbackData.comments || '').slice(0, 80)}..."`,
-          category: 'feedback',
-          type: 'feedback',
-          time: 'Just now',
-          read: false,
-          sender: feedbackData.studentName || 'Student'
-        };
-        const updatedNotifs = [newNotif, ...currentNotifs];
-        localStorage.setItem(notifKey, JSON.stringify(updatedNotifs));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('storage'));
-        }
+        const STORAGE_KEY_FEEDBACKS = 'learnsmart_quiz_feedbacks';
+        const existing = JSON.parse(localStorage.getItem(STORAGE_KEY_FEEDBACKS) || '[]');
+        localStorage.setItem(STORAGE_KEY_FEEDBACKS, JSON.stringify([newFeedback, ...existing]));
       } catch (err) {
-        console.warn('Failed to dispatch educator notification for feedback:', err);
+        console.warn('Failed to cache quiz feedback:', err);
       }
 
       return newFeedback;
-    } catch (e) {
-      console.warn('Failed to save quiz feedback:', e);
+    } catch (err) {
+      console.warn('Failed to save quiz feedback to MySQL:', err?.message || err);
       return null;
     }
   },

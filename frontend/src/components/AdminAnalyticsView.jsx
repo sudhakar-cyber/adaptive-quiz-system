@@ -61,10 +61,10 @@ export const AdminAnalyticsView = ({
     };
   }, []);
 
-  const safeStudents = Array.isArray(students) && students.length > 0 ? students : (typeof sharedDatabase?.getStudents === 'function' ? sharedDatabase.getStudents() : []);
-  const safeEducators = Array.isArray(educators) && educators.length > 0 ? educators : (typeof sharedDatabase?.getEducators === 'function' ? sharedDatabase.getEducators() : []);
-  const safeQuizzes = Array.isArray(quizzes) && quizzes.length > 0 ? quizzes : (typeof sharedDatabase?.getQuizzes === 'function' ? sharedDatabase.getQuizzes() : []);
-  const safeSubmissions = Array.isArray(submissions) && submissions.length > 0 ? submissions : (typeof sharedDatabase?.getSubmissions === 'function' ? sharedDatabase.getSubmissions() : []);
+  const safeStudents = Array.isArray(students) ? students : (typeof sharedDatabase?.getStudents === 'function' ? sharedDatabase.getStudents() : []);
+  const safeEducators = Array.isArray(educators) ? educators : (typeof sharedDatabase?.getEducators === 'function' ? sharedDatabase.getEducators() : []);
+  const safeQuizzes = Array.isArray(quizzes) ? quizzes : (typeof sharedDatabase?.getQuizzes === 'function' ? sharedDatabase.getQuizzes() : []);
+  const safeSubmissions = Array.isArray(submissions) ? submissions : (typeof sharedDatabase?.getSubmissions === 'function' ? sharedDatabase.getSubmissions() : []);
 
   // 1. Exact Platform Average Score (Strict calculation from stored database attempts)
   const platformAvgScore = useMemo(() => {

@@ -13,6 +13,10 @@ from app.routes.auth_routes import router as auth_router
 from app.routes.quiz_routes import router as quiz_router
 from app.routes.result_routes import router as result_router
 from app.routes.user_routes import router as user_router
+from app.routes.notification_routes import router as notification_router
+from app.routes.activity_routes import router as activity_router
+from app.routes.analytics_routes import router as analytics_router
+from app.routes.feedback_routes import router as feedback_router
 
 # Initialize SQL database
 init_db()
@@ -44,6 +48,10 @@ app.include_router(auth_router)
 app.include_router(quiz_router)
 app.include_router(result_router)
 app.include_router(user_router)
+app.include_router(notification_router)
+app.include_router(activity_router)
+app.include_router(analytics_router)
+app.include_router(feedback_router)
 
 @app.get("/api/health")
 def health():

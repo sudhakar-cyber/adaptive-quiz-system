@@ -23,17 +23,18 @@ import {
   BotIcon,
   SettingsIcon
 } from './Icons';
-import { INITIAL_NOTIFICATIONS, INITIAL_HISTORY } from '../data/quizData';
 import { QuizModal } from './QuizModal';
 import { TakeQuizView } from './TakeQuizView';
 import { AIChatBotView } from './AIChatBotView';
 import { ProgressView } from './ProgressView';
 import { LearningPathView } from './LearningPathView';
-import { NotificationsView, NotificationsDropdown } from './NotificationsView';
+import { NotificationsDropdown } from './NotificationsView';
+import { NotificationCenter, useServerNotifications } from './NotificationCenter';
 import { ProfileView, ProfileDropdownMenu } from './ProfileView';
 import { StudentSettingsView } from './StudentSettingsView';
 import { sharedDatabase } from '../services/sharedDatabase';
 import { auth, onAuthStateChanged } from '../config/firebase';
+import { PortalSwitcher } from './PortalSwitcher';
 
 export const Dashboard = ({ username = 'Student', onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -85,6 +86,60 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
   // Authenticated Firebase user state
   const [firebaseUser, setFirebaseUser] = useState(() => auth.currentUser);
+
+  // Anonymised class benchmark (average score + spread) from MySQL.
+  const [benchmark, setBenchmark] = useState(() => {
+    try {
+      return sharedDatabase.getStudentBenchmark?.() || null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Load the anonymised class benchmark (real average + spread from MySQL).
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyBenchmark = (data) => {
+      if (!cancelled) setBenchmark(data || null);
+    };
+
+    const readCached = () => {
+      try {
+        return sharedDatabase.getStudentBenchmark?.() || null;
+      } catch {
+        return null;
+      }
+    };
+
+    const loadBenchmark = () => {
+      try {
+        const request = sharedDatabase.syncStudentBenchmark?.();
+        if (!request || typeof request.then !== 'function') {
+          applyBenchmark(readCached());
+          return;
+        }
+        request
+          .then((data) => applyBenchmark(data || readCached()))
+          .catch(() => applyBenchmark(readCached()));
+      } catch {
+        applyBenchmark(readCached());
+      }
+    };
+
+    const handleBenchmarkUpdate = (e) => applyBenchmark(e.detail || readCached());
+    const handleSubmissionsUpdate = () => loadBenchmark();
+
+    loadBenchmark();
+    window.addEventListener('learnsmart_benchmark_updated', handleBenchmarkUpdate);
+    window.addEventListener('learnsmart_submissions_updated', handleSubmissionsUpdate);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('learnsmart_benchmark_updated', handleBenchmarkUpdate);
+      window.removeEventListener('learnsmart_submissions_updated', handleSubmissionsUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -214,14 +269,13 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     } catch {}
     return 0;
   });
-  const [notifications, setNotifications] = useState(() => {
-    try {
-      const saved = localStorage.getItem('learnsmart_student_notifications');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const {
+    notifications,
+    unreadCount: unreadNotifCount,
+    markAllRead: markAllNotificationsRead,
+    remove: dismissServerNotification
+  } = useServerNotifications();
+
   const [quizHistory, setQuizHistory] = useState(() => {
     try {
       const student = sharedDatabase.getStudentByUsername(username);
@@ -248,16 +302,41 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   // Synchronize student data in real-time when student metrics change
   useEffect(() => {
     const handleStudentSync = () => {
-      const profile = sharedDatabase.getStudentByUsername(currentUsername || username);
-      if (profile) {
-        if (typeof profile.quizzesCompleted === 'number' && profile.quizzesCompleted > 0) {
-          setTotalQuizzesTaken(profile.quizzesCompleted);
-        }
-        if (typeof profile.avgScore === 'number' && profile.avgScore > 0) {
-          setAverageScore(profile.avgScore);
-        }
+      // The performance of the signed-in student is derived from the attempts
+      // stored in MySQL.
+      const performance = sharedDatabase.getStudentPerformance();
+      if (performance.quizzesCompleted > 0) {
+        setTotalQuizzesTaken(performance.quizzesCompleted);
+        setAverageScore(performance.avgScore);
+        setCompletedQuizzes(performance.completedQuizIds);
+        setQuizHistory(
+          performance.submissions.map((s, idx) => {
+            const submittedAt = s.submittedAt || '';
+            const parsed = submittedAt ? Date.parse(submittedAt) : NaN;
+            const scoreValue = Number(s.scoreValue ?? 0);
+            return {
+              id: 10001 + idx,
+              quizId: s.quizId || null,
+              timestamp: Number.isNaN(parsed) ? Date.now() : parsed,
+              createdAt: submittedAt || new Date().toISOString(),
+              title: s.quizTitle || 'Quiz',
+              category: s.category || 'General',
+              score: scoreValue,
+              status:
+                s.status || (scoreValue >= 80 ? 'Mastered' : scoreValue >= 70 ? 'Passed' : 'Needs Review'),
+              date: s.date || 'Today'
+            };
+          })
+        );
       }
     };
+
+    const handleSubmissionsSync = () => {
+      handleStudentSync();
+    };
+
+    // Pull the personal attempts from MySQL.
+    sharedDatabase.syncSubmissionsFromBackend(true).then(() => handleStudentSync()).catch(() => {});
 
     const handleResetEvent = (e) => {
       const resetInfo = e?.detail;
@@ -287,28 +366,14 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
           console.warn(err);
         }
 
-        const resetNotif = {
-          id: Date.now(),
-          title: 'Quiz Progress Reset by Educator',
-          message: 'Your educator has reset your quiz attempts and scores. All quizzes are now unlocked for retaking!',
-          category: 'system',
-          timestamp: 'Just now',
-          unread: true
-        };
-        setNotifications((prev) => [resetNotif, ...prev]);
+        // The reset itself is persisted in MySQL by the backend, which also
+        // writes the matching notification for this student.
         showToast('🔄 Your educator has reset your quiz progress. All quizzes are unlocked!');
       }
     };
 
-    const handleNotificationSync = (e) => {
-      try {
-        const notifs = e?.detail || JSON.parse(localStorage.getItem('learnsmart_student_notifications') || '[]');
-        if (Array.isArray(notifs) && notifs.length > 0) {
-          setNotifications(notifs);
-        }
-      } catch (err) {
-        console.warn('Failed to sync student notifications:', err);
-      }
+    const handleNotificationSync = () => {
+      // The shared notification cache is refreshed by useServerNotifications.
     };
 
     const handleStorageChange = (e) => {
@@ -329,6 +394,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     const unsubscribe = sharedDatabase.subscribe(handleStudentSync);
     window.addEventListener('learnsmart_student_reset', handleResetEvent);
     window.addEventListener('learnsmart_student_notifications_updated', handleNotificationSync);
+    window.addEventListener('learnsmart_submissions_updated', handleSubmissionsSync);
     window.addEventListener('storage', handleStorageChange);
 
     // Run initial sync check
@@ -338,6 +404,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       unsubscribe();
       window.removeEventListener('learnsmart_student_reset', handleResetEvent);
       window.removeEventListener('learnsmart_student_notifications_updated', handleNotificationSync);
+      window.removeEventListener('learnsmart_submissions_updated', handleSubmissionsSync);
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [currentUsername, username]);
@@ -469,24 +536,16 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     return 'SA';
   })();
 
-  const unreadNotifCount = notifications.filter((n) => n.unread).length;
-
   const isZeroQuizzes = totalQuizzesTaken === 0 && quizHistory.length === 0;
 
-  // Real-time cohort benchmark average
+  // Real class benchmark average from MySQL (anonymised, computed by the backend).
   const cohortAverage = React.useMemo(() => {
-    try {
-      const students = sharedDatabase.getStudents();
-      if (students && students.length > 0) {
-        const valid = students.filter((s) => (s.avgScore || 0) > 0);
-        if (valid.length > 0) {
-          const sum = valid.reduce((acc, s) => acc + (s.avgScore || 0), 0);
-          return Math.round(sum / valid.length);
-        }
-      }
-    } catch {}
-    return 70;
-  }, []);
+    const mean = Number(benchmark?.meanScore);
+    return Number.isFinite(mean) && mean > 0 ? Math.round(mean * 10) / 10 : null;
+  }, [benchmark]);
+
+  // The benchmark only exists once there are real attempts to average.
+  const hasCohortAverage = cohortAverage !== null;
 
   // Parse quiz attempt dates and scores robustly
   const parseAttempt = React.useCallback((item, index = 0) => {
@@ -533,16 +592,8 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       return days.map((day) => ({ day, score: 0, avg: 0 }));
     }
 
-    const baseAvg = cohortAverage || 70;
-    const dayClassAvgs = [
-      Math.max(20, baseAvg - 6),
-      Math.max(20, baseAvg - 4),
-      Math.max(20, baseAvg - 2),
-      baseAvg,
-      Math.min(95, baseAvg + 1),
-      Math.min(95, baseAvg + 2),
-      Math.min(95, baseAvg + 3)
-    ];
+    // The class benchmark is a single real figure - the measured class average.
+    const dayClassAvgs = days.map(() => (hasCohortAverage ? cohortAverage : 0));
 
     const attempts = [...quizHistory]
       .map((item, idx) => parseAttempt(item, idx))
@@ -591,7 +642,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       const idx = Math.min(allScores.length - 1, Math.round((i / 6) * (allScores.length - 1)));
       return { day, score: allScores[idx], avg: dayClassAvgs[i] };
     });
-  }, [isZeroQuizzes, quizHistory, cohortAverage, parseAttempt]);
+  }, [isZeroQuizzes, quizHistory, cohortAverage, hasCohortAverage, parseAttempt]);
 
   // Dynamically tracked Month performance data (W1 to W4)
   const monthPerformanceData = React.useMemo(() => {
@@ -600,13 +651,8 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       return weeks.map((day) => ({ day, score: 0, avg: 0 }));
     }
 
-    const baseAvg = cohortAverage || 70;
-    const weekClassAvgs = [
-      Math.max(20, baseAvg - 5),
-      Math.max(20, baseAvg - 2),
-      Math.min(95, baseAvg + 1),
-      Math.min(95, baseAvg + 3)
-    ];
+    // The class benchmark is a single real figure - the measured class average.
+    const weekClassAvgs = weeks.map(() => (hasCohortAverage ? cohortAverage : 0));
 
     const attempts = [...quizHistory]
       .map((item, idx) => parseAttempt(item, idx))
@@ -665,7 +711,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
         avg: weekClassAvgs[i]
       };
     });
-  }, [isZeroQuizzes, quizHistory, cohortAverage, parseAttempt]);
+  }, [isZeroQuizzes, quizHistory, cohortAverage, hasCohortAverage, parseAttempt]);
 
   const activePerformanceData =
     performanceTimeframe === 'week' ? weekPerformanceData : monthPerformanceData;
@@ -695,99 +741,90 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     };
   }, [isZeroQuizzes, quizHistory, activePerformanceData]);
 
-  const SUBJECT_CONFIGS = [
-    {
-      name: 'Mathematics',
-      color: '#00C48C',
-      bgLight: '#E6FAF0',
-      defaultScore: 90
-    },
-    {
-      name: 'Data Structures',
-      color: '#00D2D3',
-      bgLight: '#E0FAFA',
-      defaultScore: 82
-    },
-    {
-      name: 'Python',
-      color: '#FFB900',
-      bgLight: '#FFF8E6',
-      defaultScore: 76
-    },
-    {
-      name: 'Web Security',
-      color: '#FF7675',
-      bgLight: '#FFF0F0',
-      defaultScore: 68
-    },
-    {
-      name: 'Others',
-      color: '#6C5CE7',
-      bgLight: '#F3E8FF',
-      defaultScore: 60
-    }
+  // Colour palette for the subject-wise panels (assigned in a stable order).
+  const SUBJECT_PALETTE = [
+    { color: '#00C48C', bgLight: '#E6FAF0' },
+    { color: '#00D2D3', bgLight: '#E0FAFA' },
+    { color: '#FFB900', bgLight: '#FFF8E6' },
+    { color: '#FF7675', bgLight: '#FFF0F0' },
+    { color: '#6C5CE7', bgLight: '#F3E8FF' },
+    { color: '#1D68F2', bgLight: '#EAF1FE' },
+    { color: '#14B8A6', bgLight: '#E6F9F6' },
+    { color: '#F472B6', bgLight: '#FDECF5' }
   ];
 
-  const mapQuizToSubject = (quizTitle = '', category = '') => {
-    const t = (quizTitle || '').toLowerCase();
-    const c = (category || '').toLowerCase();
-    if (t.includes('python')) return 'Python';
-    if (c === 'dsa' || t.includes('data structure') || t.includes('algorithm') || t.includes('tree') || t.includes('dsa')) {
-      return 'Data Structures';
-    }
-    if (c === 'mathematics' || t.includes('math') || t.includes('discrete') || t.includes('logic')) {
-      return 'Mathematics';
-    }
-    if (c === 'cyber security' || t.includes('security') || t.includes('owasp') || t.includes('cyber')) {
-      return 'Web Security';
-    }
-    return 'Others';
+  // Friendly labels for the categories stored in MySQL.
+  const formatSubjectName = (category = '') => {
+    const raw = String(category || '').trim();
+    if (!raw) return 'General';
+    const labels = {
+      dsa: 'Data Structures & Algorithms',
+      'data structures': 'Data Structures & Algorithms',
+      cybersecurity: 'Cyber Security',
+      'cyber security': 'Cyber Security',
+      math: 'Mathematics'
+    };
+    return labels[raw.toLowerCase()] || raw;
   };
 
+  // Subjects are derived from what the student actually attempted plus the
+  // published quiz catalog - never from a hardcoded list.
   const subjectProgress = React.useMemo(() => {
-    if (isZeroQuizzes) {
-      return SUBJECT_CONFIGS.map((cfg) => ({
-        name: cfg.name,
-        score: 0,
-        color: cfg.color,
-        bgLight: cfg.bgLight,
-        attemptsCount: 0
-      }));
-    }
+    const attemptsBySubject = new Map();
 
-    const hasCustomQuizzes = quizHistory.some((h) => h.id > 10000);
-
-    return SUBJECT_CONFIGS.map((cfg) => {
-      const attempts = quizHistory.filter(
-        (item) => mapQuizToSubject(item.title, item.category) === cfg.name
-      );
-
-      let score = 0;
-      if (attempts.length > 0) {
-        const sum = attempts.reduce((acc, curr) => {
-          const s = typeof curr.score === 'number' ? curr.score : parseInt(curr.score, 10) || 0;
-          return acc + s;
-        }, 0);
-        score = Math.round(sum / attempts.length);
-      } else {
-        score = hasCustomQuizzes ? 0 : cfg.defaultScore;
-      }
-
-      return {
-        name: cfg.name,
-        score,
-        color: cfg.color,
-        bgLight: cfg.bgLight,
-        attemptsCount: attempts.length
-      };
+    quizHistory.forEach((item, idx) => {
+      const parsed = parseAttempt(item, idx);
+      const subject = formatSubjectName(item.category || parsed.category);
+      if (!attemptsBySubject.has(subject)) attemptsBySubject.set(subject, []);
+      attemptsBySubject.get(subject).push({
+        score: parsed.score,
+        quizKey: item.quizId || parsed.quizId || item.title || parsed.title || `attempt-${idx}`
+      });
     });
-  }, [isZeroQuizzes, quizHistory]);
 
-  const overallProgress = isZeroQuizzes
-    ? 0
-    : Math.round(
-        subjectProgress.reduce((sum, s) => sum + s.score, 0) / subjectProgress.length
-      );
+    const availableBySubject = new Map();
+    (quizzesList || []).forEach((quiz) => {
+      const subject = formatSubjectName(quiz.category);
+      availableBySubject.set(subject, (availableBySubject.get(subject) || 0) + 1);
+    });
+
+    // Subjects the student can still work on, even without an attempt.
+    availableBySubject.forEach((_count, subject) => {
+      if (!attemptsBySubject.has(subject)) attemptsBySubject.set(subject, []);
+    });
+
+    return [...attemptsBySubject.entries()]
+      .sort(([nameA, listA], [nameB, listB]) => {
+        const aAttempted = listA.length > 0;
+        const bAttempted = listB.length > 0;
+        if (aAttempted !== bAttempted) return aAttempted ? -1 : 1;
+        return nameA.localeCompare(nameB);
+      })
+      .map(([subject, list], idx) => {
+        const palette = SUBJECT_PALETTE[idx % SUBJECT_PALETTE.length];
+        const scores = list.map((a) => a.score).filter((s) => Number.isFinite(s));
+        const score = scores.length
+          ? Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length)
+          : 0;
+        const quizzesTaken = new Set(list.map((a) => a.quizKey)).size;
+        const quizzesAvailable = availableBySubject.get(subject) || quizzesTaken;
+
+        return {
+          name: subject,
+          score,
+          color: palette.color,
+          bgLight: palette.bgLight,
+          attemptsCount: list.length,
+          quizzesTaken,
+          quizzesAvailable,
+          isAttempted: list.length > 0
+        };
+      });
+  }, [quizHistory, quizzesList, parseAttempt]);
+
+  const overallProgress = subjectProgress.length
+    ? Math.round(subjectProgress.reduce((sum, s) => sum + s.score, 0) / subjectProgress.length)
+    : 0;
 
   const chartW = 350;
   const chartH = 150;
@@ -809,9 +846,9 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
     activePerformanceData.length - 1
   )},${getY(0)} Z`;
 
-  const avgPathPoints = activePerformanceData
-    .map((d, i) => `${getX(i)},${getY(d.avg)}`)
-    .join(' L ');
+  const avgPathPoints = hasCohortAverage
+    ? activePerformanceData.map((d, i) => `${getX(i)},${getY(d.avg)}`).join(' L ')
+    : '';
 
   const donutR = 54;
   const donutStroke = 18;
@@ -917,23 +954,9 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
       return updated;
     });
 
-    const newNotif = {
-      id: Date.now(),
-      title: `Quiz Completed: ${quizTitle}`,
-      message: `You scored ${score}%! Your dashboard stats and mastery level have been updated.`,
-      category: 'quiz',
-      timestamp: 'Just now',
-      unread: true
-    };
-    setNotifications((prev) => {
-      const updated = [newNotif, ...prev];
-      try {
-        localStorage.setItem('learnsmart_student_notifications', JSON.stringify(updated));
-      } catch (e) {
-        console.warn(e);
-      }
-      return updated;
-    });
+    // The receipt notification is written to MySQL by the backend when the
+    // attempt is stored, so it shows up in the notification centre on the
+    // next sync instead of only in the browser.
 
     // Resolve authentic Firebase user details
     const activeUid = firebaseUser?.uid || auth.currentUser?.uid || localStorage.getItem('learnsmart_uid') || '';
@@ -958,28 +981,12 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
   };
 
   const handleMarkAllRead = () => {
-    setNotifications((prev) => {
-      const updated = prev.map((n) => ({ ...n, unread: false }));
-      try {
-        localStorage.setItem('learnsmart_student_notifications', JSON.stringify(updated));
-      } catch (e) {
-        console.warn(e);
-      }
-      return updated;
-    });
+    markAllNotificationsRead();
     showToast('All notifications marked as read');
   };
 
   const handleDismissNotification = (id) => {
-    setNotifications((prev) => {
-      const updated = prev.filter((n) => n.id !== id);
-      try {
-        localStorage.setItem('learnsmart_student_notifications', JSON.stringify(updated));
-      } catch (e) {
-        console.warn(e);
-      }
-      return updated;
-    });
+    dismissServerNotification(id);
   };
 
   const handleStartQuiz = (quiz) => {
@@ -1381,10 +1388,12 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                           <span className="legend-line line-solid" />
                           <span>Score</span>
                         </span>
-                        <span className="legend-item">
-                          <span className="legend-line line-dashed" />
-                          <span>Avg</span>
-                        </span>
+                        {hasCohortAverage && (
+                          <span className="legend-item">
+                            <span className="legend-line line-dashed" />
+                            <span>Class Avg</span>
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1443,14 +1452,16 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
 
                       <path d={`M ${scoreAreaPoints}`} fill="url(#scoreGradient)" />
 
-                      <path
-                        d={`M ${avgPathPoints}`}
-                        fill="none"
-                        stroke="#00D2D3"
-                        strokeWidth="2"
-                        strokeDasharray="4 3"
-                        strokeLinecap="round"
-                      />
+                      {hasCohortAverage && (
+                        <path
+                          d={`M ${avgPathPoints}`}
+                          fill="none"
+                          stroke="#00D2D3"
+                          strokeWidth="2"
+                          strokeDasharray="4 3"
+                          strokeLinecap="round"
+                        />
+                      )}
 
                       <path
                         d={`M ${scorePathPoints}`}
@@ -1507,9 +1518,11 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                         <div className="tooltip-score">
                           Score: <strong>{activePerformanceData[hoveredPoint].score}%</strong>
                         </div>
-                        <div className="tooltip-avg">
-                          Class Avg: {activePerformanceData[hoveredPoint].avg}%
-                        </div>
+                        {hasCohortAverage && (
+                          <div className="tooltip-avg">
+                            Class Avg: {activePerformanceData[hoveredPoint].avg}%
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1518,7 +1531,9 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                 <div className="dash-panel-card progress-panel">
                   <div className="panel-header">
                     <h2 className="panel-title">Subject-wise Progress</h2>
-                    <span className="panel-badge-green">5 Subjects</span>
+                    <span className="panel-badge-green">
+                      {subjectProgress.length} {subjectProgress.length === 1 ? 'Subject' : 'Subjects'}
+                    </span>
                   </div>
 
                   <div className="donut-content-row">
@@ -1672,6 +1687,11 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                           </div>
                         );
                       })}
+                      {subjectProgress.length === 0 && (
+                        <span className="legend-subject-name">
+                          No quiz subjects available yet
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1834,6 +1854,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
               streakDays={streakDays}
               quizHistory={quizHistory}
               subjectProgress={subjectProgress}
+              benchmark={benchmark}
               onRetakeQuiz={handleStartQuizByIdOrTitle}
               onStartQuiz={() => setActiveTab('take-quiz')}
             />
@@ -1851,7 +1872,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
           )}
 
           {activeTab === 'notifications' && (
-            <NotificationsView
+            <NotificationCenter
               notifications={notifications}
               onMarkAllAsRead={handleMarkAllRead}
               onDismissNotification={handleDismissNotification}
@@ -1860,6 +1881,7 @@ export const Dashboard = ({ username = 'Student', onLogout }) => {
                 else if (n.category === 'streak') setActiveTab('progress');
                 else if (n.category === 'milestone') setActiveTab('learning-path');
               }}
+              subtitle="Stay up to date with quiz evaluations, streak milestones, and personalized study alerts."
             />
           )}
 

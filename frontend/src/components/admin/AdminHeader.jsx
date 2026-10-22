@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { PortalSwitcher } from '../PortalSwitcher';
+import { authService } from '../../services/authService';
 
 const AdminHeader = ({
   onMenuToggle,
@@ -11,6 +14,7 @@ const AdminHeader = ({
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const navigate = useNavigate();
 
   const adminName = adminUser?.fullName || adminUser?.name || 'System Administrator';
   const adminEmail = adminUser?.email || 'admin@learnsmart.edu';
@@ -164,6 +168,29 @@ const AdminHeader = ({
                 }}
               >
                 Settings
+              </button>
+              <div className="adh-dropdown-divider" />
+              <button
+                className="adh-dropdown-item"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  authService.switchPortal('student');
+                  navigate('/dashboard');
+                }}
+              >
+                <span style={{ marginRight: '6px' }}>🎓</span>
+                <span>Student Dashboard</span>
+              </button>
+              <button
+                className="adh-dropdown-item"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  authService.switchPortal('educator');
+                  navigate('/educator-dashboard');
+                }}
+              >
+                <span style={{ marginRight: '6px' }}>👨‍🏫</span>
+                <span>Educator Dashboard</span>
               </button>
               <div className="adh-dropdown-divider" />
               <button

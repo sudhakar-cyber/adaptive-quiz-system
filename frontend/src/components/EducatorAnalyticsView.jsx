@@ -51,18 +51,18 @@ export const EducatorAnalyticsView = ({
 
   // Safe data resolution (props with database fallback)
   const safeQuizzes = useMemo(() => {
-    if (Array.isArray(quizzes) && quizzes.length > 0) return quizzes;
+    if (Array.isArray(quizzes)) return quizzes;
     const dbQuizzes = sharedDatabase?.getQuizzes ? sharedDatabase.getQuizzes() : [];
     return dbQuizzes.length > 0 ? dbQuizzes : INITIAL_EDUCATOR_QUIZZES;
   }, [quizzes]);
 
   const safeStudents = useMemo(() => {
-    if (Array.isArray(students) && students.length > 0) return students;
+    if (Array.isArray(students)) return students;
     return sharedDatabase?.getStudents ? sharedDatabase.getStudents() : [];
   }, [students]);
 
   const safeSubmissions = useMemo(() => {
-    if (Array.isArray(submissions) && submissions.length > 0) return submissions;
+    if (Array.isArray(submissions)) return submissions;
     return sharedDatabase?.getSubmissions ? sharedDatabase.getSubmissions() : [];
   }, [submissions]);
 

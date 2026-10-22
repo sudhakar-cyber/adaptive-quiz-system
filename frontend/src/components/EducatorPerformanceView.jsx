@@ -766,6 +766,19 @@ export const EducatorPerformanceView = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <button
             type="button"
+            className="educator-primary-btn"
+            onClick={() => setOpenAddModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            title="Enroll New Student to Cohort"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>+ Add Student</span>
+          </button>
+          <button
+            type="button"
             className="educator-reset-btn"
             onClick={() => handleOpenResetModal(null)}
             style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -901,6 +914,19 @@ export const EducatorPerformanceView = ({
               Showing active course roster
             </span>
           </div>
+          <button
+            type="button"
+            className="educator-primary-btn sm"
+            onClick={() => setOpenAddModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="Enroll New Student"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>+ Add Student</span>
+          </button>
         </div>
 
         <div className="educator-table-wrapper">
@@ -1028,6 +1054,7 @@ export const EducatorPerformanceView = ({
                           </svg>
                           <span>Reset</span>
                         </button>
+
                       </div>
                     </td>
                   </tr>

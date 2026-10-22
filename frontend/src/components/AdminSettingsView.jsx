@@ -8,6 +8,7 @@ import {
   XIcon
 } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
+import { getCurrentIdentity } from '../services/apiClient';
 
 export const AdminSettingsView = () => {
   const [settings, setSettings] = useState({
@@ -48,7 +49,7 @@ export const AdminSettingsView = () => {
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState(false);
 
-  const handlePasswordSubmit = (e) => {
+  const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setPasswordError('');
     if (!passwords.currentPassword) {
@@ -66,7 +67,9 @@ export const AdminSettingsView = () => {
 
     try {
       if (typeof sharedDatabase?.updateUserPassword === 'function') {
-        sharedDatabase.updateUserPassword('admin@learnsmart.edu', passwords.newPassword);
+        const identity = getCurrentIdentity();
+        const account = identity?.email || 'admin@learnsmart.edu';
+        await sharedDatabase.updateUserPassword(account, passwords.newPassword);
       }
       setPasswordSuccess(true);
       setTimeout(() => {
@@ -75,7 +78,8 @@ export const AdminSettingsView = () => {
         setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' });
       }, 1500);
     } catch (err) {
-      setPasswordError('Failed to update password. Please try again.');
+      console.warn('Password update failed:', err);
+      setPasswordError(err?.message || 'Failed to update password. Please try again.');
     }
   };
 

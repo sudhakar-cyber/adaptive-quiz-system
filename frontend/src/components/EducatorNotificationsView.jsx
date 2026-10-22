@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BellIcon,
   CheckCircleIcon,
@@ -26,6 +26,7 @@ export const EducatorNotificationsView = ({
   // Modal State for Sending Notification
   const [openSendModal, setOpenSendModal] = useState(false);
   const [sendToAllStudents, setSendToAllStudents] = useState(true);
+  const [selectedStudentId, setSelectedStudentId] = useState('');
   const [notificationTitle, setNotificationTitle] = useState('');
   const [notificationCategory, setNotificationCategory] = useState('announcement');
   const [notificationPriority, setNotificationPriority] = useState('normal');
@@ -40,10 +41,24 @@ export const EducatorNotificationsView = ({
     return sharedDatabase.getStudents();
   }, [students]);
 
-  const unreadCount = notifications.filter((n) => n.unread).length;
-  const sentCount = notifications.filter((n) => n.category === 'sent').length;
+  // Initial sync from backend on mount to ensure fresh server notifications
+  useEffect(() => {
+    if (typeof sharedDatabase?.syncNotificationsFromBackend === 'function') {
+      sharedDatabase.syncNotificationsFromBackend(true).then((latest) => {
+        if (Array.isArray(latest) && typeof onUpdateNotifications === 'function') {
+          onUpdateNotifications(latest);
+        }
+      }).catch((err) => {
+        console.warn('Initial notifications sync note:', err);
+      });
+    }
+  }, []);
 
-  const filteredNotifications = notifications.filter((item) => {
+  const safeNotifications = Array.isArray(notifications) ? notifications : [];
+  const unreadCount = safeNotifications.filter((n) => n.unread).length;
+  const sentCount = safeNotifications.filter((n) => n.category === 'sent').length;
+
+  const filteredNotifications = safeNotifications.filter((item) => {
     if (filter === 'unread') return item.unread;
     if (filter === 'submission') return item.category === 'submission';
     if (filter === 'review') return item.category === 'review';
@@ -86,11 +101,11 @@ export const EducatorNotificationsView = ({
   };
 
   // Send Notification Handler
-  const handleSendNotification = (e) => {
+  const handleSendNotification = async (e) => {
     if (e) e.preventDefault();
 
-    if (!sendToAllStudents) {
-      if (showToast) showToast('⚠️ Please select All Students to send the notification.');
+    if (!sendToAllStudents && !selectedStudentId) {
+      if (showToast) showToast('⚠️ Please select a recipient student or choose All Students.');
       return;
     }
     if (!notificationTitle.trim()) {
@@ -105,43 +120,41 @@ export const EducatorNotificationsView = ({
     setIsSubmitting(true);
 
     try {
-      const targetStudentNames = cohortStudents.map((s) => s.name);
+      const chosenStudent = cohortStudents.find((s) => s.id === selectedStudentId);
+      const targetStudentIds = sendToAllStudents ? 'all' : [selectedStudentId];
+      const targetStudentNames = sendToAllStudents
+        ? cohortStudents.map((s) => s.name)
+        : [chosenStudent?.name || 'Student'];
       const broadcastId = `bcast-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-      // Send to shared student notifications
-      sharedDatabase.sendStudentNotification({
+      // The broadcast is stored in MySQL and delivered to the cohort.
+      await sharedDatabase.sendStudentNotification({
         title: notificationTitle.trim(),
         message: notificationMessage.trim(),
         category: notificationCategory,
         priority: notificationPriority,
-        targetStudentIds: 'all',
+        targetStudentIds,
         targetStudentNames,
         educatorName,
         broadcastId
       });
 
-      // Record in educator notifications log
-      const recipientSummary = 'All Students';
+      // Synchronize latest notifications from backend and update view
+      const updated = await sharedDatabase.syncNotificationsFromBackend(true);
+      const list = Array.isArray(updated) && updated.length > 0
+        ? updated
+        : sharedDatabase.getEducatorNotifications();
 
-      const newEducatorEntry = {
-        id: `sent-${Date.now()}`,
-        title: `Sent: ${notificationTitle.trim()}`,
-        message: `Delivered to ${recipientSummary}: "${notificationMessage.trim()}"`,
-        rawTitle: notificationTitle.trim(),
-        rawMessage: notificationMessage.trim(),
-        broadcastId,
-        category: 'sent',
-        timestamp: 'Just now',
-        unread: false,
-        priority: notificationPriority,
-        recipientCount: cohortStudents.length > 0 ? cohortStudents.length : 'All',
-        recipients: targetStudentNames
-      };
-
-      onUpdateNotifications([newEducatorEntry, ...notifications]);
+      if (typeof onUpdateNotifications === 'function') {
+        onUpdateNotifications(list);
+      }
 
       if (showToast) {
-        showToast('✅ Notification successfully sent to All Students!');
+        showToast(
+          sendToAllStudents
+            ? '✅ Notification successfully sent to All Students!'
+            : `✅ Notification sent to ${targetStudentNames[0]}!`
+        );
       }
 
       // Reset modal fields & close
@@ -149,6 +162,7 @@ export const EducatorNotificationsView = ({
       setNotificationMessage('');
       setNotificationCategory('announcement');
       setNotificationPriority('normal');
+      setSelectedStudentId('');
       setOpenSendModal(false);
     } catch (err) {
       console.error(err);
@@ -158,9 +172,12 @@ export const EducatorNotificationsView = ({
     }
   };
 
-  const handleDeleteNotification = (notif) => {
-    const updated = sharedDatabase.deleteEducatorNotification(notif);
-    onUpdateNotifications(updated);
+  const handleDeleteNotification = async (notif) => {
+    const updated = await sharedDatabase.deleteEducatorNotification(notif);
+    const list = Array.isArray(updated) ? updated : sharedDatabase.getEducatorNotifications();
+    if (typeof onUpdateNotifications === 'function') {
+      onUpdateNotifications(list);
+    }
     if (showToast) {
       if (notif.category === 'sent' || notif.broadcastId) {
         showToast('Notification deleted and removed from student dashboard.');
@@ -170,27 +187,33 @@ export const EducatorNotificationsView = ({
     }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (window.confirm('Are you sure you want to delete all notifications? Any announcements sent to students will also be removed.')) {
-      const updated = sharedDatabase.clearAllEducatorNotifications();
-      onUpdateNotifications(updated);
+      const updated = await sharedDatabase.clearAllEducatorNotifications();
+      if (typeof onUpdateNotifications === 'function') {
+        onUpdateNotifications(Array.isArray(updated) ? updated : []);
+      }
       if (showToast) {
         showToast('All educator notifications cleared successfully.');
       }
     }
   };
 
-  const handleMarkAllRead = () => {
-    const updated = notifications.map((n) => ({ ...n, unread: false }));
-    onUpdateNotifications(updated);
+  const handleMarkAllRead = async () => {
+    const updated = await sharedDatabase.markAllNotificationsRead();
+    const list = Array.isArray(updated) ? updated : sharedDatabase.getEducatorNotifications();
+    if (typeof onUpdateNotifications === 'function') {
+      onUpdateNotifications(list);
+    }
     if (showToast) showToast('All educator notifications marked as read.');
   };
 
-  const handleMarkAsRead = (id) => {
-    const updated = notifications.map((n) =>
-      n.id === id ? { ...n, unread: false } : n
-    );
-    onUpdateNotifications(updated);
+  const handleMarkAsRead = async (id) => {
+    const updated = await sharedDatabase.markNotificationRead(id);
+    const list = Array.isArray(updated) ? updated : sharedDatabase.getEducatorNotifications();
+    if (typeof onUpdateNotifications === 'function') {
+      onUpdateNotifications(list);
+    }
     if (showToast) showToast('Notification marked as read.');
   };
 
@@ -201,6 +224,14 @@ export const EducatorNotificationsView = ({
       if (onNavigateToTab) onNavigateToTab('Analytics');
     } else if (notif.category === 'sent') {
       if (onNavigateToTab) onNavigateToTab('Student Performance');
+    } else if (notif.link) {
+      if (notif.link.includes('performance') && onNavigateToTab) {
+        onNavigateToTab('Student Performance');
+      } else if (notif.link.includes('quizzes') && onNavigateToTab) {
+        onNavigateToTab('Manage Quizzes');
+      } else if (notif.link.includes('analytics') && onNavigateToTab) {
+        onNavigateToTab('Analytics');
+      }
     }
   };
 
@@ -240,25 +271,22 @@ export const EducatorNotificationsView = ({
             <CheckCircleIcon size={16} color="#10B981" />
             <span>Mark All as Read</span>
           </button>
-
-          {notifications.length > 0 && (
-            <button
-              type="button"
-              className="educator-secondary-btn"
-              onClick={handleClearAll}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#DC2626', borderColor: '#FECACA' }}
-              title="Delete all notifications"
-            >
-              <TrashIcon size={15} color="#DC2626" />
-              <span>Clear All</span>
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="educator-filter-toolbar" style={{ marginBottom: '14px' }}>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+      {/* Filter Tabs & Clear All Toolbar Row */}
+      <div
+        className="educator-filter-toolbar"
+        style={{
+          marginBottom: '14px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}
+      >
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
             className={`educator-time-pill ${filter === 'all' ? 'active' : ''}`}
@@ -302,6 +330,26 @@ export const EducatorNotificationsView = ({
             Sent to Students ({sentCount})
           </button>
         </div>
+
+        {notifications.length > 0 && (
+          <button
+            type="button"
+            className="educator-secondary-btn"
+            onClick={handleClearAll}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: 'rgb(220, 38, 38)',
+              borderColor: 'rgb(254, 202, 202)',
+              marginLeft: 'auto'
+            }}
+            title="Delete all notifications"
+          >
+            <TrashIcon size={15} color="#DC2626" />
+            <span>Clear All</span>
+          </button>
+        )}
       </div>
 
       {/* Notifications List */}
@@ -546,40 +594,72 @@ export const EducatorNotificationsView = ({
                 </div>
               </div>
 
-              {/* SECTION: ALL STUDENTS CHECKBOX ONLY */}
+              {/* SECTION: RECIPIENTS SELECTION */}
               <div>
                 <label className="educator-field-label" style={{ marginBottom: '8px', display: 'block' }}>
                   Select Recipients
                 </label>
 
-                <label
-                  htmlFor="select-all-students-modal-checkbox"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                    backgroundColor: sendToAllStudents ? '#ECFDF5' : '#F8FAFC',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    border: sendToAllStudents ? '1px solid #10B981' : '1px solid #CBD5E1',
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    id="select-all-students-modal-checkbox"
-                    checked={sendToAllStudents}
-                    onChange={(e) => setSendToAllStudents(e.target.checked)}
-                    className="educator-custom-checkbox"
-                  />
-                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0F172A' }}>
-                    All Students
-                  </span>
-                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <label
+                    htmlFor="select-all-students-modal-checkbox"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      backgroundColor: sendToAllStudents ? '#ECFDF5' : '#F8FAFC',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      border: sendToAllStudents ? '1px solid #10B981' : '1px solid #CBD5E1',
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      id="select-all-students-modal-checkbox"
+                      checked={sendToAllStudents}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSendToAllStudents(checked);
+                        if (checked) setSelectedStudentId('');
+                      }}
+                      className="educator-custom-checkbox"
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0F172A' }}>
+                        All Students ({cohortStudents.length})
+                      </span>
+                      <span style={{ fontSize: '0.74rem', color: '#64748B' }}>
+                        Broadcast announcement to entire enrolled roster
+                      </span>
+                    </div>
+                  </label>
+
+                  {!sendToAllStudents && (
+                    <div style={{ marginTop: '2px' }}>
+                      <label className="educator-field-label" htmlFor="select-individual-student" style={{ marginBottom: '4px' }}>
+                        Choose Individual Student *
+                      </label>
+                      <select
+                        id="select-individual-student"
+                        className="educator-text-input"
+                        value={selectedStudentId}
+                        onChange={(e) => setSelectedStudentId(e.target.value)}
+                      >
+                        <option value="">-- Select a student --</option>
+                        {cohortStudents.map((stud) => (
+                          <option key={stud.id} value={stud.id}>
+                            {stud.name} ({stud.email || stud.id})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Notification Details Form */}
@@ -671,11 +751,16 @@ export const EducatorNotificationsView = ({
                 {sendToAllStudents ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontSize: '0.84rem', fontWeight: 600 }}>
                     <CheckCircleIcon size={16} color="#10B981" />
-                    <span>Ready to send to All Students</span>
+                    <span>Ready to send to All Students ({cohortStudents.length})</span>
+                  </div>
+                ) : selectedStudentId ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontSize: '0.84rem', fontWeight: 600 }}>
+                    <CheckCircleIcon size={16} color="#10B981" />
+                    <span>Ready to send to selected student</span>
                   </div>
                 ) : (
                   <span style={{ color: '#DC2626', fontSize: '0.84rem', fontWeight: 600 }}>
-                    ⚠️ Please select All Students
+                    ⚠️ Please select a recipient
                   </span>
                 )}
               </div>
@@ -695,19 +780,19 @@ export const EducatorNotificationsView = ({
                   onClick={handleSendNotification}
                   disabled={
                     isSubmitting ||
-                    !sendToAllStudents ||
+                    (!sendToAllStudents && !selectedStudentId) ||
                     !notificationTitle.trim() ||
                     !notificationMessage.trim()
                   }
                   style={{
                     opacity:
-                      !sendToAllStudents ||
+                      (!sendToAllStudents && !selectedStudentId) ||
                       !notificationTitle.trim() ||
                       !notificationMessage.trim()
                         ? 0.55
                         : 1,
                     cursor:
-                      !sendToAllStudents ||
+                      (!sendToAllStudents && !selectedStudentId) ||
                       !notificationTitle.trim() ||
                       !notificationMessage.trim()
                         ? 'not-allowed'
@@ -716,7 +801,11 @@ export const EducatorNotificationsView = ({
                 >
                   <SendIcon size={15} color="#FFFFFF" />
                   <span>
-                    {isSubmitting ? 'Sending...' : 'Send to All Students'}
+                    {isSubmitting
+                      ? 'Sending...'
+                      : sendToAllStudents
+                      ? 'Send to All Students'
+                      : 'Send Notification'}
                   </span>
                 </button>
               </div>

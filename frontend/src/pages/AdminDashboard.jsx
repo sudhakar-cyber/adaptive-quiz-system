@@ -204,6 +204,8 @@ export const AdminDashboard = ({ onLogout }) => {
     window.addEventListener('learnsmart_admin_updated', handleLiveEvents);
     window.addEventListener('learnsmart_quizzes_updated', handleLiveEvents);
     window.addEventListener('learnsmart_submissions_updated', handleLiveEvents);
+    window.addEventListener('learnsmart_notifications_updated', handleLiveEvents);
+    window.addEventListener('learnsmart_analytics_updated', handleLiveEvents);
     window.addEventListener('storage', handleLiveEvents);
 
     // Live tracking from MySQL database
@@ -283,6 +285,8 @@ export const AdminDashboard = ({ onLogout }) => {
       window.removeEventListener('learnsmart_admin_updated', handleLiveEvents);
       window.removeEventListener('learnsmart_quizzes_updated', handleLiveEvents);
       window.removeEventListener('learnsmart_submissions_updated', handleLiveEvents);
+      window.removeEventListener('learnsmart_notifications_updated', handleLiveEvents);
+      window.removeEventListener('learnsmart_analytics_updated', handleLiveEvents);
       window.removeEventListener('storage', handleLiveEvents);
     };
   }, []);
@@ -369,24 +373,24 @@ export const AdminDashboard = ({ onLogout }) => {
     showToast(`New ${newUser.role} "${newUser.name}" added successfully!`);
   };
 
-  const handleMarkRead = (id) => {
-    const updated = sharedDatabase.markAdminNotificationRead(id);
+  const handleMarkRead = async (id) => {
+    const updated = await sharedDatabase.markAdminNotificationRead(id);
     setNotifications(updated);
   };
 
-  const handleMarkAllRead = () => {
-    const updated = sharedDatabase.markAllAdminNotificationsRead();
+  const handleMarkAllRead = async () => {
+    const updated = await sharedDatabase.markAllAdminNotificationsRead();
     setNotifications(updated);
   };
 
-  const handleDeleteNotification = (notifOrId) => {
-    const updated = sharedDatabase.deleteAdminNotification(notifOrId);
+  const handleDeleteNotification = async (notifOrId) => {
+    const updated = await sharedDatabase.deleteAdminNotification(notifOrId);
     setNotifications(updated);
     showToast('Notification deleted successfully');
   };
 
-  const handleClearAllNotifications = () => {
-    const updated = sharedDatabase.clearAllAdminNotifications();
+  const handleClearAllNotifications = async () => {
+    const updated = await sharedDatabase.clearAllAdminNotifications();
     setNotifications(updated);
     showToast('All notifications cleared successfully');
   };

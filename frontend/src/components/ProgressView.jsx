@@ -10,14 +10,14 @@ import {
   XIcon,
   SparklesIcon
 } from './Icons';
-import { sharedDatabase } from '../services/sharedDatabase';
 
 export const ProgressView = ({
-  quizzesTaken = 18,
-  avgScore = '85.4%',
-  streakDays = 7,
+  quizzesTaken = 0,
+  avgScore = '0%',
+  streakDays = 0,
   quizHistory = [],
   subjectProgress = null,
+  benchmark = null,
   onRetakeQuiz,
   onStartQuiz
 }) => {
@@ -32,80 +32,27 @@ export const ProgressView = ({
     return 'Developing';
   };
 
-  const subjectBreakdown = subjectProgress
-    ? subjectProgress.map((subj) => {
-        const totalTopics =
-          subj.name.includes('Math') || subj.name.includes('Data')
-            ? 15
-            : subj.name.includes('Python')
-            ? 12
-            : subj.name.includes('Security')
-            ? 10
-            : 8;
-        const completedTopics =
-          isReset || subj.score === 0
-            ? 0
-            : Math.min(totalTopics, Math.max(1, Math.round((subj.score / 100) * totalTopics)));
-        const fullName =
-          subj.name === 'Data Structures'
-            ? 'Data Structures & Algorithms'
-            : subj.name === 'Python'
-            ? 'Python Programming'
-            : subj.name === 'Others'
-            ? 'Others (Cloud & OS)'
-            : subj.name;
+  const subjectBreakdown = useMemo(() => {
+    if (!subjectProgress || subjectProgress.length === 0) return [];
 
-        return {
-          name: fullName,
-          score: isReset ? 0 : subj.score,
-          color: subj.color,
-          mastery: isReset || subj.score === 0 ? 'Not Started' : getMastery(subj.score),
-          topicsCompleted: `${completedTopics} / ${totalTopics} Topics`,
-          bgLight: subj.bgLight || '#F8FAFC'
-        };
-      })
-    : [
-        {
-          name: 'Mathematics',
-          score: isReset ? 0 : 90,
-          color: '#00C48C',
-          mastery: isReset ? 'Not Started' : 'Mastered',
-          topicsCompleted: isReset ? '0 / 15 Topics' : '14 / 15 Topics',
-          bgLight: '#E6FAF0'
-        },
-        {
-          name: 'Data Structures & Algorithms',
-          score: isReset ? 0 : 82,
-          color: '#00D2D3',
-          mastery: isReset ? 'Not Started' : 'Proficient',
-          topicsCompleted: isReset ? '0 / 15 Topics' : '12 / 15 Topics',
-          bgLight: '#E0FAFA'
-        },
-        {
-          name: 'Python Programming',
-          score: isReset ? 0 : 76,
-          color: '#FFB900',
-          mastery: isReset ? 'Not Started' : 'Intermediate',
-          topicsCompleted: isReset ? '0 / 12 Topics' : '9 / 12 Topics',
-          bgLight: '#FFF8E6'
-        },
-        {
-          name: 'Web Security',
-          score: isReset ? 0 : 68,
-          color: '#FF7675',
-          mastery: isReset ? 'Not Started' : 'Developing',
-          topicsCompleted: isReset ? '0 / 10 Topics' : '6 / 10 Topics',
-          bgLight: '#FFF0F0'
-        },
-        {
-          name: 'Others (Cloud & OS)',
-          score: isReset ? 0 : 60,
-          color: '#6C5CE7',
-          mastery: isReset ? 'Not Started' : 'Foundational',
-          topicsCompleted: isReset ? '0 / 8 Topics' : '5 / 8 Topics',
-          bgLight: '#F3E8FF'
-        }
-      ];
+    return subjectProgress.map((subj) => {
+      const takenCount = Number(subj.quizzesTaken) || 0;
+      const availableCount = Number(subj.quizzesAvailable) || takenCount;
+      const attempted = !isReset && (Number(subj.attemptsCount) || 0) > 0;
+
+      return {
+        name: subj.name,
+        score: attempted ? Number(subj.score) || 0 : 0,
+        color: subj.color,
+        mastery: attempted ? getMastery(Number(subj.score) || 0) : 'Not Started',
+        topicsCompleted: `${takenCount} / ${availableCount} Quizzes`,
+        quizzesTaken: takenCount,
+        quizzesAvailable: availableCount,
+        bgLight: subj.bgLight || '#F8FAFC'
+      };
+    });
+  }, [subjectProgress, isReset]);
+
 
   const numericAvg = useMemo(() => {
     if (typeof avgScore === 'number') return isNaN(avgScore) ? 0 : avgScore;
@@ -116,7 +63,16 @@ export const ProgressView = ({
   }, [avgScore]);
 
   const percentileData = useMemo(() => {
-    if (isReset || numericAvg === 0) {
+    const benchmarkMean = Number(benchmark?.meanScore);
+    const benchmarkStd = Number(benchmark?.stdDev);
+    const benchmarkCount = Number(benchmark?.attempts);
+    const hasBenchmark =
+      Number.isFinite(benchmarkMean) &&
+      benchmarkMean > 0 &&
+      Number.isFinite(benchmarkCount) &&
+      benchmarkCount > 1;
+
+    if (isReset || numericAvg === 0 || !hasBenchmark) {
       return {
         isRanked: false,
         percentile: 0,
@@ -125,8 +81,8 @@ export const ProgressView = ({
         topPercentDisplay: 'Unranked',
         rank: null,
         rankDisplay: 'Unranked',
-        cohortSize: 85,
-        cohortMedian: 72.0,
+        cohortSize: Number.isFinite(benchmarkCount) ? benchmarkCount : 0,
+        cohortMedian: Number.isFinite(benchmarkMean) ? benchmarkMean : 0,
         tier: 'Unranked',
         tierBadgeColor: '#64748B',
         tierBadgeBg: '#F1F5F9',
@@ -141,9 +97,9 @@ export const ProgressView = ({
       };
     }
 
-    // Cohort benchmark distribution: Mean = 72.0%, Standard Deviation = 11.5%
-    const mean = 72.0;
-    const std = 11.5;
+    // Distribution measured from the student's quizzes in MySQL.
+    const mean = benchmarkMean;
+    const std = benchmarkStd > 0 ? benchmarkStd : 1;
     const z = (numericAvg - mean) / std;
 
     // Cumulative normal distribution CDF approximation (Abramowitz & Stegun)
@@ -155,14 +111,8 @@ export const ProgressView = ({
     const percentile = Math.min(99, Math.max(1, Math.round(cdf * 100)));
     const topPercent = Math.max(1, 100 - percentile);
 
-    // Dynamic cohort size from shared database or standard cohort of 85
-    let cohortTotal = 85;
-    try {
-      const students = sharedDatabase.getStudents();
-      if (students && students.length > 5) {
-        cohortTotal = Math.max(85, students.length);
-      }
-    } catch {}
+    // Real number of students contributing to the benchmark distribution.
+    const cohortTotal = Math.max(1, Number(benchmark?.cohortSize) || 1);
 
     const rank = Math.max(1, Math.min(cohortTotal, Math.round(((100 - percentile) / 100) * cohortTotal) || 1));
 
@@ -190,9 +140,15 @@ export const ProgressView = ({
 
     const percentileDisplay = percentile >= 80 ? `Top ${topPercent}%` : `${percentile}th %ile`;
 
-    // Compute subject standings relative to cohort benchmark
+    // Compute subject standings relative to the real per-subject benchmark.
+    const subjectBenchmarks = benchmark?.subjects || {};
     const subjectStandings = subjectBreakdown.map((s) => {
       const sScore = s.score || 0;
+      const subBench = subjectBenchmarks[s.name];
+      const subMean = Number(subBench?.mean);
+      const subStd = Number(subBench?.stdDev);
+      const subCount = Number(subBench?.count);
+
       if (sScore === 0) {
         return {
           name: s.name,
@@ -202,7 +158,18 @@ export const ProgressView = ({
           tier: 'Not Attempted'
         };
       }
-      const subZ = (sScore - mean) / std;
+
+      if (!Number.isFinite(subMean) || subMean <= 0 || !Number.isFinite(subCount) || subCount < 2) {
+        return {
+          name: s.name,
+          score: sScore,
+          color: s.color,
+          percentile: 0,
+          tier: 'Unranked'
+        };
+      }
+
+      const subZ = (sScore - subMean) / (subStd > 0 ? subStd : 1);
       const subT = 1.0 / (1.0 + 0.2316419 * Math.abs(subZ));
       const subD = 0.3989423 * Math.exp(-subZ * subZ / 2.0);
       const subP = subD * subT * (0.3193815 + subT * (-0.3565638 + subT * (1.781478 + subT * (-1.821256 + subT * 1.330274))));
@@ -239,7 +206,45 @@ export const ProgressView = ({
       tierBadgeBg,
       subjectStandings
     };
-  }, [isReset, numericAvg, subjectBreakdown]);
+  }, [isReset, numericAvg, subjectBreakdown, benchmark]);
+
+  // Real activity metrics derived from the student's own attempt history.
+  const activityStats = useMemo(() => {
+    const dates = (quizHistory || [])
+      .map((item) => {
+        const raw = item.submittedAt || item.timestamp || item.createdAt || item.date;
+        const parsed = raw ? new Date(raw) : null;
+        return parsed && !isNaN(parsed.getTime()) ? parsed : null;
+      })
+      .filter(Boolean);
+
+    if (dates.length === 0) {
+      return { thisWeek: 0, bestStreak: 0 };
+    }
+
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const thisWeek = dates.filter((d) => d.getTime() >= weekAgo).length;
+
+    const dayKeys = [...new Set(dates.map((d) => {
+      const copy = new Date(d);
+      copy.setHours(0, 0, 0, 0);
+      return copy.getTime();
+    }))].sort((a, b) => a - b);
+
+    let bestStreak = 1;
+    let current = 1;
+    const dayMs = 24 * 60 * 60 * 1000;
+    for (let i = 1; i < dayKeys.length; i++) {
+      if (dayKeys[i] - dayKeys[i - 1] === dayMs) {
+        current += 1;
+      } else {
+        current = 1;
+      }
+      bestStreak = Math.max(bestStreak, current);
+    }
+
+    return { thisWeek, bestStreak };
+  }, [quizHistory]);
 
   return (
     <div className="tab-view-container progress-view">
@@ -262,7 +267,7 @@ export const ProgressView = ({
             <span className="kpi-value">{quizzesTaken}</span>
             <span className="kpi-trend trend-up">
               <TrendingUpIcon size={12} color="#10B981" />
-              <span>+3 this week</span>
+              <span>{activityStats.thisWeek} this week</span>
             </span>
           </div>
         </div>
@@ -276,7 +281,11 @@ export const ProgressView = ({
             <span className="kpi-value">{avgScore}</span>
             <span className="kpi-trend trend-up">
               <TrendingUpIcon size={12} color="#10B981" />
-              <span>+5.2% vs last month</span>
+              <span>
+                {percentileData.isRanked
+                  ? `${percentileData.scoreDiff >= 0 ? '+' : ''}${percentileData.scoreDiff}% vs class avg`
+                  : 'No class benchmark yet'}
+              </span>
             </span>
           </div>
         </div>
@@ -288,7 +297,7 @@ export const ProgressView = ({
           <div className="kpi-data">
             <span className="kpi-label">Current Streak</span>
             <span className="kpi-value">{streakDays} Days</span>
-            <span className="kpi-subtext text-orange">Best streak: 12 days</span>
+            <span className="kpi-subtext text-orange">Best streak: {activityStats.bestStreak} days</span>
           </div>
         </div>
 
@@ -329,7 +338,9 @@ export const ProgressView = ({
         <div className="progress-section-card">
           <div className="section-card-header">
             <h3 className="section-card-title">Subject Mastery Breakdown</h3>
-            <span className="section-badge-info">5 Active Subjects</span>
+            <span className="section-badge-info">
+              {subjectBreakdown.length} {subjectBreakdown.length === 1 ? 'Subject' : 'Subjects'}
+            </span>
           </div>
 
           <div className="subject-progress-bars-list">
@@ -366,6 +377,11 @@ export const ProgressView = ({
                 </div>
               </div>
             ))}
+            {subjectBreakdown.length === 0 && (
+              <p style={{ fontSize: '0.82rem', color: '#64748B', margin: 0 }}>
+                No quiz subjects available yet. Your subject mastery appears after the first published quiz.
+              </p>
+            )}
           </div>
         </div>
 
