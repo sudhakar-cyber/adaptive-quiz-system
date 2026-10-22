@@ -99,6 +99,15 @@ export const AdminDashboard = ({ onLogout }) => {
     }
   });
 
+  const [submissions, setSubmissions] = useState(() => {
+    try {
+      if (typeof sharedDatabase?.getSubmissions === 'function') return sharedDatabase.getSubmissions() || [];
+      return [];
+    } catch {
+      return [];
+    }
+  });
+
   const [adminProfile, setAdminProfile] = useState(() => {
     try {
       const saved = localStorage.getItem('learnsmart_admin_profile');
@@ -166,6 +175,7 @@ export const AdminDashboard = ({ onLogout }) => {
       if (typeof sharedDatabase?.getEducators === 'function') setEducators(sharedDatabase.getEducators() || []);
       if (typeof sharedDatabase?.getAdminNotifications === 'function') setNotifications(sharedDatabase.getAdminNotifications() || []);
       if (typeof sharedDatabase?.getSystemStats === 'function') setStats(sharedDatabase.getSystemStats() || {});
+      if (typeof sharedDatabase?.getSubmissions === 'function') setSubmissions(sharedDatabase.getSubmissions() || []);
     } catch (err) {
       console.warn('Admin refresh error:', err);
     }
@@ -203,24 +213,48 @@ export const AdminDashboard = ({ onLogout }) => {
       }).catch(() => {});
     }
 
-    // Fetch administrator profile from MySQL database
+    // Fetch administrator profile from MySQL database using actual logged-in admin credentials
     (async () => {
       try {
         const token = await getAuthToken();
-        const res = await fetch('/api/users/me', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'X-User-UID': 'admin-system',
-            'X-User-Email': 'admin@learnsmart.edu',
-            'X-User-Role': 'admin'
-          }
-        });
+        // Resolve actual admin identity from localStorage (set during login)
+        const actualUid =
+          localStorage.getItem('learnsmart_uid') ||
+          sessionStorage.getItem('learnsmart_uid') ||
+          '';
+        const actualEmail =
+          localStorage.getItem('learnsmart_email') ||
+          sessionStorage.getItem('learnsmart_email') ||
+          (() => {
+            try {
+              const raw = localStorage.getItem('learnsmart_admin');
+              if (raw && raw.trim().startsWith('{')) {
+                return JSON.parse(raw)?.email || '';
+              }
+            } catch { }
+            return 'admin@learnsmart.edu';
+          })();
+        const actualName =
+          localStorage.getItem('learnsmart_user') ||
+          sessionStorage.getItem('learnsmart_user') ||
+          'Admin';
+
+        const headers = {
+          'Authorization': `Bearer ${token}`,
+          'X-User-Role': 'admin'
+        };
+        if (actualUid) headers['X-User-UID'] = actualUid;
+        if (actualEmail) headers['X-User-Email'] = actualEmail;
+        if (actualName) headers['X-User-Name'] = actualName;
+
+        const res = await fetch('/api/users/me', { headers });
         if (res.ok) {
           const data = await res.json();
           if (data && data.name) {
             setAdminProfile((prev) => ({
               ...prev,
               fullName: data.name || prev.fullName,
+              email: data.email || prev.email,
               phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
               department: data.department || prev.department,
               title: data.title || prev.title,
@@ -612,14 +646,13 @@ export const AdminDashboard = ({ onLogout }) => {
             />
           )}
 
-          {/* System Analytics Tab */}
           {activeTab === 'analytics' && (
             <AdminAnalyticsView
               students={students}
               educators={educators}
               quizzes={quizzes}
               stats={stats}
-              submissions={sharedDatabase.getSubmissions()}
+              submissions={submissions}
             />
           )}
 

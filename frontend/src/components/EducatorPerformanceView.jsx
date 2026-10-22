@@ -147,7 +147,10 @@ export const EducatorPerformanceView = ({
         student.topSubject.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesStatus =
-        statusFilter === 'All' || student.status === statusFilter;
+        statusFilter === 'All' ||
+        (statusFilter === 'Attended' && (student.quizzesCompleted || 0) > 0) ||
+        (statusFilter === 'Not Attended' && (student.quizzesCompleted || 0) === 0) ||
+        student.status === statusFilter;
 
       return matchesSearch && matchesStatus;
     })
@@ -867,6 +870,8 @@ export const EducatorPerformanceView = ({
             className="educator-select-input"
           >
             <option value="All">Status: All</option>
+            <option value="Attended">Quiz Attended</option>
+            <option value="Not Attended">Quiz Not Attended</option>
             <option value="Top Performer">Top Performers</option>
             <option value="On Track">On Track</option>
             <option value="Needs Support">Needs Support</option>
@@ -945,7 +950,18 @@ export const EducatorPerformanceView = ({
                       {student.studentId}
                     </td>
                     <td style={{ fontWeight: 600, color: '#0F172A' }}>
-                      {student.quizzesCompleted}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{student.quizzesCompleted || 0}</span>
+                        {(student.quizzesCompleted || 0) > 0 ? (
+                          <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '0.72rem', fontWeight: 700, background: '#DCFCE7', color: '#15803D' }}>
+                            ✓ Attended
+                          </span>
+                        ) : (
+                          <span style={{ padding: '2px 8px', borderRadius: '9999px', fontSize: '0.72rem', fontWeight: 600, background: '#F1F5F9', color: '#64748B' }}>
+                            Not Attended
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

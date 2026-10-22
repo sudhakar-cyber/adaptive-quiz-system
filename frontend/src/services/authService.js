@@ -143,19 +143,33 @@ export const authService = {
   // Log in as Admin
   loginAdmin: (adminData = null) => {
     try {
-      const data = JSON.stringify(adminData || {
+      try {
+        localStorage.removeItem('learnsmart_student_profile');
+        localStorage.removeItem('learnsmart_avatar');
+        localStorage.removeItem('learnsmart_user_profile');
+        if (auth?.currentUser && auth.currentUser.email !== 'admin@learnsmart.edu') {
+          firebaseSignOut(auth).catch(() => {});
+        }
+      } catch {}
+
+      const resolvedAdmin = adminData || {
         name: 'Admin',
         fullName: 'System Administrator',
         email: 'admin@learnsmart.edu',
         role: 'admin',
         title: 'Administrator'
-      });
+      };
+      const data = JSON.stringify(resolvedAdmin);
+      const displayName = resolvedAdmin.fullName || resolvedAdmin.name || 'Admin';
+      const adminEmail = resolvedAdmin.email || 'admin@learnsmart.edu';
       localStorage.setItem('learnsmart_role', 'admin');
       localStorage.setItem('learnsmart_admin', data);
-      localStorage.setItem('learnsmart_user', 'Admin');
+      localStorage.setItem('learnsmart_user', displayName);
+      localStorage.setItem('learnsmart_email', adminEmail);
       sessionStorage.setItem('learnsmart_role', 'admin');
       sessionStorage.setItem('learnsmart_admin', data);
-      sessionStorage.setItem('learnsmart_user', 'Admin');
+      sessionStorage.setItem('learnsmart_user', displayName);
+      sessionStorage.setItem('learnsmart_email', adminEmail);
     } catch (err) {
       console.error('Failed to set admin session:', err);
     }
@@ -164,52 +178,94 @@ export const authService = {
   // Log in as Educator
   loginEducator: (educatorData = null) => {
     try {
+      // 1. Purge lingering student sessions and avatars so student data never leaks into educator dashboard
+      try {
+        localStorage.removeItem('learnsmart_student_profile');
+        localStorage.removeItem('learnsmart_avatar');
+        localStorage.removeItem('learnsmart_user_profile');
+      } catch {}
+
       const educatorsList = typeof sharedDatabase.getEducators === 'function'
         ? sharedDatabase.getEducators()
         : [];
+
+      let inputName = '';
+      let inputEmail = '';
+      let inputId = '';
+      let inputDept = '';
+
+      if (educatorData && typeof educatorData === 'object') {
+        inputName = (educatorData.name && educatorData.name !== 'Educator') ? educatorData.name : '';
+        inputEmail = educatorData.email || '';
+        inputId = educatorData.id || educatorData.educatorId || educatorData.facultyId || '';
+        inputDept = educatorData.department || '';
+      } else if (typeof educatorData === 'string' && educatorData !== 'Educator') {
+        if (educatorData.includes('@')) {
+          inputEmail = educatorData;
+        } else {
+          inputName = educatorData;
+        }
+      }
+
+      // If a student email was accidentally passed, never allow it to be stored as the educator email
+      const allStudents = typeof sharedDatabase.getAllStudents === 'function' ? sharedDatabase.getAllStudents() : [];
+      const isStudentEmail = inputEmail && allStudents.some((s) => s.email && s.email.toLowerCase() === inputEmail.toLowerCase());
+      if (isStudentEmail) {
+        inputEmail = '';
+      }
+
       const matched = educatorsList.find((e) => {
-        if (educatorData && typeof educatorData === 'object') {
-          if (educatorData.email && e.email?.toLowerCase() === educatorData.email.toLowerCase()) return true;
-          if (educatorData.name && educatorData.name !== 'Educator' && e.name?.toLowerCase() === educatorData.name.toLowerCase()) return true;
-        }
-        if (typeof educatorData === 'string' && educatorData !== 'Educator') {
-          if (e.name?.toLowerCase() === educatorData.toLowerCase() || e.email?.toLowerCase() === educatorData.toLowerCase()) return true;
-        }
+        if (inputEmail && e.email?.toLowerCase() === inputEmail.toLowerCase()) return true;
+        if (inputName && e.name?.toLowerCase() === inputName.toLowerCase()) return true;
         return false;
       }) || educatorsList[0] || null;
 
       const resolvedEducator = {
-        id: educatorData?.id || matched?.id || 'edu-201',
-        name:
-          (educatorData && typeof educatorData === 'object' && educatorData.name && educatorData.name !== 'Educator'
-            ? educatorData.name
-            : typeof educatorData === 'string' && educatorData !== 'Educator'
-              ? educatorData
-              : null) ||
-          matched?.name ||
-          'Dr. Sarah Jenkins',
-        email:
-          (educatorData && typeof educatorData === 'object' ? educatorData.email : '') ||
-          matched?.email ||
-          'educator@learnsmart.com',
-        educatorId:
-          (educatorData && typeof educatorData === 'object' ? educatorData.educatorId || educatorData.facultyId : '') ||
-          matched?.educatorId ||
-          'FAC-CS-2025-101',
-        department:
-          (educatorData && typeof educatorData === 'object' ? educatorData.department : '') ||
-          matched?.department ||
-          'Computer Science',
+        id: inputId || matched?.id || 'edu-201',
+        name: inputName || matched?.name || 'Dr. Sarah Jenkins',
+        email: inputEmail || matched?.email || 'educator@learnsmart.com',
+        educatorId: inputId || matched?.educatorId || 'FAC-CS-2025-101',
+        department: inputDept || matched?.department || 'Computer Science & Engineering',
         role: 'Educator'
       };
+
+      // If Firebase Auth currentUser is a student, sign out of Firebase to clear the token
+      if (auth?.currentUser) {
+        const currentFbEmail = (auth.currentUser.email || '').toLowerCase();
+        if (currentFbEmail !== resolvedEducator.email.toLowerCase()) {
+          firebaseSignOut(auth).catch(() => {});
+        }
+      }
 
       const data = JSON.stringify(resolvedEducator);
       localStorage.setItem('learnsmart_role', 'educator');
       localStorage.setItem('learnsmart_educator', data);
       localStorage.setItem('learnsmart_user', resolvedEducator.name);
+      localStorage.setItem('learnsmart_email', resolvedEducator.email);
+      localStorage.setItem('learnsmart_uid', resolvedEducator.id);
+
       sessionStorage.setItem('learnsmart_role', 'educator');
       sessionStorage.setItem('learnsmart_educator', data);
       sessionStorage.setItem('learnsmart_user', resolvedEducator.name);
+      sessionStorage.setItem('learnsmart_email', resolvedEducator.email);
+      sessionStorage.setItem('learnsmart_uid', resolvedEducator.id);
+
+      // Clean up educator profile cache so old student email is never reused
+      try {
+        const savedProfileRaw = localStorage.getItem('learnsmart_educator_profile');
+        if (savedProfileRaw) {
+          const parsed = JSON.parse(savedProfileRaw);
+          if (parsed.email !== resolvedEducator.email) {
+            localStorage.setItem('learnsmart_educator_profile', JSON.stringify({
+              ...parsed,
+              fullName: resolvedEducator.name,
+              email: resolvedEducator.email,
+              facultyId: resolvedEducator.educatorId,
+              department: resolvedEducator.department
+            }));
+          }
+        }
+      } catch {}
     } catch (err) {
       console.error('Failed to set educator session:', err);
     }
@@ -407,7 +463,17 @@ export const authService = {
         console.warn('Firestore login update warning:', fsErr);
       }
 
-      const resolvedRole = firestoreProfile?.role || 'student';
+      let resolvedRole = firestoreProfile?.role;
+      if (!resolvedRole || resolvedRole === 'student') {
+        const cleanUserEmail = (user.email || '').trim().toLowerCase();
+        if (cleanUserEmail === 'admin@learnsmart.edu' || (typeof sharedDatabase.getAdminUser === 'function' && sharedDatabase.getAdminUser(cleanUserEmail))) {
+          resolvedRole = 'admin';
+        } else if (cleanUserEmail === 'educator@learnsmart.com' || (typeof sharedDatabase.getEducatorByEmail === 'function' && sharedDatabase.getEducatorByEmail(cleanUserEmail))) {
+          resolvedRole = 'educator';
+        } else {
+          resolvedRole = resolvedRole || 'student';
+        }
+      }
       const studentName =
         (firestoreProfile?.displayName && firestoreProfile.displayName.trim()) ||
         (user.displayName && user.displayName.trim()) ||
