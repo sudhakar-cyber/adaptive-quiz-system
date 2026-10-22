@@ -47,6 +47,7 @@ def get_current_user_from_token(
     x_user_uid: Optional[str] = Header(None, alias="X-User-UID"),
     x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
     x_user_name: Optional[str] = Header(None, alias="X-User-Name"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
 ) -> Dict[str, Any]:
     """
     FastAPI dependency that extracts and validates the caller's Firebase Auth token.
@@ -62,6 +63,8 @@ def get_current_user_from_token(
         x_user_email = None
     if not isinstance(x_user_name, str):
         x_user_name = None
+    if not isinstance(x_user_role, str):
+        x_user_role = None
 
     if not authorization or not authorization.strip():
         raise HTTPException(
@@ -82,10 +85,29 @@ def get_current_user_from_token(
     uid = (x_user_uid or "").strip() or None
     email = (x_user_email or "").strip().lower() or None
     name = (x_user_name or "").strip() or None
+    req_role = (x_user_role or "").strip().lower() or None
 
     # Handle local role session tokens
     if raw_token in ("dev-admin-token", "admin-session-token"):
         with get_connection() as conn:
+            if uid or email:
+                cur = conn.execute(
+                    "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE (id = ? OR LOWER(email) = ?) AND role = 'admin'",
+                    (uid or "", email or "")
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "id": row["id"],
+                        "uid": row["id"],
+                        "email": row["email"],
+                        "name": row["name"],
+                        "role": "admin",
+                        "department": row.get("department"),
+                        "phone": row.get("phone"),
+                        "title": row.get("title"),
+                        "is_active": bool(row["is_active"])
+                    }
             cur = conn.execute("SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE role = 'admin' OR LOWER(email) = 'admin@learnsmart.edu'")
             row = cur.fetchone()
             if row:
@@ -100,11 +122,39 @@ def get_current_user_from_token(
                     "title": row.get("title"),
                     "is_active": bool(row["is_active"])
                 }
-        return {"id": "admin-system", "uid": "admin-system", "email": "admin@learnsmart.edu", "name": "System Administrator", "role": "admin", "is_active": True}
+        return {"id": "admin-system", "uid": "admin-system", "email": email or "admin@learnsmart.edu", "name": name or "System Administrator", "role": "admin", "is_active": True}
 
     if raw_token in ("dev-educator-token", "educator-session-token"):
         with get_connection() as conn:
-            cur = conn.execute("SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE role = 'educator' OR LOWER(email) IN ('educator@learnsmart.com', 'sarah.jenkins@learnsmart.edu')")
+            # 1. If an explicit educator identity was passed, only accept if it exists as an educator in MySQL
+            if uid or email:
+                cur = conn.execute(
+                    "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE (id = ? OR LOWER(email) = ?) AND role = 'educator'",
+                    (uid or "", email or "")
+                )
+                row = cur.fetchone()
+                if row:
+                    # Update name in DB if a genuine non-default name was provided
+                    if name and name != "Educator" and row["name"] != name:
+                        conn.execute("UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (name, row["id"]))
+                        conn.commit()
+                        row["name"] = name
+                    return {
+                        "id": row["id"],
+                        "uid": row["id"],
+                        "email": row["email"],
+                        "name": row["name"],
+                        "role": "educator",
+                        "department": row.get("department") or "Computer Science",
+                        "phone": row.get("phone") or "",
+                        "title": row.get("title") or "Faculty Member",
+                        "is_active": bool(row["is_active"])
+                    }
+
+            # 2. Otherwise, fetch the registered educator from MySQL
+            cur = conn.execute(
+                "SELECT id, name, email, role, department, phone, title, is_active FROM users WHERE role = 'educator' ORDER BY created_at ASC"
+            )
             row = cur.fetchone()
             if row:
                 return {
@@ -113,12 +163,22 @@ def get_current_user_from_token(
                     "email": row["email"],
                     "name": row["name"],
                     "role": "educator",
-                    "department": row.get("department"),
-                    "phone": row.get("phone"),
-                    "title": row.get("title"),
+                    "department": row.get("department") or "Computer Science",
+                    "phone": row.get("phone") or "",
+                    "title": row.get("title") or "Faculty Member",
                     "is_active": bool(row["is_active"])
                 }
-        return {"id": "edu-201", "uid": "edu-201", "email": "educator@learnsmart.com", "name": "Dr. Sarah Jenkins", "role": "educator", "is_active": True}
+        return {
+            "id": "edu-201",
+            "uid": "edu-201",
+            "email": "educator@learnsmart.com",
+            "name": "Dr. Sarah Jenkins",
+            "role": "educator",
+            "department": "Computer Science",
+            "phone": "",
+            "title": "Faculty Member",
+            "is_active": True
+        }
 
     if raw_token in ("dev-student-token", "student-session-token"):
         # For student session tokens, do NOT use hardcoded Demo Student!
@@ -180,12 +240,34 @@ def get_current_user_from_token(
                     detail="Your account has been deactivated. Please contact support."
                 )
 
+            current_role = row["role"]
+            user_email_clean = (row["email"] or "").lower()
+
+            # Strictly enforce verified roles - do not promote students based on req_role header alone
+            target_role = current_role
+            if user_email_clean in ADMIN_EMAILS:
+                target_role = "admin"
+            elif user_email_clean in EDUCATOR_EMAILS:
+                target_role = "educator"
+
+            if target_role != current_role:
+                conn.execute("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (target_role, row["id"]))
+                conn.commit()
+                current_role = target_role
+
+            # If an educator endpoint was requested with student credentials, reject to prevent student email leaks
+            if req_role == "educator" and current_role == "student":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. Student credentials cannot access educator resources."
+                )
+
             return {
                 "id": row["id"],
                 "uid": row["id"],
                 "email": row["email"],
                 "name": row["name"],
-                "role": row["role"],
+                "role": current_role,
                 "department": row.get("department"),
                 "phone": row.get("phone"),
                 "title": row.get("title"),
@@ -198,7 +280,13 @@ def get_current_user_from_token(
         if uid or email:
             clean_email = email or f"{uid}@user.learnsmart"
             clean_name = name or (clean_email.split("@")[0] if clean_email else "Learner")
-            assigned_role = "admin" if clean_email in ADMIN_EMAILS else ("educator" if clean_email in EDUCATOR_EMAILS else "student")
+            if clean_email in ADMIN_EMAILS:
+                assigned_role = "admin"
+            elif clean_email in EDUCATOR_EMAILS:
+                assigned_role = "educator"
+            else:
+                assigned_role = "student"
+
             user_id = uid or f"usr_{int(time.time() * 1000)}"
 
             conn.execute("""
@@ -206,6 +294,7 @@ def get_current_user_from_token(
                 VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
+                    role = VALUES(role),
                     updated_at = CURRENT_TIMESTAMP
             """, (user_id, clean_name, clean_email, assigned_role))
             conn.commit()

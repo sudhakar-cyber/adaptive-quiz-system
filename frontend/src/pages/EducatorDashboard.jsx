@@ -80,56 +80,75 @@ export const EducatorDashboard = ({ onLogout }) => {
       ? sharedDatabase.getEducators()
       : [];
 
+    const allStudents = typeof sharedDatabase.getAllStudents === 'function' ? sharedDatabase.getAllStudents() : [];
+    const isStudentEmail = (em) => {
+      if (!em) return false;
+      const lower = em.toLowerCase();
+      return allStudents.some((s) => s.email && s.email.toLowerCase() === lower);
+    };
+
+    let activeEmail = storedAuthEducator?.email;
+    if (activeEmail && isStudentEmail(activeEmail)) {
+      activeEmail = null;
+    }
+
+    if (!activeEmail) {
+      const localEmail = localStorage.getItem('learnsmart_email');
+      if (localEmail && !isStudentEmail(localEmail) && !localEmail.includes('student')) {
+        activeEmail = localEmail;
+      }
+    }
+
+    if (!activeEmail && storedProfile?.email && !isStudentEmail(storedProfile.email)) {
+      activeEmail = storedProfile.email;
+    }
+
+    if (!activeEmail) {
+      activeEmail = educatorsList[0]?.email || 'educator@learnsmart.com';
+    }
+
+    const storedUser = localStorage.getItem('learnsmart_user') || sessionStorage.getItem('learnsmart_user');
+
     const matchedEducator = educatorsList.find((e) => {
-      if (storedAuthEducator?.email && e.email?.toLowerCase() === storedAuthEducator.email.toLowerCase()) return true;
-      if (storedProfile?.email && e.email?.toLowerCase() === storedProfile.email.toLowerCase()) return true;
+      if (activeEmail && e.email?.toLowerCase() === activeEmail.toLowerCase()) return true;
       if (storedAuthEducator?.name && storedAuthEducator.name !== 'Educator' && e.name?.toLowerCase() === storedAuthEducator.name.toLowerCase()) return true;
       return false;
     }) || educatorsList[0] || null;
 
-    const base = { ...INITIAL_EDUCATOR_PROFILE, ...(storedProfile || {}) };
+    const base = { ...INITIAL_EDUCATOR_PROFILE, ...(storedProfile?.email === activeEmail && !isStudentEmail(storedProfile?.email) ? storedProfile : {}) };
 
     const resolvedName =
-      (base.fullName && base.fullName !== 'Educator' ? base.fullName : null) ||
       (storedAuthEducator?.name && storedAuthEducator.name !== 'Educator' ? storedAuthEducator.name : null) ||
+      (storedUser && storedUser !== 'Educator' && storedUser !== 'educator' ? storedUser : null) ||
+      (storedProfile?.email === activeEmail && storedProfile?.fullName && storedProfile.fullName !== 'Educator' ? storedProfile.fullName : null) ||
       matchedEducator?.name ||
-      (INITIAL_EDUCATOR_PROFILE.fullName && INITIAL_EDUCATOR_PROFILE.fullName !== 'Educator'
-        ? INITIAL_EDUCATOR_PROFILE.fullName
-        : 'Dr. Sarah Jenkins');
-
-    const resolvedEmail =
-      base.email ||
-      storedAuthEducator?.email ||
-      matchedEducator?.email ||
-      INITIAL_EDUCATOR_PROFILE.email ||
-      'educator@learnsmart.com';
+      'Dr. Sarah Jenkins';
 
     const resolvedFacultyId =
-      base.facultyId ||
       storedAuthEducator?.educatorId ||
       storedAuthEducator?.facultyId ||
+      (storedProfile?.email === activeEmail ? storedProfile?.facultyId : null) ||
       matchedEducator?.educatorId ||
-      matchedEducator?.facultyId ||
-      INITIAL_EDUCATOR_PROFILE.facultyId ||
       'FAC-CS-2025-101';
 
     const resolvedDepartment =
-      base.department ||
       storedAuthEducator?.department ||
+      (storedProfile?.email === activeEmail ? storedProfile?.department : null) ||
       matchedEducator?.department ||
-      INITIAL_EDUCATOR_PROFILE.department ||
       'Computer Science & Engineering';
 
     const finalProfile = {
       ...base,
       fullName: resolvedName,
-      email: resolvedEmail,
+      email: activeEmail,
       facultyId: resolvedFacultyId,
       department: resolvedDepartment
     };
 
     try {
       localStorage.setItem('learnsmart_educator_profile', JSON.stringify(finalProfile));
+      localStorage.setItem('learnsmart_email', activeEmail);
+      localStorage.setItem('learnsmart_user', resolvedName);
     } catch {
       // ignore
     }
@@ -230,32 +249,78 @@ export const EducatorDashboard = ({ onLogout }) => {
       }).catch(() => {});
     }
 
-    // Fetch educator profile from MySQL database
+    // Fetch educator profile from MySQL database using actual logged-in educator credentials
     (async () => {
       try {
         const token = await getAuthToken();
-        const res = await fetch('/api/users/me', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'X-User-UID': 'edu-201',
-            'X-User-Email': 'educator@learnsmart.com',
-            'X-User-Role': 'educator'
-          }
-        });
+        // Resolve actual educator identity from localStorage (set during login)
+        const actualUid =
+          localStorage.getItem('learnsmart_uid') ||
+          sessionStorage.getItem('learnsmart_uid') ||
+          '';
+        const actualEmail =
+          localStorage.getItem('learnsmart_email') ||
+          sessionStorage.getItem('learnsmart_email') ||
+          (() => {
+            try {
+              const raw = localStorage.getItem('learnsmart_educator');
+              if (raw && raw.trim().startsWith('{')) {
+                return JSON.parse(raw)?.email || '';
+              }
+            } catch { }
+            return '';
+          })();
+        const actualName =
+          localStorage.getItem('learnsmart_user') ||
+          sessionStorage.getItem('learnsmart_user') ||
+          '';
+
+        const headers = {
+          'Authorization': `Bearer ${token}`,
+          'X-User-Role': 'educator'
+        };
+        if (actualUid) headers['X-User-UID'] = actualUid;
+        if (actualEmail) headers['X-User-Email'] = actualEmail;
+        if (actualName) headers['X-User-Name'] = actualName;
+
+        const res = await fetch('/api/users/me', { headers });
         if (res.ok) {
           const data = await res.json();
+          // Never accept a student profile on educator dashboard
+          if (data && data.role === 'student') {
+            console.warn('Backend returned student profile for educator dashboard; ignored.');
+            return;
+          }
           if (data && data.name) {
-            setProfileData((prev) => ({
-              ...prev,
-              fullName: data.name || prev.fullName,
-              phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
-              department: data.department || prev.department,
-              academicTitle: data.title || prev.academicTitle,
-              bio: data.bio || prev.bio,
-              avatarImage: data.avatar_url || prev.avatarImage
-            }));
-            if (data.avatar_url) {
-              setAvatarImage(data.avatar_url);
+            const allStudents = typeof sharedDatabase.getAllStudents === 'function' ? sharedDatabase.getAllStudents() : [];
+            const isStudent = (data.email && allStudents.some((s) => s.email && s.email.toLowerCase() === data.email.toLowerCase())) ||
+              data.role === 'student';
+
+            if (!isStudent) {
+              setProfileData((prev) => ({
+                ...prev,
+                fullName: (data.name && data.name !== 'Educator') ? data.name : prev.fullName,
+                email: (data.email && data.role === 'educator') ? data.email : prev.email,
+                phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
+                department: data.department || prev.department,
+                academicTitle: data.title || prev.academicTitle,
+                bio: data.bio || prev.bio,
+                avatarImage: data.avatar_url || prev.avatarImage
+              }));
+              if (data.avatar_url) {
+                setAvatarImage(data.avatar_url);
+              }
+              // Update localStorage with real educator name and email from DB
+              if (data.name && data.name !== 'Educator') {
+                try {
+                  const raw = localStorage.getItem('learnsmart_educator');
+                  const parsed = raw && raw.trim().startsWith('{') ? JSON.parse(raw) : {};
+                  const safeEmail = (data.email && data.role === 'educator') ? data.email : (parsed.email || 'educator@learnsmart.com');
+                  localStorage.setItem('learnsmart_educator', JSON.stringify({ ...parsed, name: data.name, email: safeEmail }));
+                  localStorage.setItem('learnsmart_user', data.name);
+                  localStorage.setItem('learnsmart_email', safeEmail);
+                } catch { }
+              }
             }
           }
         }

@@ -23,6 +23,7 @@ export const AdminUserManagementView = ({
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [attendanceFilter, setAttendanceFilter] = useState('all');
   const [sortBy, setSortBy] = useState('joined');
   const [selectedUser, setSelectedUser] = useState(null); // For details modal
 
@@ -46,7 +47,12 @@ export const AdminUserManagementView = ({
       (statusFilter === 'active' && u.isActive !== false) ||
       (statusFilter === 'inactive' && u.isActive === false);
 
-    return matchSearch && matchRole && matchStatus;
+    const matchAttendance =
+      attendanceFilter === 'all' ||
+      (attendanceFilter === 'attended' && u.role?.toLowerCase() === 'student' && (u.quizzesCompleted || 0) > 0) ||
+      (attendanceFilter === 'not_attended' && u.role?.toLowerCase() === 'student' && (u.quizzesCompleted || 0) === 0);
+
+    return matchSearch && matchRole && matchStatus && matchAttendance;
   });
 
   // Sort
@@ -113,6 +119,19 @@ export const AdminUserManagementView = ({
           </select>
         </div>
 
+        {/* Attendance Filter */}
+        <div className="filter-select-group">
+          <label>Quiz Attendance:</label>
+          <select
+            value={attendanceFilter}
+            onChange={(e) => setAttendanceFilter(e.target.value)}
+          >
+            <option value="all">All Cohort</option>
+            <option value="attended">Attended Quizzes</option>
+            <option value="not_attended">Not Attended</option>
+          </select>
+        </div>
+
         {/* Sort Filter */}
         <div className="filter-select-group">
           <label>Sort By:</label>
@@ -163,6 +182,7 @@ export const AdminUserManagementView = ({
                 <th>User Details</th>
                 <th>Role</th>
                 <th>Status</th>
+                <th>Quizzes Attended</th>
                 <th>Joined Date</th>
                 <th>Last Active</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -171,7 +191,7 @@ export const AdminUserManagementView = ({
             <tbody>
               {sortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="table-empty-cell">
+                  <td colSpan="7" className="table-empty-cell">
                     No users match your current search and filter criteria.
                   </td>
                 </tr>
@@ -209,6 +229,27 @@ export const AdminUserManagementView = ({
                         <span className={`status-badge ${isActive ? 'active' : 'inactive'}`}>
                           {isActive ? 'Active' : 'Inactive'}
                         </span>
+                      </td>
+
+                      {/* Quizzes Attended */}
+                      <td>
+                        {u.role?.toLowerCase() === 'student' ? (
+                          (u.quizzesCompleted || 0) > 0 ? (
+                            <span className="status-badge active" style={{ fontSize: '0.78rem', background: '#DCFCE7', color: '#15803D' }}>
+                              ✓ Attended ({u.quizzesCompleted})
+                            </span>
+                          ) : (
+                            <span className="status-badge inactive" style={{ fontSize: '0.78rem', background: '#F1F5F9', color: '#64748B' }}>
+                              Not Attended
+                            </span>
+                          )
+                        ) : u.role?.toLowerCase() === 'educator' ? (
+                          <span style={{ fontSize: '0.82rem', color: '#475569', fontWeight: 600 }}>
+                            {u.quizzesCreated || 0} Quizzes Created
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.82rem', color: '#94A3B8' }}>System Admin</span>
+                        )}
                       </td>
 
                       {/* Joined Date */}
@@ -323,44 +364,46 @@ export const AdminUserManagementView = ({
                   <h4 className="analytics-section-heading">Student Performance & Tracking</h4>
                   <div className="metrics-strip">
                     <div className="metric-box">
-                      <span className="metric-val">{selectedUser.quizzesCompleted || 18}</span>
+                      <span className="metric-val">{selectedUser.quizzesCompleted ?? 0}</span>
                       <span className="metric-lbl">Quizzes Attempted</span>
                     </div>
                     <div className="metric-box">
-                      <span className="metric-val">{selectedUser.quizzesCompleted || 18}</span>
+                      <span className="metric-val">{selectedUser.quizzesCompleted ?? 0}</span>
                       <span className="metric-lbl">Completed</span>
                     </div>
                     <div className="metric-box">
-                      <span className="metric-val">{selectedUser.avgScore ? `${selectedUser.avgScore}%` : '85.4%'}</span>
+                      <span className="metric-val">{selectedUser.avgScore !== undefined && selectedUser.avgScore !== null ? `${selectedUser.avgScore}%` : '0%'}</span>
                       <span className="metric-lbl">Average Score</span>
                     </div>
                     <div className="metric-box">
-                      <span className="metric-val">{selectedUser.highestScore ? `${selectedUser.highestScore}%` : '96%'}</span>
+                      <span className="metric-val">{selectedUser.highestScore !== undefined && selectedUser.highestScore !== null ? `${selectedUser.highestScore}%` : '0%'}</span>
                       <span className="metric-lbl">Highest Score</span>
                     </div>
                     <div className="metric-box">
-                      <span className="metric-val">92%</span>
+                      <span className="metric-val">{(selectedUser.quizzesCompleted || 0) > 0 ? '100%' : '0%'}</span>
                       <span className="metric-lbl">Completion Rate</span>
                     </div>
                   </div>
 
                   <h5 className="sub-heading">Recent Quiz Activity</h5>
                   <div className="recent-activity-list">
-                    {(selectedUser.raw?.recentSubmissions || [
-                      { title: 'Python Basics & Logic', score: '92%', status: 'Completed', date: '28 Sep 2025' },
-                      { title: 'Data Structures Mastery', score: '88%', status: 'Completed', date: '25 Sep 2025' },
-                      { title: 'Cyber Security Essentials', score: '76%', status: 'Completed', date: '20 Sep 2025' }
-                    ]).map((act, i) => (
-                      <div key={i} className="activity-item-row">
-                        <div className="activity-title-cell">
-                          <BookOpenIcon size={16} color="#6366F1" />
-                          <span>{act.title}</span>
+                    {(selectedUser.raw?.recentSubmissions && selectedUser.raw.recentSubmissions.length > 0) ? (
+                      selectedUser.raw.recentSubmissions.map((act, i) => (
+                        <div key={i} className="activity-item-row">
+                          <div className="activity-title-cell">
+                            <BookOpenIcon size={16} color="#6366F1" />
+                            <span>{act.title}</span>
+                          </div>
+                          <span className="activity-score">{act.score}</span>
+                          <span className="status-badge active">{act.status}</span>
+                          <span className="activity-date">{act.date}</span>
                         </div>
-                        <span className="activity-score">{act.score}</span>
-                        <span className="status-badge active">{act.status}</span>
-                        <span className="activity-date">{act.date}</span>
+                      ))
+                    ) : (
+                      <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.85rem' }}>
+                        No quiz attempts recorded yet. Student has not attended any quizzes.
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
               )}

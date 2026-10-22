@@ -8,6 +8,23 @@ from app.db import get_connection
 
 logger = logging.getLogger("quiz_controller")
 
+CATEGORY_STYLES = {
+    "Programming": {"bg": "#E0F2FE", "color": "#0369A1"},
+    "Cyber Security": {"bg": "#FEE2E2", "color": "#B91C1C"},
+    "DSA": {"bg": "#EDE9FE", "color": "#6D28D9"},
+    "Machine Learning": {"bg": "#FEF3C7", "color": "#B45309"},
+    "Cloud Computing": {"bg": "#E0E7FF", "color": "#4338CA"},
+    "Database Systems": {"bg": "#DCFCE7", "color": "#15803D"},
+    "Web Development": {"bg": "#FCE7F3", "color": "#BE185D"},
+    "Computer Networks": {"bg": "#CCFBF1", "color": "#0F766E"},
+}
+
+DIFFICULTY_STYLES = {
+    "Easy": {"bg": "#D1FAE5", "color": "#047857"},
+    "Medium": {"bg": "#FFEDD5", "color": "#C2410C"},
+    "Hard": {"bg": "#FEE2E2", "color": "#B91C1C"},
+}
+
 def get_all_quizzes(role: str = "student", current_user: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
     Returns list of quizzes.
@@ -32,19 +49,33 @@ def get_all_quizzes(role: str = "student", current_user: Optional[Dict[str, Any]
             )
             questions = []
             for q_row in q_cur.fetchall():
+                raw_opts = q_row["options_json"]
+                try:
+                    opts = json.loads(raw_opts) if isinstance(raw_opts, str) else (raw_opts or [])
+                except Exception:
+                    opts = []
                 questions.append({
                     "id": q_row["id"],
                     "question": q_row["question_text"],
-                    "options": json.loads(q_row["options_json"]),
+                    "options": opts,
                     "correctIndex": q_row["correct_index"],
-                    "explanation": q_row["explanation"]
+                    "explanation": q_row["explanation"] or ""
                 })
+
+            cat_st = CATEGORY_STYLES.get(q.get("category"), {"bg": "#E0F2FE", "color": "#0369A1"})
+            diff_st = DIFFICULTY_STYLES.get(q.get("difficulty"), {"bg": "#FFEDD5", "color": "#C2410C"})
+
             q["questions"] = questions
-            q["questionsCount"] = len(questions) if questions else q["questions_count"]
-            q["isRecommended"] = bool(q["is_recommended"])
-            q["submissionsCount"] = q["submissions_count"]
-            q["avgScore"] = q["avg_score"]
-            q["passRate"] = q["pass_rate"]
+            q["questionsCount"] = len(questions) if questions else (q.get("questions_count") or 0)
+            q["isRecommended"] = bool(q.get("is_recommended", 1))
+            q["recommendationReason"] = q.get("recommendation_reason") or "Curriculum Assessment • Assigned by Educator"
+            q["categoryBg"] = cat_st["bg"]
+            q["categoryColor"] = cat_st["color"]
+            q["diffBg"] = diff_st["bg"]
+            q["diffColor"] = diff_st["color"]
+            q["submissionsCount"] = q.get("submissions_count") or 0
+            q["avgScore"] = q.get("avg_score") or 0.0
+            q["passRate"] = q.get("pass_rate") or 0.0
             quizzes.append(q)
             
         return quizzes
@@ -57,7 +88,7 @@ def get_quiz_by_id(quiz_id: str, role: str = "student") -> Optional[Dict[str, An
         if not row:
             return None
         q = dict(row)
-        if role.lower() == "student" and q["status"].lower() not in ("active", "published"):
+        if role.lower() == "student" and (q.get("status") or "").lower() not in ("active", "published"):
             return None  # Drafts hidden from students
 
         q_cur = conn.execute(
@@ -66,35 +97,55 @@ def get_quiz_by_id(quiz_id: str, role: str = "student") -> Optional[Dict[str, An
         )
         questions = []
         for q_row in q_cur.fetchall():
+            raw_opts = q_row["options_json"]
+            try:
+                opts = json.loads(raw_opts) if isinstance(raw_opts, str) else (raw_opts or [])
+            except Exception:
+                opts = []
             questions.append({
                 "id": q_row["id"],
                 "question": q_row["question_text"],
-                "options": json.loads(q_row["options_json"]),
+                "options": opts,
                 "correctIndex": q_row["correct_index"],
-                "explanation": q_row["explanation"]
+                "explanation": q_row["explanation"] or ""
             })
+
+        cat_st = CATEGORY_STYLES.get(q.get("category"), {"bg": "#E0F2FE", "color": "#0369A1"})
+        diff_st = DIFFICULTY_STYLES.get(q.get("difficulty"), {"bg": "#FFEDD5", "color": "#C2410C"})
+
         q["questions"] = questions
         q["questionsCount"] = len(questions)
-        q["isRecommended"] = bool(q["is_recommended"])
-        q["submissionsCount"] = q["submissions_count"]
-        q["avgScore"] = q["avg_score"]
-        q["passRate"] = q["pass_rate"]
+        q["isRecommended"] = bool(q.get("is_recommended", 1))
+        q["recommendationReason"] = q.get("recommendation_reason") or "Curriculum Assessment • Assigned by Educator"
+        q["categoryBg"] = cat_st["bg"]
+        q["categoryColor"] = cat_st["color"]
+        q["diffBg"] = diff_st["bg"]
+        q["diffColor"] = diff_st["color"]
+        q["submissionsCount"] = q.get("submissions_count") or 0
+        q["avgScore"] = q.get("avg_score") or 0.0
+        q["passRate"] = q.get("pass_rate") or 0.0
         return q
 
 def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any]) -> Dict[str, Any]:
     """Creates or updates a quiz in the database."""
-    quiz_id = quiz_data.get("id") or f"quiz-{int(time.time() * 1000)}"
-    title = quiz_data.get("title", "Untitled Quiz").strip()
-    category = quiz_data.get("category", "General")
-    difficulty = quiz_data.get("difficulty", "Medium")
-    duration = quiz_data.get("duration", "15 mins")
-    raw_status = quiz_data.get("status", "Active").strip()
+    quiz_id = str(quiz_data.get("id") or f"quiz-{int(time.time() * 1000)}").strip()
+    title = str(quiz_data.get("title", "Untitled Quiz")).strip()
+    category = str(quiz_data.get("category") or "General").strip()
+    difficulty = str(quiz_data.get("difficulty") or "Medium").strip()
+    duration = str(quiz_data.get("duration") or "15 mins").strip()
+    raw_status = str(quiz_data.get("status") or "Active").strip()
     status = "Draft" if raw_status.lower() == "draft" else "Active"
     is_rec = 1 if quiz_data.get("isRecommended", True) else 0
-    rec_reason = quiz_data.get("recommendationReason", "Curriculum Assessment • Assigned by Educator")
-    desc = quiz_data.get("description", "")
-    author_id = current_user.get("uid") or "educator"
-    author_name = current_user.get("name") or "Educator"
+    rec_reason = str(quiz_data.get("recommendationReason") or "Curriculum Assessment • Assigned by Educator").strip()
+    desc = str(quiz_data.get("description") or "").strip()
+    author_id = current_user.get("uid") or current_user.get("id") or "educator"
+    # Prefer author_name from quiz_data (frontend sends real educator name), fallback to current_user
+    author_name = (
+        str(quiz_data.get("author_name") or "").strip() or
+        str(quiz_data.get("createdBy") or "").strip() or
+        str(current_user.get("name") or "").strip() or
+        "Educator"
+    )
     questions = quiz_data.get("questions") or []
 
     with get_connection() as conn:
@@ -120,10 +171,13 @@ def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any
         conn.execute("DELETE FROM questions WHERE quiz_id = ?", (quiz_id,))
         for idx, q in enumerate(questions):
             q_id = str(q.get("id") or f"{quiz_id}-q{idx+1}")
-            q_text = q.get("question", "").strip()
-            options = q.get("options") or ["", "", "", ""]
-            c_idx = int(q.get("correctIndex", 0))
-            expl = q.get("explanation", "")
+            q_text = str(q.get("question") or q.get("question_text") or "").strip()
+            options = q.get("options") or ["Option A", "Option B", "Option C", "Option D"]
+            try:
+                c_idx = int(q.get("correctIndex", q.get("correct_index", 0)))
+            except (ValueError, TypeError):
+                c_idx = 0
+            expl = str(q.get("explanation") or "")
             conn.execute("""
                 INSERT INTO questions (id, quiz_id, question_text, options_json, correct_index, explanation, order_index)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -136,6 +190,8 @@ def create_or_upsert_quiz(quiz_data: Dict[str, Any], current_user: Dict[str, Any
 def delete_quiz(quiz_id: str) -> bool:
     """Deletes a quiz and cascade deletes its questions and attempts."""
     with get_connection() as conn:
+        conn.execute("DELETE FROM questions WHERE quiz_id = ?", (quiz_id,))
+        conn.execute("DELETE FROM quiz_attempts WHERE quiz_id = ?", (quiz_id,))
         cur = conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
         conn.commit()
         return cur.rowcount > 0
@@ -192,6 +248,25 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
                 quiz = get_quiz_by_id(quiz_id, role="educator")
 
     if not quiz:
+        # If the quiz was not found in MySQL, auto-create it so the attempt and foreign key succeed
+        auto_title = attempt_data.get("quizTitle") or f"Quiz {quiz_id}"
+        auto_cat = attempt_data.get("category") or "General"
+        auto_q_count = int(attempt_data.get("totalQuestions") or 5)
+        with get_connection() as conn:
+            conn.execute("""
+                INSERT INTO quizzes (
+                    id, title, category, difficulty, duration, status, is_recommended,
+                    description, questions_count, author_id, author_name, created_at, updated_at
+                ) VALUES (?, ?, ?, 'Medium', '15 mins', 'Active', 1, 'Assessment Quiz', ?, 'educator', 'Educator', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON DUPLICATE KEY UPDATE
+                    title = VALUES(title),
+                    status = 'Active',
+                    updated_at = CURRENT_TIMESTAMP
+            """, (quiz_id, auto_title, auto_cat, auto_q_count))
+            conn.commit()
+        quiz = get_quiz_by_id(quiz_id, role="educator")
+
+    if not quiz:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Genuine quiz with ID '{quiz_id}' not found in database. Cannot submit attempt for non-existent quiz."
@@ -201,21 +276,7 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
     genuine_quiz_title = quiz["title"]
     genuine_quiz_cat = quiz.get("category") or "General"
 
-    # 3. Check and prevent duplicate submissions
-    with get_connection() as conn:
-        cur = conn.execute("""
-            SELECT id, score, status, submitted_at
-            FROM quiz_attempts
-            WHERE quiz_id = ? AND (student_id = ? OR LOWER(student_email) = ?)
-        """, (genuine_quiz_id, student_id, student_email))
-        existing_attempt = cur.fetchone()
-        if existing_attempt:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Student '{student_name}' has already submitted quiz '{genuine_quiz_title}'. Duplicate submissions are not permitted."
-            )
-
-    # 4. Backend validation of answers against MySQL questions
+    # 3. Backend validation of answers against MySQL questions
     questions = quiz.get("questions") or []
     answers = attempt_data.get("answers") or attempt_data.get("selectedAnswers") or {}
 
@@ -250,19 +311,37 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
         score_pct = 0.0
         correct_count = 0
 
-    # 5. Compute genuine pass/fail status (passing grade threshold >= 70%)
+    # 4. Compute genuine pass/fail status (passing grade threshold >= 70%)
     pass_status = "Passed" if score_pct >= 70.0 else "Failed"
 
     # Deterministic structured attempt ID
-    attempt_id = f"attempt_{genuine_quiz_id}_{student_id}"
+    attempt_id = attempt_data.get("id") or f"attempt_{genuine_quiz_id}_{student_id}"
 
-    # 6. Save attempt and update quiz aggregate metrics in MySQL
+    # 5. Save attempt and update quiz aggregate metrics in MySQL
     with get_connection() as conn:
+        # Ensure student exists in users table with role = 'student'
+        if student_id or student_email:
+            user_id = student_id or f"stud-{student_email.split('@')[0]}"
+            conn.execute("""
+                INSERT INTO users (id, name, email, role, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 'student', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    updated_at = CURRENT_TIMESTAMP
+            """, (user_id, student_name, student_email))
+
         conn.execute("""
             INSERT INTO quiz_attempts (
                 id, quiz_id, quiz_title, category, student_id, student_name, student_email,
                 score, total_questions, correct_count, status, answers_json, submitted_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE
+                score = VALUES(score),
+                total_questions = VALUES(total_questions),
+                correct_count = VALUES(correct_count),
+                status = VALUES(status),
+                answers_json = VALUES(answers_json),
+                submitted_at = CURRENT_TIMESTAMP
         """, (
             attempt_id, genuine_quiz_id, genuine_quiz_title, genuine_quiz_cat,
             student_id, student_name, student_email, score_pct, total_q, correct_count,
@@ -320,6 +399,8 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
         submissions = []
         for row in cur.fetchall():
             s = dict(row)
+            sub_date = s.get("submitted_at")
+            formatted_date = sub_date.strftime("%b %d, %Y") if hasattr(sub_date, "strftime") else (str(sub_date) if sub_date else "Today")
             submissions.append({
                 "id": s["id"],
                 "quizId": s["quiz_id"],
@@ -333,7 +414,8 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
                 "totalQuestions": s["total_questions"],
                 "correctCount": s["correct_count"],
                 "status": s["status"],
-                "date": s["submitted_at"]
+                "date": formatted_date,
+                "submittedAt": sub_date.isoformat() if hasattr(sub_date, "isoformat") else str(sub_date or "")
             })
         return submissions
 
@@ -444,22 +526,20 @@ def compute_real_analytics(timeframe: str = "Last 30 Days") -> Dict[str, Any]:
             student_scores[email]["scores"].append(a["score"])
             student_scores[email]["quizzesCompleted"] += 1
 
-        top_students = []
+        all_student_list = []
         for s in student_scores.values():
             avg_sc = round(sum(s["scores"]) / len(s["scores"]), 1)
-            top_students.append({
+            all_student_list.append({
                 "name": s["name"],
                 "email": s["email"],
                 "studentId": s["studentId"],
                 "quizzesCompleted": s["quizzesCompleted"],
                 "avgScore": avg_sc
             })
-        top_students.sort(key=lambda x: (x["avgScore"], x["quizzesCompleted"]), reverse=True)
-        top_students = top_students[:5]
+        top_students = sorted(all_student_list, key=lambda x: (x["avgScore"], x["quizzesCompleted"]), reverse=True)[:5]
 
         # Students needing support (< 70% average)
-        support_students = [s for s in top_students if s["avgScore"] < 70.0]
-        support_students.sort(key=lambda x: x["avgScore"])
+        support_students = sorted([s for s in all_student_list if s["avgScore"] < 70.0], key=lambda x: x["avgScore"])[:5]
 
         return {
             "kpis": {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import sharedDatabase from '../services/sharedDatabase';
 import {
   SearchIcon,
   EditIcon,
@@ -40,6 +41,7 @@ export const EducatorManageQuizzesView = ({
   const [editingQuiz, setEditingQuiz] = useState(null);
   const [viewingQuestionsQuiz, setViewingQuestionsQuiz] = useState(null);
   const [deleteConfirmQuiz, setDeleteConfirmQuiz] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form State for Create / Edit
   const [formData, setFormData] = useState({
@@ -209,19 +211,23 @@ export const EducatorManageQuizzesView = ({
 
     if (editingQuiz) {
       // Update existing
+      const updatedFields = {
+        title: formData.title.trim(),
+        category: formData.category,
+        difficulty: formData.difficulty,
+        duration: formData.duration,
+        status: formData.status,
+        description: formData.description.trim(),
+        questionsCount: formData.questions.length,
+        questions: formData.questions,
+        lastUpdated: 'Just now'
+      };
+      sharedDatabase.updateQuiz(editingQuiz.id, updatedFields);
       const updatedList = quizzes.map((q) => {
         if (q.id === editingQuiz.id) {
           return {
             ...q,
-            title: formData.title.trim(),
-            category: formData.category,
-            difficulty: formData.difficulty,
-            duration: formData.duration,
-            status: formData.status,
-            description: formData.description.trim(),
-            questionsCount: formData.questions.length,
-            questions: formData.questions,
-            lastUpdated: 'Just now'
+            ...updatedFields
           };
         }
         return q;
@@ -251,6 +257,7 @@ export const EducatorManageQuizzesView = ({
         description: formData.description.trim() || 'Custom educator created quiz.',
         questions: formData.questions
       };
+      sharedDatabase.addQuiz(newQuiz);
       onUpdateQuizzes([newQuiz, ...quizzes]);
       if (showToast) showToast(`New quiz "${formData.title}" published successfully!`);
     }
@@ -269,23 +276,55 @@ export const EducatorManageQuizzesView = ({
       passRate: 0,
       lastUpdated: 'Just now'
     };
+    sharedDatabase.addQuiz(cloned);
     onUpdateQuizzes([cloned, ...quizzes]);
     if (showToast) showToast(`Duplicated "${quiz.title}" as Draft!`);
   };
 
   const handleToggleStatus = (quiz) => {
     const nextStatus = quiz.status === 'Active' ? 'Draft' : quiz.status === 'Draft' ? 'Archived' : 'Active';
-    const updated = quizzes.map((q) => (q.id === quiz.id ? { ...q, status: nextStatus, lastUpdated: 'Just now' } : q));
+    sharedDatabase.updateQuiz(quiz.id, {
+      status: nextStatus,
+      isRecommended: nextStatus === 'Active',
+      lastUpdated: 'Just now'
+    });
+    const updated = quizzes.map((q) => (q.id === quiz.id ? { ...q, status: nextStatus, isRecommended: nextStatus === 'Active', lastUpdated: 'Just now' } : q));
     onUpdateQuizzes(updated);
     if (showToast) showToast(`"${quiz.title}" status changed to ${nextStatus}.`);
   };
 
-  const handleDeleteQuiz = () => {
-    if (!deleteConfirmQuiz) return;
-    const updated = quizzes.filter((q) => q.id !== deleteConfirmQuiz.id);
-    onUpdateQuizzes(updated);
-    if (showToast) showToast(`Quiz "${deleteConfirmQuiz.title}" deleted.`);
-    setDeleteConfirmQuiz(null);
+  const handleDeleteQuiz = async () => {
+    if (!deleteConfirmQuiz || isDeleting) return;
+    const quizToDelete = deleteConfirmQuiz;
+    setIsDeleting(true);
+    try {
+      if (sharedDatabase && typeof sharedDatabase.removeQuiz === 'function') {
+        sharedDatabase.removeQuiz(quizToDelete.id);
+      }
+      const updated = quizzes.filter(
+        (q) => String(q.id).trim() !== String(quizToDelete.id).trim()
+      );
+      if (typeof onUpdateQuizzes === 'function') {
+        onUpdateQuizzes(updated);
+      }
+      if (viewingQuestionsQuiz && String(viewingQuestionsQuiz.id).trim() === String(quizToDelete.id).trim()) {
+        setViewingQuestionsQuiz(null);
+      }
+      if (editingQuiz && String(editingQuiz.id).trim() === String(quizToDelete.id).trim()) {
+        setEditingQuiz(null);
+      }
+      if (showToast) {
+        showToast(`Quiz "${quizToDelete.title}" deleted.`);
+      }
+      setDeleteConfirmQuiz(null);
+    } catch (err) {
+      console.error('Failed to delete quiz:', err);
+      if (showToast) {
+        showToast('Failed to delete quiz. Please try again.');
+      }
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Stats
@@ -918,12 +957,14 @@ export const EducatorManageQuizzesView = ({
               <button
                 type="button"
                 className="educator-secondary-btn"
+                disabled={isDeleting}
                 onClick={() => setDeleteConfirmQuiz(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
+                disabled={isDeleting}
                 style={{
                   background: '#DC2626',
                   color: '#FFFFFF',
@@ -931,11 +972,12 @@ export const EducatorManageQuizzesView = ({
                   borderRadius: '10px',
                   border: 'none',
                   fontWeight: 600,
-                  cursor: 'pointer'
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  opacity: isDeleting ? 0.7 : 1
                 }}
                 onClick={handleDeleteQuiz}
               >
-                Yes, Delete Quiz
+                {isDeleting ? 'Deleting...' : 'Yes, Delete Quiz'}
               </button>
             </div>
           </div>

@@ -22,6 +22,57 @@ const DEFAULT_SUBMISSIONS = [];
 
 // Helper: Resolve Authorization Bearer Token for Backend API
 export const getAuthToken = async () => {
+  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
+    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role'));
+
+  if (role === 'educator') {
+    try {
+      if (auth?.currentUser) {
+        let eduEmail = '';
+        const eduRaw = localStorage.getItem('learnsmart_educator') || sessionStorage.getItem('learnsmart_educator');
+        if (eduRaw) {
+          try {
+            const parsed = JSON.parse(eduRaw);
+            eduEmail = parsed.email || '';
+          } catch {}
+        }
+        if (!eduEmail) {
+          eduEmail = localStorage.getItem('learnsmart_email') || '';
+        }
+        // Only return Firebase token if auth.currentUser actually matches the educator's email
+        if (eduEmail && auth.currentUser.email && auth.currentUser.email.toLowerCase() === eduEmail.toLowerCase()) {
+          const token = await auth.currentUser.getIdToken(false).catch(() => null);
+          if (token) return token;
+        }
+      }
+    } catch {}
+    return 'educator-session-token';
+  }
+
+  if (role === 'admin') {
+    try {
+      if (auth?.currentUser) {
+        let adminEmail = '';
+        const adminRaw = localStorage.getItem('learnsmart_admin') || sessionStorage.getItem('learnsmart_admin');
+        if (adminRaw) {
+          try {
+            const parsed = JSON.parse(adminRaw);
+            adminEmail = parsed.email || '';
+          } catch {}
+        }
+        if (!adminEmail) {
+          adminEmail = localStorage.getItem('learnsmart_email') || '';
+        }
+        if (adminEmail && auth.currentUser.email && auth.currentUser.email.toLowerCase() === adminEmail.toLowerCase()) {
+          const token = await auth.currentUser.getIdToken(false).catch(() => null);
+          if (token) return token;
+        }
+      }
+    } catch {}
+    return 'admin-session-token';
+  }
+
+  // Student role:
   try {
     if (auth) {
       if (typeof auth.authStateReady === 'function') {
@@ -33,21 +84,87 @@ export const getAuthToken = async () => {
       }
     }
   } catch {}
-  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
-               (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role'));
-  if (role === 'admin') return 'admin-session-token';
-  if (role === 'educator') return 'educator-session-token';
   return 'student-session-token';
+};
+
+// Helper: Resolve Comprehensive Authentication & Role Headers
+export const getAuthHeaders = async () => {
+  const role = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
+    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role')) || '';
+
+  const token = await getAuthToken();
+  const headers = {
+    'Authorization': `Bearer ${token}`
+  };
+  try {
+    let email = '';
+    let uid = '';
+    let name = '';
+
+    if (role === 'educator') {
+      headers['X-User-Role'] = 'educator';
+      let eduObj = null;
+      try {
+        const raw = localStorage.getItem('learnsmart_educator') || sessionStorage.getItem('learnsmart_educator');
+        if (raw) eduObj = JSON.parse(raw);
+      } catch {}
+
+      email = eduObj?.email;
+      if (!email || email.includes('student')) {
+        const localEmail = localStorage.getItem('learnsmart_email');
+        let studentProfile = null;
+        try {
+          studentProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
+        } catch {}
+        if (localEmail && localEmail !== studentProfile?.email) {
+          email = localEmail;
+        }
+      }
+      if (!email) {
+        email = 'educator@learnsmart.com';
+      }
+
+      uid = eduObj?.id || eduObj?.educatorId || 'edu-201';
+      name = eduObj?.name || 'Dr. Sarah Jenkins';
+    } else if (role === 'admin') {
+      headers['X-User-Role'] = 'admin';
+      let adminObj = null;
+      try {
+        const raw = localStorage.getItem('learnsmart_admin') || sessionStorage.getItem('learnsmart_admin');
+        if (raw) adminObj = JSON.parse(raw);
+      } catch {}
+
+      email = adminObj?.email || 'admin@learnsmart.edu';
+      uid = adminObj?.uid || adminObj?.id || 'admin-system';
+      name = adminObj?.name || adminObj?.fullName || 'System Administrator';
+    } else {
+      headers['X-User-Role'] = 'student';
+      email = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_email')) ||
+        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_email')) ||
+        (auth?.currentUser?.email) || '';
+      uid = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_uid')) ||
+        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_uid')) ||
+        (auth?.currentUser?.uid) || '';
+      name = (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_user')) ||
+        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_user')) ||
+        (auth?.currentUser?.displayName) || '';
+    }
+
+    if (email) headers['X-User-Email'] = email;
+    if (uid) headers['X-User-UID'] = uid;
+    if (name) headers['X-User-Name'] = name;
+  } catch (e) {
+    console.warn('Error constructing auth headers:', e);
+  }
+  return headers;
 };
 
 // Sync quizzes from backend MySQL API into local store
 export const syncQuizzesFromBackend = async () => {
   try {
-    const token = await getAuthToken();
+    const headers = await getAuthHeaders();
     const res = await fetch('/api/quizzes', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers
     });
     if (res.ok) {
       const backendQuizzes = await res.json();
@@ -68,11 +185,9 @@ export const syncQuizzesFromBackend = async () => {
 // Sync live quiz submissions from backend MySQL database
 export const syncSubmissionsFromBackend = async () => {
   try {
-    const token = await getAuthToken();
+    const headers = await getAuthHeaders();
     const res = await fetch('/api/results/submissions', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers
     });
     if (res.ok) {
       const backendSubmissions = await res.json();
@@ -93,11 +208,29 @@ export const syncSubmissionsFromBackend = async () => {
           date: s.date ? (typeof s.date === 'string' && s.date.includes('T') ? new Date(s.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : s.date) : 'Today'
         }));
 
-        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(formatted));
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: formatted }));
+        // Merge authoritative backend submissions with local store
+        const localSaved = (() => {
+          try {
+            const r = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+            return r ? JSON.parse(r) : [];
+          } catch { return []; }
+        })();
+        const subMap = new Map();
+        if (Array.isArray(localSaved)) {
+          localSaved.forEach((s) => {
+            if (s && s.id) subMap.set(s.id, s);
+          });
         }
-        return formatted;
+        formatted.forEach((s) => {
+          if (s && s.id) subMap.set(s.id, s);
+        });
+        const merged = Array.from(subMap.values());
+
+        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(merged));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: merged }));
+        }
+        return merged;
       }
     }
   } catch (err) {
@@ -109,11 +242,9 @@ export const syncSubmissionsFromBackend = async () => {
 // Sync live students from backend MySQL database
 export const syncStudentsFromBackend = async () => {
   try {
-    const token = await getAuthToken();
+    const headers = await getAuthHeaders();
     const res = await fetch('/api/users/students', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers
     });
     if (res.ok) {
       const backendStudents = await res.json();
@@ -131,19 +262,20 @@ export const syncStudentsFromBackend = async () => {
           .map((bs) => ({
             id: bs.id || bs.uid,
             uid: bs.uid || bs.id,
-            studentId: bs.uid || bs.id,
+            studentId: bs.studentId || bs.uid || bs.id,
             name: bs.name,
             email: bs.email,
             role: bs.role || 'student',
             department: bs.department || 'General',
             isActive: bs.is_active !== undefined ? Boolean(bs.is_active) : true,
-            quizzesCompleted: 0,
-            avgScore: 0,
-            highestScore: 0,
-            topSubject: 'General',
-            status: 'On Track',
-            statusVariant: 'info',
-            lastActive: 'Active',
+            quizzesCompleted: bs.quizzesCompleted ?? 0,
+            avgScore: bs.avgScore ?? 0,
+            highestScore: bs.highestScore ?? 0,
+            topSubject: bs.topSubject || 'General',
+            status: bs.status || 'On Track',
+            statusVariant: bs.statusVariant || 'info',
+            lastActive: bs.lastActive || 'Active',
+            recentSubmissions: Array.isArray(bs.recentSubmissions) ? bs.recentSubmissions : [],
             avatarInitials: getInitials(bs.name)
           }));
 
@@ -160,17 +292,83 @@ export const syncStudentsFromBackend = async () => {
   return [];
 };
 
+// Sync educators from backend MySQL database
+export const syncEducatorsFromBackend = async () => {
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch('/api/users/educators', {
+      headers
+    });
+    if (res.ok) {
+      const backendEducators = await res.json();
+      if (Array.isArray(backendEducators) && backendEducators.length > 0) {
+        const formatted = backendEducators.map((be) => ({
+          id: be.id || be.uid,
+          uid: be.uid || be.id,
+          educatorId: be.educatorId || be.id,
+          name: be.name,
+          email: be.email,
+          role: 'Educator',
+          department: be.department || 'Computer Science',
+          title: be.title || '',
+          phone: be.phone || '',
+          isActive: be.isActive !== undefined ? Boolean(be.isActive) : true,
+          status: be.status || 'Active',
+          statusVariant: 'success',
+          quizzesCreated: be.quizzesCreated || 0,
+          activeQuizzes: be.activeQuizzes || 0,
+          totalStudents: be.totalStudents || 0,
+          avgPerformance: be.avgPerformance || 0,
+          avatarInitials: getInitials(be.name),
+          avatarImage: null,
+          institution: 'LearnSmart University',
+          lastActive: 'Active',
+          joinedDate: be.created_at
+            ? new Date(be.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+            : 'Aug 2025',
+          rating: 5.0
+        }));
+
+        // Merge with existing educators (preserve any local-only educators)
+        const existing = loadStoredEducators();
+        const mergedMap = new Map();
+        existing.forEach((e) => mergedMap.set((e.email || '').toLowerCase(), e));
+        formatted.forEach((e) => {
+          const key = (e.email || '').toLowerCase();
+          if (mergedMap.has(key)) {
+            // Update existing with fresh DB data
+            mergedMap.set(key, { ...mergedMap.get(key), ...e });
+          } else {
+            mergedMap.set(key, e);
+          }
+        });
+        const merged = Array.from(mergedMap.values());
+        persistEducators(merged);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: merged }));
+        }
+        return merged;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync educators from backend MySQL:', err);
+  }
+  return [];
+};
+
 // Sync all platform data from backend MySQL database for live tracking
 export const syncAllFromBackend = async () => {
-  const [quizzes, submissions, students] = await Promise.allSettled([
+  const [quizzes, submissions, students, educators] = await Promise.allSettled([
     syncQuizzesFromBackend(),
     syncSubmissionsFromBackend(),
-    syncStudentsFromBackend()
+    syncStudentsFromBackend(),
+    syncEducatorsFromBackend()
   ]);
   return {
     quizzes: quizzes.status === 'fulfilled' ? quizzes.value : [],
     submissions: submissions.status === 'fulfilled' ? submissions.value : [],
-    students: students.status === 'fulfilled' ? students.value : []
+    students: students.status === 'fulfilled' ? students.value : [],
+    educators: educators.status === 'fulfilled' ? educators.value : []
   };
 };
 
@@ -203,7 +401,7 @@ export const generateStudentId = (existingList = []) => {
         });
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   let counter = 1001;
   while (existingIds.has(`LS-2025-${counter}`)) {
@@ -349,7 +547,7 @@ export const syncStudentsFromFirestore = async (force = false) => {
 // Initial background sync
 if (typeof window !== 'undefined') {
   setTimeout(() => {
-    syncStudentsFromFirestore().catch(() => {});
+    syncStudentsFromFirestore().catch(() => { });
   }, 1000);
 }
 
@@ -486,7 +684,7 @@ const performCleanSlateReset = () => {
             })
           );
         }
-      } catch {}
+      } catch { }
 
       localStorage.setItem(STORAGE_KEY_CLEAN_SLATE, 'true');
 
@@ -513,8 +711,10 @@ const performCleanSlateReset = () => {
             if (
               id.includes('python-basics') ||
               id.includes('quiz-179251') ||
+              id.includes('quiz-custom-1792576000000') ||
               t.includes('python & programming') ||
               t.includes('operating systems core') ||
+              t.includes('operating systems fundamentals') ||
               t.includes('compiler design draft') ||
               t.includes('draft quiz on operating')
             ) return false;
@@ -528,7 +728,7 @@ const performCleanSlateReset = () => {
           }
         }
       }
-    } catch {}
+    } catch { }
 
     // Always sanitize stored students against demo data
     try {
@@ -548,10 +748,10 @@ const performCleanSlateReset = () => {
           }
         }
       }
-    } catch {}
+    } catch { }
 
     // Synchronize live clean data from MySQL database
-    syncAllFromBackend().catch(() => {});
+    syncAllFromBackend().catch(() => { });
   } catch (e) {
     console.warn('Notice: Clean slate initialization skipped:', e);
   }
@@ -674,6 +874,7 @@ export const sharedDatabase = {
   syncQuizzesFromBackend: () => syncQuizzesFromBackend(),
   syncSubmissionsFromBackend: () => syncSubmissionsFromBackend(),
   syncStudentsFromBackend: () => syncStudentsFromBackend(),
+  syncEducatorsFromBackend: () => syncEducatorsFromBackend(),
   syncAllFromBackend: () => syncAllFromBackend(),
 
   syncStudentsFromFirestore: (force = false) => {
@@ -682,14 +883,14 @@ export const sharedDatabase = {
 
   // Get active students list
   getStudents: () => {
-    syncStudentsFromBackend().catch(() => {});
+    syncStudentsFromBackend().catch(() => { });
     const all = loadStoredStudents();
     return all.filter((s) => s.isActive !== false);
   },
 
   // Get all students including inactive
   getAllStudents: () => {
-    syncStudentsFromFirestore().catch(() => {});
+    syncStudentsFromFirestore().catch(() => { });
     return loadStoredStudents();
   },
 
@@ -932,7 +1133,7 @@ export const sharedDatabase = {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        syncSubmissionsFromBackend().catch(() => {});
+        syncSubmissionsFromBackend().catch(() => { });
       } catch (err) {
         console.warn('Backend student deletion sync note:', err);
       }
@@ -1005,7 +1206,7 @@ export const sharedDatabase = {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        syncAllFromBackend().catch(() => {});
+        syncAllFromBackend().catch(() => { });
       } catch (err) {
         console.warn('Backend cleanup sync note:', err);
       }
@@ -1090,9 +1291,9 @@ export const sharedDatabase = {
       // Filter recentSubmissions
       const updatedSubmissions = Array.isArray(targetStudent.recentSubmissions)
         ? targetStudent.recentSubmissions.filter((sub) => {
-            const cat = sub.category || sub.title || '';
-            return !matchesSubject(cat);
-          })
+          const cat = sub.category || sub.title || '';
+          return !matchesSubject(cat);
+        })
         : [];
 
       // Recalculate metrics
@@ -1281,6 +1482,163 @@ export const sharedDatabase = {
     return generateStudentId();
   },
 
+  // ==========================================
+  // EDUCATOR MANAGEMENT
+  // ==========================================
+  getEducators: () => {
+    syncEducatorsFromBackend().catch(() => {});
+    const all = loadStoredEducators();
+    return all.filter((e) => e.isActive !== false);
+  },
+
+  getAllEducators: () => {
+    syncEducatorsFromBackend().catch(() => {});
+    return loadStoredEducators();
+  },
+
+  getEducatorById: (id) => {
+    if (!id) return null;
+    const all = loadStoredEducators();
+    return all.find((e) => e.id === id || e.educatorId === id) || null;
+  },
+
+  getEducatorByEmail: (email) => {
+    if (!email) return null;
+    const lower = email.trim().toLowerCase();
+    const all = loadStoredEducators();
+    return all.find((e) => e.email && e.email.toLowerCase() === lower) || null;
+  },
+
+  getEducatorByUsername: (identifier) => {
+    if (!identifier) return null;
+    const lower = identifier.trim().toLowerCase();
+    const all = loadStoredEducators();
+    return all.find((e) =>
+      (e.id && e.id.toLowerCase() === lower) ||
+      (e.educatorId && e.educatorId.toLowerCase() === lower) ||
+      (e.email && e.email.toLowerCase() === lower) ||
+      (e.name && e.name.toLowerCase() === lower)
+    ) || null;
+  },
+
+  addEducator: (data) => {
+    const all = loadStoredEducators();
+    const cleanEmail = (data.email || '').trim().toLowerCase();
+    const assignedId = data.id || data.educatorId || `edu-${Date.now()}`;
+    const newEducator = {
+      id: assignedId,
+      uid: assignedId,
+      educatorId: data.educatorId || data.customId || `FAC-CS-${Math.floor(Math.random() * 900) + 100}`,
+      name: data.name || 'Educator',
+      email: cleanEmail,
+      department: data.department || 'Computer Science',
+      role: 'Educator',
+      title: data.title || 'Faculty Member',
+      phone: data.phone || '',
+      isActive: true,
+      status: 'Active',
+      statusVariant: 'success',
+      joinedDate: 'Today',
+      lastActive: 'Just now',
+      avatarInitials: getInitials(data.name || 'Educator'),
+      quizzesCreated: 0,
+      activeQuizzes: 0,
+      totalStudents: 0,
+      avgPerformance: 0
+    };
+
+    const existingIdx = all.findIndex((e) => cleanEmail && e.email && e.email.toLowerCase() === cleanEmail);
+    if (existingIdx !== -1) {
+      all[existingIdx] = { ...all[existingIdx], ...newEducator };
+    } else {
+      all.unshift(newEducator);
+    }
+    persistEducators(all);
+
+    // Sync to backend MySQL
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        await fetch('/api/users/educators', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({
+            name: newEducator.name,
+            email: newEducator.email,
+            educatorId: newEducator.educatorId,
+            department: newEducator.department,
+            title: newEducator.title,
+            phone: newEducator.phone
+          })
+        });
+      } catch (err) {
+        console.warn('Backend educator add note:', err);
+      }
+    })();
+
+    return newEducator;
+  },
+
+  updateEducator: (id, updates = {}) => {
+    const all = loadStoredEducators();
+    const idx = all.findIndex((e) => e.id === id || e.educatorId === id || (updates.email && e.email?.toLowerCase() === updates.email.toLowerCase()));
+    if (idx !== -1) {
+      all[idx] = { ...all[idx], ...updates };
+      persistEducators(all);
+
+      // Sync to backend MySQL
+      (async () => {
+        try {
+          const headers = await getAuthHeaders();
+          await fetch('/api/users/me', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify({
+              name: all[idx].name,
+              department: all[idx].department,
+              title: all[idx].title,
+              phone: all[idx].phone
+            })
+          });
+        } catch (err) {
+          console.warn('Backend educator update note:', err);
+        }
+      })();
+
+      return all[idx];
+    }
+    return null;
+  },
+
+  removeEducator: (id) => {
+    const all = loadStoredEducators();
+    const cleanId = String(id || '').trim().toLowerCase();
+    const target = all.find((e) => String(e.id || '').toLowerCase() === cleanId || String(e.educatorId || '').toLowerCase() === cleanId || String(e.email || '').toLowerCase() === cleanId);
+    const updated = all.filter((e) => {
+      const eId = String(e.id || '').toLowerCase();
+      const eEduId = String(e.educatorId || '').toLowerCase();
+      const eEmail = String(e.email || '').toLowerCase();
+      return eId !== cleanId && eEduId !== cleanId && eEmail !== cleanId;
+    });
+    persistEducators(updated);
+
+    // Sync to backend MySQL
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const param = target?.email || target?.id || cleanId;
+        await fetch(`/api/users/educators/${encodeURIComponent(param)}`, {
+          method: 'DELETE',
+          headers
+        });
+      } catch (err) {
+        console.warn('Backend educator delete note:', err);
+      }
+    })();
+
+    return updated;
+  },
+
   // Record a completed quiz attempt for a student
   recordQuizAttempt: ({
     studentName,
@@ -1297,7 +1655,7 @@ export const sharedDatabase = {
     let fbUser = null;
     try {
       fbUser = auth.currentUser;
-    } catch {}
+    } catch { }
 
     const realUid =
       studentId ||
@@ -1377,17 +1735,17 @@ export const sharedDatabase = {
       const currentMastery = Array.isArray(student.subjectMastery) && student.subjectMastery.length > 0
         ? [...student.subjectMastery]
         : [
-            { subject: 'Mathematics', score: 0 },
-            { subject: 'Data Structures', score: 0 },
-            { subject: 'Python', score: 0 },
-            { subject: 'Web Security', score: 0 },
-            { subject: 'Others', score: 0 }
-          ];
+          { subject: 'Mathematics', score: 0 },
+          { subject: 'Data Structures', score: 0 },
+          { subject: 'Python', score: 0 },
+          { subject: 'Web Security', score: 0 },
+          { subject: 'Others', score: 0 }
+        ];
 
       const matchIdx = currentMastery.findIndex(
         (m) => m.subject.toLowerCase() === subName.toLowerCase() ||
-               m.subject.toLowerCase().includes(subName.toLowerCase()) ||
-               subName.toLowerCase().includes(m.subject.toLowerCase())
+          m.subject.toLowerCase().includes(subName.toLowerCase()) ||
+          subName.toLowerCase().includes(m.subject.toLowerCase())
       );
 
       let updatedMastery;
@@ -1419,7 +1777,7 @@ export const sharedDatabase = {
         const allQuizzes = loadStoredQuizzes();
         const quizIdx = allQuizzes.findIndex(
           (q) => (quizId && String(q.id).toLowerCase() === String(quizId).toLowerCase()) ||
-                 (q.title && q.title.toLowerCase().trim() === quizTitle.toLowerCase().trim())
+            (q.title && q.title.toLowerCase().trim() === quizTitle.toLowerCase().trim())
         );
         if (quizIdx !== -1) {
           const targetQuiz = allQuizzes[quizIdx];
@@ -1474,12 +1832,13 @@ export const sharedDatabase = {
       // Sync attempt with backend API asynchronously
       (async () => {
         try {
-          const token = await getAuthToken();
+          const authHeaders = await getAuthHeaders();
           const targetQuizId = quizId || `quiz-${encodeURIComponent(quizTitle.toLowerCase().replace(/\s+/g, '-'))}`;
-          
+
           const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            ...authHeaders,
+            'X-User-Role': 'student'
           };
           if (realUid) headers['X-User-UID'] = realUid;
           if (realEmail) headers['X-User-Email'] = realEmail;
@@ -1512,6 +1871,7 @@ export const sharedDatabase = {
             console.log('[LearnSmart] Genuine quiz attempt saved to MySQL database:', data);
             // Trigger instant live tracking synchronization from MySQL
             await syncSubmissionsFromBackend();
+            await syncStudentsFromBackend();
             await syncQuizzesFromBackend();
           }
         } catch (apiErr) {
@@ -1852,7 +2212,7 @@ export const sharedDatabase = {
           updated = true;
         }
       }
-    } catch {}
+    } catch { }
 
     return updated;
   },
@@ -1930,6 +2290,22 @@ export const sharedDatabase = {
     const status = isDraft ? 'Draft' : 'Active';
     const isPub = !isDraft;
 
+    // Resolve the actual logged-in educator's name from auth session
+    const resolvedAuthorName = (() => {
+      try {
+        // Try localStorage educator session (set during login)
+        const raw = localStorage.getItem('learnsmart_educator');
+        if (raw && raw.trim().startsWith('{')) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.name && parsed.name !== 'Educator') return parsed.name;
+        }
+        // Fallback: learnsmart_user key
+        const storedUser = localStorage.getItem('learnsmart_user');
+        if (storedUser && storedUser !== 'Educator' && storedUser !== 'educator') return storedUser;
+      } catch { }
+      return quizData.createdBy || quizData.author_name || 'Educator';
+    })();
+
     const newQuiz = {
       id: quizData.id || `quiz-${Date.now()}`,
       title: quizData.title || 'Untitled Quiz',
@@ -1949,26 +2325,42 @@ export const sharedDatabase = {
       passRate: 0,
       lastUpdated: 'Just now',
       description: quizData.description || '',
-      createdBy: quizData.createdBy || 'Educator',
+      createdBy: resolvedAuthorName,
+      author_name: resolvedAuthorName,
       questions: quizData.questions || []
     };
 
     all.unshift(newQuiz);
     persistQuizzes(all);
 
-    // Sync with backend API asynchronously
+    // Sync with backend MySQL API immediately
     (async () => {
       try {
-        const token = await getAuthToken();
-        await fetch('/api/quizzes', {
+        const headers = await getAuthHeaders();
+        const res = await fetch('/api/quizzes', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            ...headers
           },
           body: JSON.stringify(newQuiz)
         });
-      } catch (e) {}
+        if (res.ok) {
+          const saved = await res.json();
+          if (saved && saved.id) {
+            const fresh = loadStoredQuizzes();
+            const fIdx = fresh.findIndex((q) => String(q.id).trim() === String(saved.id).trim());
+            if (fIdx !== -1) {
+              fresh[fIdx] = { ...fresh[fIdx], ...saved };
+              persistQuizzes(fresh);
+            }
+          }
+        } else {
+          console.error('MySQL save quiz failed with status:', res.status);
+        }
+      } catch (e) {
+        console.error('Network error saving quiz to MySQL:', e);
+      }
     })();
 
     sharedDatabase.sendAdminNotification({
@@ -1998,19 +2390,21 @@ export const sharedDatabase = {
       all[idx] = { ...all[idx], ...updates, lastUpdated: 'Just now' };
       persistQuizzes(all);
 
-      // Sync with backend API asynchronously
+      // Sync with backend MySQL API immediately
       (async () => {
         try {
-          const token = await getAuthToken();
-          await fetch(`/api/quizzes/${id}`, {
+          const headers = await getAuthHeaders();
+          await fetch(`/api/quizzes/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
+              ...headers
             },
             body: JSON.stringify(all[idx])
           });
-        } catch (e) {}
+        } catch (e) {
+          console.error('Network error updating quiz in MySQL:', e);
+        }
       })();
 
       return all[idx];
@@ -2022,6 +2416,20 @@ export const sharedDatabase = {
     const all = loadStoredQuizzes();
     const updated = all.filter((q) => String(q.id).trim() !== String(id).trim());
     persistQuizzes(updated);
+
+    // Sync deletion to backend MySQL API
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        await fetch(`/api/quizzes/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers
+        });
+      } catch (e) {
+        console.error('Network error deleting quiz from MySQL:', e);
+      }
+    })();
+
     return updated;
   },
 
@@ -2030,8 +2438,28 @@ export const sharedDatabase = {
     const idx = all.findIndex((q) => String(q.id).trim() === String(id).trim());
     if (idx !== -1) {
       const current = all[idx].status || 'Active';
-      all[idx].status = current === 'Active' ? 'Draft' : 'Active';
+      const newStatus = current === 'Active' ? 'Draft' : 'Active';
+      all[idx].status = newStatus;
+      all[idx].isRecommended = newStatus === 'Active';
       persistQuizzes(all);
+
+      // Sync updated status to backend MySQL API
+      (async () => {
+        try {
+          const headers = await getAuthHeaders();
+          await fetch(`/api/quizzes/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...headers
+            },
+            body: JSON.stringify(all[idx])
+          });
+        } catch (e) {
+          console.error('Network error toggling quiz status in MySQL:', e);
+        }
+      })();
+
       return all[idx];
     }
     return null;
@@ -2042,7 +2470,7 @@ export const sharedDatabase = {
   // ==========================================
   getSubmissions: () => {
     // Trigger asynchronous live synchronization with MySQL
-    syncSubmissionsFromBackend().catch(() => {});
+    syncSubmissionsFromBackend().catch(() => { });
 
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
@@ -2052,7 +2480,7 @@ export const sharedDatabase = {
           return parsed;
         }
       }
-    } catch {}
+    } catch { }
 
     return [];
   },
@@ -2480,8 +2908,8 @@ export const sharedDatabase = {
   deleteAdminNotification: (idOrNotif) => {
     const list = loadAdminNotifications();
     const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
-    const targetNotif = typeof idOrNotif === 'object' && idOrNotif !== null 
-      ? idOrNotif 
+    const targetNotif = typeof idOrNotif === 'object' && idOrNotif !== null
+      ? idOrNotif
       : list.find((n) => n.id === targetId);
 
     const updatedAdmin = list.filter((n) => n.id !== targetId);

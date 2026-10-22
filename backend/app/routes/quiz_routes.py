@@ -9,10 +9,13 @@ router = APIRouter(prefix="/api/quizzes", tags=["Quizzes"])
 
 class QuestionItem(BaseModel):
     id: Optional[Any] = None
-    question: str
-    options: List[str]
-    correctIndex: int
+    question: Optional[str] = ""
+    options: Optional[List[Any]] = []
+    correctIndex: Optional[int] = 0
     explanation: Optional[str] = ""
+
+    class Config:
+        extra = "allow"
 
 class CreateQuizRequest(BaseModel):
     id: Optional[str] = None
@@ -24,7 +27,10 @@ class CreateQuizRequest(BaseModel):
     description: Optional[str] = ""
     isRecommended: Optional[bool] = True
     recommendationReason: Optional[str] = None
-    questions: Optional[List[QuestionItem]] = []
+    questions: Optional[List[Any]] = []
+
+    class Config:
+        extra = "allow"
 
 class AttemptRequest(BaseModel):
     studentName: Optional[str] = None
@@ -39,19 +45,37 @@ class AttemptRequest(BaseModel):
     quizTitle: Optional[str] = None
     category: Optional[str] = None
 
+    class Config:
+        extra = "allow"
+
 @router.get("")
-def list_quizzes(authorization: Optional[str] = Header(None)):
+def list_quizzes(
+    authorization: Optional[str] = Header(None),
+    x_user_uid: Optional[str] = Header(None, alias="X-User-UID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_name: Optional[str] = Header(None, alias="X-User-Name"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
     """
     Returns published quizzes for students/public, and all quizzes (including drafts) for educators/admins.
     """
     role = "student"
     user = None
+    if x_user_role and x_user_role.strip().lower() in ("educator", "admin"):
+        role = x_user_role.strip().lower()
+
     if authorization:
         try:
-            user = get_current_user_from_token(authorization)
-            role = user.get("role", "student")
+            user = get_current_user_from_token(
+                authorization=authorization,
+                x_user_uid=x_user_uid,
+                x_user_email=x_user_email,
+                x_user_name=x_user_name,
+                x_user_role=x_user_role,
+            )
+            role = user.get("role", role)
         except HTTPException:
-            role = "student"
+            pass
 
     return quiz_controller.get_all_quizzes(role=role, current_user=user)
 
@@ -66,12 +90,28 @@ def get_analytics(current_user: Dict[str, Any] = Depends(require_educator_or_adm
     return quiz_controller.compute_real_analytics()
 
 @router.get("/{quiz_id}")
-def get_quiz_details(quiz_id: str, authorization: Optional[str] = Header(None)):
+def get_quiz_details(
+    quiz_id: str,
+    authorization: Optional[str] = Header(None),
+    x_user_uid: Optional[str] = Header(None, alias="X-User-UID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    x_user_name: Optional[str] = Header(None, alias="X-User-Name"),
+    x_user_role: Optional[str] = Header(None, alias="X-User-Role"),
+):
     role = "student"
+    if x_user_role and x_user_role.strip().lower() in ("educator", "admin"):
+        role = x_user_role.strip().lower()
+
     if authorization:
         try:
-            user = get_current_user_from_token(authorization)
-            role = user.get("role", "student")
+            user = get_current_user_from_token(
+                authorization=authorization,
+                x_user_uid=x_user_uid,
+                x_user_email=x_user_email,
+                x_user_name=x_user_name,
+                x_user_role=x_user_role,
+            )
+            role = user.get("role", role)
         except HTTPException:
             pass
     quiz = quiz_controller.get_quiz_by_id(quiz_id, role=role)

@@ -57,6 +57,10 @@ function AppRoutes() {
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      const storedRole = localStorage.getItem('learnsmart_role');
+      if (storedRole === 'educator' || storedRole === 'admin') {
+        return;
+      }
       try {
         const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
         if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
@@ -67,7 +71,6 @@ function AppRoutes() {
       if (user?.displayName && user.displayName.trim()) {
         setStudentUser(user.displayName.trim());
       } else if (!user) {
-        const storedRole = localStorage.getItem('learnsmart_role');
         if (!storedRole) {
           setStudentUser(null);
         }
@@ -86,15 +89,15 @@ function AppRoutes() {
     };
   }, []);
 
-  const handleLoginSuccess = (user, role) => {
+  const handleLoginSuccess = (user, role, profile = null) => {
     if (role === 'admin') {
-      authService.loginAdmin();
+      authService.loginAdmin(profile || user);
       navigate('/admin-dashboard');
     } else if (role === 'educator') {
-      authService.loginEducator(user);
+      authService.loginEducator(profile || user);
       navigate('/educator-dashboard');
     } else {
-      authService.loginStudent(user);
+      authService.loginStudent(profile || user);
       setStudentUser(typeof user === 'string' ? user : user?.name || 'Student');
       navigate('/dashboard');
     }

@@ -67,7 +67,7 @@ export const Login = ({ onLoginSuccess, initialView = 'login' }) => {
       const eduPayload = studentObj || user;
       authService.loginEducator(eduPayload);
       if (onLoginSuccess) {
-        onLoginSuccess(eduPayload || 'Educator', 'educator');
+        onLoginSuccess(eduPayload?.name || (typeof eduPayload === 'string' ? eduPayload : 'Educator'), 'educator', eduPayload);
       }
       navigate('/educator-dashboard');
     } else {
