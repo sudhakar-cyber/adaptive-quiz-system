@@ -14,6 +14,7 @@ import { EducatorReportsView } from '../components/EducatorReportsView';
 import { EducatorNotificationsView } from '../components/EducatorNotificationsView';
 import { EducatorProfileView } from '../components/EducatorProfileView';
 import { EducatorSettingsView } from '../components/EducatorSettingsView';
+import { LiveActivityFeed } from '../components/LiveActivityFeed';
 import {
   INITIAL_EDUCATOR_QUIZZES,
   INITIAL_EDUCATOR_PROFILE
@@ -657,6 +658,16 @@ export const EducatorDashboard = ({ onLogout }) => {
                 />
               </section>
 
+              {/* Live Student Activity Feed */}
+              <section className="educator-activity-feed-section" style={{ marginTop: '24px', marginBottom: '24px' }}>
+                <LiveActivityFeed
+                  role="educator"
+                  title="Live Student Activity Feed"
+                  subtitle="Real-time monitoring of quiz submissions, test starts, score evaluations, and student logins"
+                  maxHeight="380px"
+                />
+              </section>
+
               {/* Bottom Section: Quick Actions */}
               <section className="educator-quick-actions-grid" aria-label="Quick Actions">
                 <QuickActionCard
@@ -711,6 +722,24 @@ export const EducatorDashboard = ({ onLogout }) => {
               onClearAllStudents={handleClearAllStudents}
               onResetStudent={handleResetStudent}
             />
+          )}
+
+          {/* TAB: DEDICATED STUDENT ACTIVITY */}
+          {activeTab === 'Student Activity' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div className="educator-greeting-section" style={{ marginBottom: 0 }}>
+                <h1 className="educator-greeting-title">Student Activity Stream</h1>
+                <p className="educator-greeting-sub">
+                  Full real-time chronological audit trail of all student quizzes, assessment starts, completions, logins, and feedback.
+                </p>
+              </div>
+              <LiveActivityFeed
+                role="educator"
+                title="Cohort Activity Stream"
+                subtitle="Connected directly to MySQL activity telemetry"
+                maxHeight="680px"
+              />
+            </div>
           )}
 
           {/* TAB 4: ANALYTICS */}

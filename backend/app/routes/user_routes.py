@@ -401,25 +401,12 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
 
         if role == "educator":
             cohort = tracking_controller.educator_cohort_ids(conn, current_user)
-            quiz_ids = tracking_controller.educator_quiz_ids(conn, current_user)
             if not cohort:
                 return []
             cohort_placeholders = ", ".join(["?"] * len(cohort))
-            if quiz_ids:
-                quiz_placeholders = ", ".join(["?"] * len(quiz_ids))
-                join_attempt_scope = f"qa.quiz_id IN ({quiz_placeholders})"
-                bare_attempt_scope = f"quiz_id IN ({quiz_placeholders})"
-                attempt_params = list(quiz_ids)
-            else:
-                join_attempt_scope = "1=0"
-                bare_attempt_scope = "1=0"
-                attempt_params = []
             cohort_params = list(cohort)
         else:
             cohort_placeholders = None
-            join_attempt_scope = "1=1"
-            bare_attempt_scope = "1=1"
-            attempt_params = []
             cohort_params = []
 
         where_clause = "u.role = 'student'"
@@ -460,12 +447,15 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
                 COALESCE(DATE_FORMAT(MAX(qa.submitted_at), '%Y-%m-%d %H:%i'), 'Active') as lastActive
             FROM users u
             LEFT JOIN quiz_attempts qa
-                ON (qa.student_id = u.id OR LOWER(qa.student_email) = LOWER(u.email))
-                AND {join_attempt_scope}
+                ON (
+                    qa.student_id = u.id
+                    OR (u.student_id IS NOT NULL AND u.student_id != '' AND qa.student_id = u.student_id)
+                    OR (qa.student_email IS NOT NULL AND LOWER(qa.student_email) = LOWER(u.email))
+                )
             WHERE {where_clause}
             GROUP BY u.id, u.name, u.email, u.role, u.department, u.phone, u.title, u.is_active, u.created_at, u.student_id, u.top_subject, u.avatar_url, u.country, u.streak, u.subject_mastery
             ORDER BY u.created_at DESC
-        """, tuple(attempt_params + cohort_params))
+        """, tuple(cohort_params))
 
         students = []
         for r in cur.fetchall():
@@ -483,14 +473,18 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
                     mastery = None
             d["subjectMastery"] = mastery if isinstance(mastery, list) else []
 
-            sub_cur = conn.execute(f"""
+            stud_sid = d.get("studentId") or d.get("student_id") or d["id"]
+            sub_cur = conn.execute("""
                 SELECT id, quiz_id, quiz_title as title, category, score, status, submitted_at
                 FROM quiz_attempts
-                WHERE (student_id = ? OR LOWER(student_email) = LOWER(?))
-                  AND {bare_attempt_scope}
+                WHERE (
+                    student_id = ?
+                    OR (student_id IS NOT NULL AND student_id = ?)
+                    OR (student_email IS NOT NULL AND LOWER(student_email) = LOWER(?))
+                )
                 ORDER BY submitted_at DESC
                 LIMIT 5
-            """, tuple([d["id"], d["email"]] + attempt_params))
+            """, (d["id"], stud_sid, d["email"]))
 
             recent = []
             for srow in sub_cur.fetchall():

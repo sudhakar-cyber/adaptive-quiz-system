@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   StarIcon,
   FlameIcon,
@@ -6,10 +6,10 @@ import {
   CheckCircleIcon,
   TrendingUpIcon,
   AwardIcon,
-  RotateCcwIcon,
   XIcon,
   SparklesIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const ProgressView = ({
   quizzesTaken = 0,
@@ -19,10 +19,86 @@ export const ProgressView = ({
   subjectProgress = null,
   benchmark = null,
   onRetakeQuiz,
-  onStartQuiz
+  onStartQuiz,
+  quizzes: initialQuizzes = null
 }) => {
   const [showPercentileModal, setShowPercentileModal] = useState(false);
   const isReset = quizzesTaken === 0;
+
+  // Real-time synchronization of published quizzes added by educator and admin
+  const [activeQuizzes, setActiveQuizzes] = useState(() => {
+    if (Array.isArray(initialQuizzes) && initialQuizzes.length > 0) {
+      return initialQuizzes;
+    }
+    return sharedDatabase.getPublishedQuizzes ? sharedDatabase.getPublishedQuizzes() : [];
+  });
+
+  useEffect(() => {
+    if (Array.isArray(initialQuizzes)) {
+      setActiveQuizzes(initialQuizzes);
+    }
+  }, [initialQuizzes]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setActiveQuizzes(sharedDatabase.getPublishedQuizzes ? sharedDatabase.getPublishedQuizzes() : []);
+    };
+    window.addEventListener('learnsmart_quizzes_updated', handleUpdate);
+    window.addEventListener('learnsmart_quiz_completed', handleUpdate);
+    window.addEventListener('learnsmart_activity_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('learnsmart_quizzes_updated', handleUpdate);
+      window.removeEventListener('learnsmart_quiz_completed', handleUpdate);
+      window.removeEventListener('learnsmart_activity_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
+  // Filter quiz history strictly based on active quizzes added by educator and admin
+  const displayQuizHistory = useMemo(() => {
+    if (!activeQuizzes || activeQuizzes.length === 0) {
+      return [];
+    }
+    if (!quizHistory || quizHistory.length === 0) {
+      return [];
+    }
+
+    return quizHistory
+      .filter((item) => {
+        const hQuizId = String(item.quizId || item.id || '').trim().toLowerCase();
+        const hTitle = String(item.title || item.quizTitle || '').trim().toLowerCase();
+
+        return activeQuizzes.some((q) => {
+          const qId = String(q.id || '').trim().toLowerCase();
+          const qTitle = String(q.title || '').trim().toLowerCase();
+          return (
+            (qId && hQuizId && qId === hQuizId) ||
+            (qTitle && hTitle && qTitle === hTitle) ||
+            (qId && hTitle && qId === hTitle)
+          );
+        });
+      })
+      .map((item) => {
+        const matchingQuiz = activeQuizzes.find((q) => {
+          const qId = String(q.id || '').trim().toLowerCase();
+          const qTitle = String(q.title || '').trim().toLowerCase();
+          const hQuizId = String(item.quizId || item.id || '').trim().toLowerCase();
+          const hTitle = String(item.title || item.quizTitle || '').trim().toLowerCase();
+          return (
+            (qId && hQuizId && qId === hQuizId) ||
+            (qTitle && hTitle && qTitle === hTitle) ||
+            (qId && hTitle && qId === hTitle)
+          );
+        });
+
+        return {
+          ...item,
+          title: matchingQuiz?.title || item.title,
+          category: matchingQuiz?.category || item.category || 'General'
+        };
+      });
+  }, [quizHistory, activeQuizzes]);
 
   const getMastery = (score) => {
     if (score === 0) return 'Not Started';
@@ -460,7 +536,9 @@ export const ProgressView = ({
       <div className="progress-section-card history-card">
         <div className="section-card-header">
           <h3 className="section-card-title">Recent Quiz Activity History</h3>
-          <span className="section-badge-info">{quizHistory.length > 0 ? `${quizHistory.length} Quizzes` : 'No Activity'}</span>
+          <span className="section-badge-info">
+            {displayQuizHistory.length > 0 ? `${displayQuizHistory.length} ${displayQuizHistory.length === 1 ? 'Quiz' : 'Quizzes'}` : 'No Activity'}
+          </span>
         </div>
 
         <div className="history-table-wrapper">
@@ -472,12 +550,11 @@ export const ProgressView = ({
                 <th>Score</th>
                 <th>Status</th>
                 <th>Date Taken</th>
-                <th className="text-right">Action</th>
               </tr>
             </thead>
             <tbody>
-              {quizHistory.length > 0 ? (
-                quizHistory.map((item) => (
+              {displayQuizHistory.length > 0 ? (
+                displayQuizHistory.map((item) => (
                   <tr key={item.id}>
                     <td className="font-semibold text-dark">{item.title}</td>
                     <td>
@@ -500,21 +577,11 @@ export const ProgressView = ({
                       </span>
                     </td>
                     <td className="text-muted">{item.date}</td>
-                    <td className="text-right">
-                      <button
-                        type="button"
-                        className="retake-table-btn"
-                        onClick={() => onRetakeQuiz && onRetakeQuiz(item.title)}
-                      >
-                        <RotateCcwIcon size={13} />
-                        <span>Retake</span>
-                      </button>
-                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" className="text-center text-muted py-4">
+                  <td colSpan="5" className="text-center text-muted py-4">
                     No recent quizzes found. Take a quiz to view your history!
                   </td>
                 </tr>

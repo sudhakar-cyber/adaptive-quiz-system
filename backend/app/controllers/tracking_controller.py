@@ -75,6 +75,35 @@ def educator_cohort_ids(conn, educator: Optional[Dict[str, Any]]) -> List[str]:
     return sorted(cohort)
 
 
+def educator_cohort_identifiers(conn, educator: Optional[Dict[str, Any]]) -> List[str]:
+    """
+    Returns all identifier keys (id, email, student_id) for the students in
+    the educator's cohort so activity_log queries match student events regardless
+    of whether they were logged with email, student_id, or database users.id.
+    """
+    cohort = educator_cohort_ids(conn, educator)
+    if not cohort:
+        return []
+    placeholders = ", ".join(["?"] * len(cohort))
+    cur = conn.execute(
+        f"""
+        SELECT id, email, student_id FROM users
+        WHERE id IN ({placeholders}) OR email IN ({placeholders}) OR student_id IN ({placeholders})
+        """,
+        tuple(cohort) + tuple(cohort) + tuple(cohort)
+    )
+    idents: Set[str] = set(cohort)
+    for row in cur.fetchall():
+        if row.get("id"):
+            idents.add(str(row["id"]))
+        if row.get("email"):
+            idents.add(str(row["email"]).strip().lower())
+        if row.get("student_id"):
+            idents.add(str(row["student_id"]))
+    return sorted(idents)
+
+
+
 def link_student_to_educator(
     conn,
     educator_id: str,

@@ -446,6 +446,22 @@ export const authService = {
         sessionStorage.setItem('learnsmart_uid', activeStudent.uid);
       }
 
+      // Log student.login activity to MySQL so educators and admins see live sign-in event
+      try {
+        import('./activityService.js').then(({ activityService }) => {
+          activityService.logActivity({
+            action: 'student.login',
+            entityType: 'user',
+            entityId: activeStudent.uid || activeStudent.id,
+            summary: `Student ${activeStudent.name} signed in to LearnSmart`,
+            metadata: { email: activeStudent.email, studentId: activeStudent.studentId },
+            studentId: activeStudent.uid || activeStudent.id,
+            studentName: activeStudent.name,
+            studentEmail: activeStudent.email
+          }).catch(() => {});
+        }).catch(() => {});
+      } catch (e) {}
+
       return activeStudent;
     } catch (err) {
       console.error('Failed to set student session:', err);

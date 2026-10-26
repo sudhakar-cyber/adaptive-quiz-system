@@ -44,7 +44,7 @@ def _scope(conn, current_user: Optional[Dict[str, Any]]) -> Tuple[Optional[List[
     if role == "educator":
         return (
             tracking_controller.educator_quiz_ids(conn, current_user),
-            tracking_controller.educator_cohort_ids(conn, current_user),
+            tracking_controller.educator_cohort_identifiers(conn, current_user),
         )
     return [], []
 
@@ -55,19 +55,19 @@ def _attempt_filter(quiz_ids: Optional[List[str]], cohort_ids: Optional[List[str
     clauses: List[str] = []
     params: List[Any] = []
 
-    if quiz_ids is not None:
-        if not quiz_ids:
-            return "1=0", []
+    if quiz_ids:
         placeholders = ", ".join(["?"] * len(quiz_ids))
         clauses.append(f"{prefix}quiz_id IN ({placeholders})")
         params.extend(quiz_ids)
 
-    if cohort_ids is not None:
-        if not cohort_ids:
-            return "1=0", []
+    if cohort_ids:
         placeholders = ", ".join(["?"] * len(cohort_ids))
-        clauses.append(f"{prefix}student_id IN ({placeholders})")
+        clauses.append(f"({prefix}student_id IN ({placeholders}) OR LOWER({prefix}student_email) IN ({placeholders}))")
         params.extend(cohort_ids)
+        params.extend([str(x).lower().strip() for x in cohort_ids])
+
+    if (quiz_ids is not None or cohort_ids is not None) and not clauses:
+        return "1=0", []
 
     if not clauses:
         return "1=1", []

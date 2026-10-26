@@ -811,6 +811,7 @@ export const ProfileDropdownMenu = ({
             src={profileImage}
             alt={displayName}
             className="dropdown-avatar-img"
+            style={{ borderRadius: '50%', width: '40px', height: '40px', objectFit: 'cover' }}
             referrerPolicy="no-referrer"
           />
         ) : (

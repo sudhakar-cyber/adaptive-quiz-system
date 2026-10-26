@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   BookOpenIcon,
   CheckCircleIcon,
@@ -6,6 +6,7 @@ import {
   PlayIcon,
   AwardIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const LearningPathView = ({
   onStartQuizByTopic,
@@ -13,260 +14,160 @@ export const LearningPathView = ({
   quizHistory = [],
   totalQuizzesTaken = null,
   subjectProgress = null,
-  averageScore = null
+  averageScore = null,
+  quizzes: initialQuizzes = null
 }) => {
-  // Determine if student is in reset / unstarted state (0 quizzes taken)
+  // Real-time active quizzes state from educator/admin additions
+  const [activeQuizzes, setActiveQuizzes] = useState(() => {
+    if (Array.isArray(initialQuizzes) && initialQuizzes.length > 0) {
+      return initialQuizzes;
+    }
+    return sharedDatabase.getPublishedQuizzes ? sharedDatabase.getPublishedQuizzes() : [];
+  });
+
+  useEffect(() => {
+    if (Array.isArray(initialQuizzes)) {
+      setActiveQuizzes(initialQuizzes);
+    }
+  }, [initialQuizzes]);
+
+  // Real-time synchronization when educator or admin creates, updates, or deletes quizzes
+  useEffect(() => {
+    const handleUpdate = () => {
+      setActiveQuizzes(sharedDatabase.getPublishedQuizzes ? sharedDatabase.getPublishedQuizzes() : []);
+    };
+
+    window.addEventListener('learnsmart_quizzes_updated', handleUpdate);
+    window.addEventListener('learnsmart_quiz_completed', handleUpdate);
+    window.addEventListener('learnsmart_activity_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+
+    return () => {
+      window.removeEventListener('learnsmart_quizzes_updated', handleUpdate);
+      window.removeEventListener('learnsmart_quiz_completed', handleUpdate);
+      window.removeEventListener('learnsmart_activity_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
+  // Determine if student has 0 attempts / reset state
   const isReset =
     totalQuizzesTaken === 0 ||
     (totalQuizzesTaken === null &&
       (!completedQuizIds || completedQuizIds.length === 0) &&
       (!quizHistory || quizHistory.length === 0));
 
-  // Dynamically compute the state and progression of each roadmap stage
+  // Build stages strictly based on published quizzes added by educator and admin
   const roadmapStages = useMemo(() => {
-    // Stage 1: Programming Foundations (Python Basics)
-    const stage1Done =
-      !isReset &&
-      (completedQuizIds.includes('python-basics') ||
-        quizHistory.some(
-          (q) => q.id === 'python-basics' || q.title?.toLowerCase().includes('python')
-        ));
-    const stage1Score =
-      quizHistory.find(
-        (q) => q.id === 'python-basics' || q.title?.toLowerCase().includes('python')
-      )?.score ?? (stage1Done ? 92 : 0);
-
-    // Stage 2: Data Structures & Algorithms
-    const stage2Done =
-      stage1Done &&
-      (completedQuizIds.includes('dsa') ||
-        quizHistory.some(
-          (q) => q.id === 'dsa' || q.title?.toLowerCase().includes('data structure')
-        ));
-    const stage2Score =
-      quizHistory.find(
-        (q) => q.id === 'dsa' || q.title?.toLowerCase().includes('data structure')
-      )?.score ?? (stage2Done ? 84 : 0);
-
-    // Stage 3: Cyber Security & Web Defense
-    const stage3Done =
-      stage2Done &&
-      (completedQuizIds.includes('web-security') ||
-        quizHistory.some(
-          (q) => q.id === 'web-security' || q.title?.toLowerCase().includes('security')
-        ));
-    const stage3Score =
-      quizHistory.find(
-        (q) => q.id === 'web-security' || q.title?.toLowerCase().includes('security')
-      )?.score ?? (stage3Done ? 78 : 0);
-
-    // Stage 4: Advanced Systems & Discrete Mathematics
-    const stage4Done =
-      stage3Done &&
-      (completedQuizIds.includes('discrete-math') ||
-        quizHistory.some(
-          (q) => q.id === 'discrete-math' || q.title?.toLowerCase().includes('math')
-        ));
-    const stage4Score =
-      quizHistory.find(
-        (q) => q.id === 'discrete-math' || q.title?.toLowerCase().includes('math')
-      )?.score ?? (stage4Done ? 90 : 0);
-
-    // Stage 1 Status & Completion
-    let s1Status = 'locked';
-    let s1Completion = 0;
-    if (isReset) {
-      s1Status = 'active';
-      s1Completion = 0;
-    } else if (stage1Done) {
-      s1Status = 'completed';
-      s1Completion = 100;
-    } else {
-      s1Status = 'active';
-      s1Completion = stage1Score > 0 ? Math.min(85, stage1Score) : 0;
+    if (!activeQuizzes || activeQuizzes.length === 0) {
+      return [];
     }
 
-    // Stage 2 Status & Completion
-    let s2Status = 'locked';
-    let s2Completion = 0;
-    if (isReset) {
-      s2Status = 'locked';
-      s2Completion = 0;
-    } else if (stage2Done) {
-      s2Status = 'completed';
-      s2Completion = 100;
-    } else if (stage1Done) {
-      s2Status = 'active';
-      s2Completion = stage2Score > 0 ? Math.min(90, stage2Score) : 75;
-    } else {
-      s2Status = 'locked';
-      s2Completion = 0;
-    }
+    return activeQuizzes.map((quiz, index) => {
+      const quizId = String(quiz.id || '').trim();
+      const quizTitle = String(quiz.title || '').trim();
 
-    // Stage 3 Status & Completion
-    let s3Status = 'locked';
-    let s3Completion = 0;
-    if (isReset) {
-      s3Status = 'locked';
-      s3Completion = 0;
-    } else if (stage3Done) {
-      s3Status = 'completed';
-      s3Completion = 100;
-    } else if (stage2Done) {
-      s3Status = 'active';
-      s3Completion = stage3Score > 0 ? Math.min(90, stage3Score) : 40;
-    } else if (stage1Done) {
-      s3Status = 'upcoming';
-      s3Completion = 20;
-    } else {
-      s3Status = 'locked';
-      s3Completion = 0;
-    }
+      // Check if student has completed this specific quiz added by educator/admin
+      const attempt = (quizHistory || []).find((h) => {
+        const hQuizId = String(h.quizId || h.id || '').trim();
+        const hTitle = String(h.title || h.quizTitle || '').trim().toLowerCase();
+        return (
+          (quizId && hQuizId === quizId) ||
+          (quizTitle && hTitle === quizTitle.toLowerCase())
+        );
+      });
 
-    // Stage 4 Status & Completion
-    let s4Status = 'locked';
-    let s4Completion = 0;
-    if (isReset) {
-      s4Status = 'locked';
-      s4Completion = 0;
-    } else if (stage4Done) {
-      s4Status = 'completed';
-      s4Completion = 100;
-    } else if (stage3Done) {
-      s4Status = 'active';
-      s4Completion = stage4Score > 0 ? Math.min(90, stage4Score) : 15;
-    } else if (stage2Done) {
-      s4Status = 'upcoming';
-      s4Completion = 10;
-    } else {
-      s4Status = 'locked';
-      s4Completion = 0;
-    }
+      const isDone =
+        !isReset &&
+        (Boolean(
+          completedQuizIds &&
+            (completedQuizIds.includes(quiz.id) ||
+              (quizId && completedQuizIds.includes(quizId)) ||
+              (quizTitle && completedQuizIds.some((cId) => String(cId).toLowerCase() === quizTitle.toLowerCase())))
+        ) ||
+          Boolean(attempt));
 
-    return [
-      {
-        id: 1,
-        number: '01',
-        label: 'Stage 1',
-        quizId: 'python-basics',
-        requiredStage: null,
-        title: 'Stage 1: Programming Foundations',
-        status: s1Status,
-        completion: s1Completion,
-        description: 'Core concepts in Python, procedural logic, control flows, and object-oriented modeling.',
-        modules: [
-          {
-            name: 'Python Syntax, Variables & Operators',
-            status: s1Status === 'completed' ? 'done' : s1Status === 'active' ? 'in-progress' : 'locked',
-            score: s1Status === 'completed' ? `${stage1Score}%` : s1Status === 'active' ? (s1Completion > 0 ? `${s1Completion}%` : 'Ready') : 'Locked'
-          },
-          {
-            name: 'Functions, Scopes & Error Handling',
-            status: s1Status === 'completed' ? 'done' : 'upcoming',
-            score: s1Status === 'completed' ? `${Math.max(65, stage1Score - 5)}%` : 'Queued'
-          },
-          {
-            name: 'Object-Oriented Programming (Classes & Inheritance)',
-            status: s1Status === 'completed' ? 'done' : 'upcoming',
-            score: s1Status === 'completed' ? `${Math.min(99, stage1Score + 3)}%` : 'Queued'
-          }
-        ],
-        badge: 'Foundations Certified 🏅'
-      },
-      {
-        id: 2,
-        number: '02',
-        label: 'Stage 2',
-        quizId: 'dsa',
-        requiredStage: 'Stage 1',
-        title: 'Stage 2: Data Structures & Algorithms',
-        status: s2Status,
-        completion: s2Completion,
-        description: 'Master linear and non-linear memory layouts, algorithmic complexity, sorting, and graph theory.',
-        modules: [
-          {
-            name: 'Linear Data Structures (Arrays, Linked Lists, Stacks, Queues)',
-            status: s2Status === 'completed' ? 'done' : s2Status === 'active' ? 'done' : 'locked',
-            score: s2Status === 'completed' ? `${stage2Score}%` : s2Status === 'active' ? '84%' : 'Locked'
-          },
-          {
-            name: 'Sorting & Binary Search Algorithms',
-            status: s2Status === 'completed' ? 'done' : s2Status === 'active' ? 'done' : 'locked',
-            score: s2Status === 'completed' ? `${Math.max(60, stage2Score - 5)}%` : s2Status === 'active' ? '80%' : 'Locked'
-          },
-          {
-            name: 'Trees, Binary Search Trees & Heaps',
-            status: s2Status === 'completed' ? 'done' : s2Status === 'active' ? 'in-progress' : 'locked',
-            score: s2Status === 'completed' ? `${Math.min(98, stage2Score + 5)}%` : s2Status === 'active' ? 'Current' : 'Locked'
-          },
-          {
-            name: 'Dynamic Programming & Memoization',
-            status: s2Status === 'completed' ? 'done' : s2Status === 'active' ? 'upcoming' : 'locked',
-            score: s2Status === 'completed' ? `${stage2Score}%` : s2Status === 'active' ? 'Next' : 'Locked'
-          }
-        ],
-        badge: 'In Progress (Stage Milestone Test Ready)'
-      },
-      {
-        id: 3,
-        number: '03',
-        label: 'Stage 3',
-        quizId: 'web-security',
-        requiredStage: 'Stage 2',
-        title: 'Stage 3: Cyber Security & Web Defense',
-        status: s3Status,
-        completion: s3Completion,
-        description: 'Web vulnerability analysis, OWASP Top 10 defenses, HTTPS/TLS, and secure token authentication.',
-        modules: [
-          {
-            name: 'Network Protocols & HTTPS Handshakes',
-            status: s3Status === 'completed' ? 'done' : s3Status === 'active' || s3Status === 'upcoming' ? 'done' : 'locked',
-            score: s3Status === 'completed' ? `${stage3Score}%` : s3Status === 'upcoming' ? '78%' : s3Status === 'active' ? '82%' : 'Locked'
-          },
-          {
-            name: 'OWASP Top 10 (SQLi, XSS, CSRF)',
-            status: s3Status === 'completed' ? 'done' : s3Status === 'active' ? 'in-progress' : 'locked',
-            score: s3Status === 'completed' ? `${Math.max(60, stage3Score - 4)}%` : s3Status === 'active' ? 'Current' : 'Locked'
-          },
-          {
-            name: 'Authentication, Password Hashing & JWT',
-            status: s3Status === 'completed' ? 'done' : s3Status === 'active' ? 'upcoming' : 'locked',
-            score: s3Status === 'completed' ? `${Math.min(99, stage3Score + 4)}%` : s3Status === 'active' ? 'Next' : 'Locked'
-          }
-        ],
-        badge: 'Security Sentinel 🛡️'
-      },
-      {
-        id: 4,
-        number: '04',
-        label: 'Stage 4',
-        quizId: 'discrete-math',
-        requiredStage: 'Stage 3',
-        title: 'Stage 4: Advanced Systems & Discrete Mathematics',
-        status: s4Status,
-        completion: s4Completion,
-        description: 'Microservices architecture, distributed caching, discrete logic, graph theory, and system scalability.',
-        modules: [
-          {
-            name: 'Propositional Logic & Graph Definitions',
-            status: s4Status === 'completed' ? 'done' : s4Status === 'active' ? 'in-progress' : 'locked',
-            score: s4Status === 'completed' ? `${stage4Score}%` : s4Status === 'active' ? 'Current' : 'Locked'
-          },
-          {
-            name: 'Distributed Caching & Redis Patterns',
-            status: s4Status === 'completed' ? 'done' : s4Status === 'active' ? 'upcoming' : 'locked',
-            score: s4Status === 'completed' ? `${Math.max(60, stage4Score - 5)}%` : s4Status === 'active' ? 'Next' : 'Locked'
-          },
-          {
-            name: 'Capstone System Architecture & Design Assessment',
-            status: s4Status === 'completed' ? 'done' : 'locked',
-            score: s4Status === 'completed' ? `${stage4Score}%` : 'Locked'
-          }
-        ],
-        badge: 'Master Architect 🏆'
+      let score = 0;
+      if (attempt) {
+        const rawScore =
+          attempt.scoreValue ??
+          (typeof attempt.score === 'number' ? attempt.score : parseFloat(attempt.score));
+        score = isNaN(rawScore) ? 100 : Math.round(rawScore);
+      } else if (isDone) {
+        score = 100;
       }
-    ];
-  }, [isReset, completedQuizIds, quizHistory]);
+
+      const stageNumber = String(index + 1).padStart(2, '0');
+      const stageStatus = isDone ? 'completed' : 'active';
+      const stageCompletion = isDone ? 100 : 0;
+
+      // Dynamic modules generated from quiz questions or curriculum focus
+      const questions = Array.isArray(quiz.questions) ? quiz.questions : [];
+      let modules = [];
+
+      if (questions.length > 0) {
+        const topicMap = new Map();
+        questions.forEach((q, qIdx) => {
+          const rawTopic =
+            q.topic ||
+            q.category ||
+            (q.question ? (q.question.length > 40 ? `${q.question.substring(0, 40)}...` : q.question) : `Topic ${qIdx + 1}`);
+          if (!topicMap.has(rawTopic)) {
+            topicMap.set(rawTopic, q);
+          }
+        });
+
+        const topics = Array.from(topicMap.keys()).slice(0, 3);
+        modules = topics.map((topName) => ({
+          name: topName,
+          status: isDone ? 'done' : 'in-progress',
+          score: isDone ? `${score}%` : 'Pending'
+        }));
+      }
+
+      if (modules.length === 0) {
+        modules = [
+          {
+            name: `${quiz.category || 'Curriculum'} Core Principles & Concepts`,
+            status: isDone ? 'done' : 'in-progress',
+            score: isDone ? `${score}%` : 'Ready'
+          },
+          {
+            name: 'Applied Scenario Practice & Critical Analysis',
+            status: isDone ? 'done' : 'in-progress',
+            score: isDone ? `${Math.max(60, score - 5)}%` : 'Queued'
+          },
+          {
+            name: `Milestone Assessment Evaluation (${questions.length || quiz.questionsCount || 5} Questions)`,
+            status: isDone ? 'done' : 'in-progress',
+            score: isDone ? `${score}%` : 'Pending'
+          }
+        ];
+      }
+
+      return {
+        id: quiz.id || index + 1,
+        number: stageNumber,
+        label: `Stage ${index + 1}`,
+        quizId: quiz.id,
+        quizTitle,
+        requiredStage: index > 0 ? `Stage ${index}` : null,
+        title: `Stage ${index + 1}: ${quizTitle}`,
+        status: stageStatus,
+        completion: stageCompletion,
+        score,
+        description:
+          quiz.description ||
+          quiz.recommendationReason ||
+          `Official curriculum assessment in ${quiz.category || 'General'} added by educators and administrators. Complete to earn certification.`,
+        modules,
+        badge: `${quizTitle} Certified 🏅`,
+        difficulty: quiz.difficulty || 'Medium',
+        duration: quiz.duration || '15 mins',
+        questionsCount: questions.length || quiz.questionsCount || 5
+      };
+    });
+  }, [activeQuizzes, isReset, completedQuizIds, quizHistory]);
 
   // Dynamic statistics calculated directly from stage statuses
   const completedStagesCount = useMemo(() => {
@@ -278,20 +179,14 @@ export const LearningPathView = ({
   }, [roadmapStages]);
 
   const remainingStagesCount = useMemo(() => {
-    return roadmapStages.filter((s) => s.status === 'upcoming' || s.status === 'locked').length;
+    return roadmapStages.filter((s) => s.status !== 'completed').length;
   }, [roadmapStages]);
 
   // Overall curriculum completion percentage
   const totalCurriculumPct = useMemo(() => {
-    if (isReset) return 0;
-    if (completedStagesCount === roadmapStages.length) return 100;
-    // Check if in standard initial demo state (Stage 1 completed, Stage 2 at 75%)
-    if (completedStagesCount === 1 && activeStage?.id === 2 && activeStage.completion === 75) {
-      return 65; // Matches the standard 65% benchmark in demo state
-    }
-    const sum = roadmapStages.reduce((acc, s) => acc + (s.completion || 0), 0);
-    return Math.min(100, Math.round(sum / roadmapStages.length));
-  }, [isReset, roadmapStages, completedStagesCount, activeStage]);
+    if (roadmapStages.length === 0) return 0;
+    return Math.round((completedStagesCount / roadmapStages.length) * 100);
+  }, [roadmapStages, completedStagesCount]);
 
   return (
     <div className="tab-view-container learning-path-view">
@@ -299,12 +194,12 @@ export const LearningPathView = ({
         <div className="path-hero-text">
           <div className="path-track-pill">
             <BookOpenIcon size={14} />
-            <span>Personalized Adaptive Track: Computer Science & Software Engineering</span>
+            <span>Personalized Adaptive Track: Curated by Educators & Admins</span>
           </div>
           <h2 className="path-hero-heading">Your Custom Roadmap to Mastery</h2>
           <p className="path-hero-desc">
-            Your curriculum automatically adapts based on your quiz strengths and weaknesses.
-            Complete stage assessments to unlock advanced topics and industry-recognized certificates.
+            Your curriculum dynamically reflects assessments assigned by your educators and administrators.
+            Complete stage assessments to demonstrate mastery and earn certification.
           </p>
         </div>
 
@@ -324,25 +219,27 @@ export const LearningPathView = ({
             <div className="summary-detail-row">
               <span className="dot-green" />
               <span>
-                {completedStagesCount} Stage{completedStagesCount === 1 ? '' : 's'} Completed
+                {completedStagesCount} of {roadmapStages.length} {roadmapStages.length === 1 ? 'Quiz' : 'Quizzes'} Completed
               </span>
             </div>
             <div className="summary-detail-row">
               <span className="dot-blue" />
               <span>
                 {activeStage
-                  ? `${activeStage.label} in progress (${activeStage.completion}%)`
-                  : 'All Stages Completed (100%)'}
+                  ? `${activeStage.quizTitle || activeStage.label} ready to take`
+                  : roadmapStages.length > 0
+                  ? 'All Stages Completed (100%)'
+                  : 'No Quizzes Assigned'}
               </span>
             </div>
             <div className="summary-detail-row">
               <span className="dot-gray" />
               <span>
                 {remainingStagesCount > 0
-                  ? `${remainingStagesCount} Stage${remainingStagesCount === 1 ? '' : 's'} Remaining`
-                  : activeStage
-                  ? 'Final Stage in Progress'
-                  : 'Curriculum Completed'}
+                  ? `${remainingStagesCount} ${remainingStagesCount === 1 ? 'Quiz' : 'Quizzes'} Remaining`
+                  : roadmapStages.length > 0
+                  ? 'Curriculum Completed'
+                  : 'Awaiting Educator Assignment'}
               </span>
             </div>
           </div>
@@ -350,119 +247,145 @@ export const LearningPathView = ({
       </div>
 
       <div className="roadmap-stages-flow">
-        {roadmapStages.map((stage) => {
-          const isDone = stage.status === 'completed';
-          const isActive = stage.status === 'active';
-          const isLocked = stage.status === 'locked';
-
-          return (
+        {roadmapStages.length === 0 ? (
+          <div
+            className="stage-card"
+            style={{
+              padding: '40px 24px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px'
+            }}
+          >
             <div
-              key={stage.id}
-              className={`stage-card ${stage.status}`}
+              style={{
+                width: '52px',
+                height: '52px',
+                borderRadius: '50%',
+                background: '#EFF6FF',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#1A6BFF'
+              }}
             >
-              <div className="stage-card-indicator">
-                <div className="stage-num-badge">
-                  {isDone ? (
-                    <CheckCircleIcon size={20} color="#FFFFFF" />
-                  ) : isLocked ? (
-                    <LockIcon size={18} color="#94A3B8" />
-                  ) : (
-                    <span>{stage.number}</span>
-                  )}
-                </div>
-                <div className="stage-connector-line" />
-              </div>
+              <BookOpenIcon size={26} />
+            </div>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+              No Quizzes Published Yet
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: '#64748B', maxWidth: '440px', margin: 0 }}>
+              Quizzes added and published by educators or administrators will automatically appear here in your personalized learning roadmap.
+            </p>
+          </div>
+        ) : (
+          roadmapStages.map((stage) => {
+            const isDone = stage.status === 'completed';
+            const isActive = stage.status === 'active';
 
-              <div className="stage-card-content">
-                <div className="stage-header-row">
-                  <div>
-                    <div className="stage-status-tag">
-                      {isDone && <span className="tag-done">✓ Completed</span>}
-                      {isActive && <span className="tag-active">▶ Current Learning Stage</span>}
-                      {stage.status === 'upcoming' && <span className="tag-upcoming">⏳ Up Next</span>}
-                      {isLocked && <span className="tag-locked">🔒 Locked</span>}
-                    </div>
-                    <h3 className="stage-card-title">{stage.title}</h3>
-                    <p className="stage-card-desc">{stage.description}</p>
-                  </div>
-
-                  <div className="stage-actions-box">
-                    {isActive ? (
-                      <button
-                        type="button"
-                        className="stage-action-primary-btn"
-                        onClick={() => onStartQuizByTopic && onStartQuizByTopic(stage.quizId)}
-                      >
-                        <PlayIcon size={16} />
-                        <span>
-                          {stage.completion > 0 ? 'Resume Current Topic' : 'Start Stage Assessment'}
-                        </span>
-                      </button>
-                    ) : isDone ? (
-                      <button
-                        type="button"
-                        className="stage-action-outline-btn"
-                        onClick={() => onStartQuizByTopic && onStartQuizByTopic(stage.quizId)}
-                      >
-                        <span>Review Material</span>
-                      </button>
+            return (
+              <div
+                key={stage.id}
+                className={`stage-card ${stage.status}`}
+              >
+                <div className="stage-card-indicator">
+                  <div className="stage-num-badge">
+                    {isDone ? (
+                      <CheckCircleIcon size={20} color="#FFFFFF" />
                     ) : (
-                      <button type="button" className="stage-action-disabled-btn" disabled>
-                        <span>Requires {stage.requiredStage}</span>
-                      </button>
+                      <span>{stage.number}</span>
                     )}
                   </div>
+                  <div className="stage-connector-line" />
                 </div>
 
-                {isActive && (
-                  <div className="stage-progress-bar-wrap">
-                    <div className="stage-progress-labels">
-                      <span>{stage.label} Progress</span>
-                      <span>{stage.completion}%</span>
+                <div className="stage-card-content">
+                  <div className="stage-header-row">
+                    <div>
+                      <div className="stage-status-tag">
+                        {isDone ? (
+                          <span className="tag-done">✓ Completed</span>
+                        ) : (
+                          <span className="tag-active">▶ Ready to Start</span>
+                        )}
+                      </div>
+                      <h3 className="stage-card-title">{stage.title}</h3>
+                      <p className="stage-card-desc">{stage.description}</p>
                     </div>
-                    <div className="stage-progress-track">
-                      <div
-                        className="stage-progress-fill"
-                        style={{ width: `${stage.completion}%` }}
-                      />
+
+                    <div className="stage-actions-box">
+                      {isDone ? (
+                        <button
+                          type="button"
+                          className="stage-action-outline-btn"
+                          onClick={() => onStartQuizByTopic && onStartQuizByTopic(stage.quizId)}
+                        >
+                          <span>Review Material</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="stage-action-primary-btn"
+                          onClick={() => onStartQuizByTopic && onStartQuizByTopic(stage.quizId)}
+                        >
+                          <PlayIcon size={16} />
+                          <span>Start Stage Assessment</span>
+                        </button>
+                      )}
                     </div>
                   </div>
-                )}
 
-                <div className="stage-modules-list">
-                  {stage.modules.map((mod, modIdx) => (
-                    <div key={modIdx} className="stage-module-item">
-                      <div className="module-left">
-                        <span className="module-bullet">
-                          {mod.status === 'done' ? '✓' : mod.status === 'in-progress' ? '▶' : '•'}
-                        </span>
-                        <span className="module-name">{mod.name}</span>
+                  {isActive && stage.completion > 0 && (
+                    <div className="stage-progress-bar-wrap">
+                      <div className="stage-progress-labels">
+                        <span>{stage.label} Progress</span>
+                        <span>{stage.completion}%</span>
                       </div>
-                      <div className="module-right">
-                        <span
-                          className={`module-score-badge ${
-                            mod.status === 'done'
-                              ? 'mod-done'
-                              : mod.status === 'in-progress'
-                              ? 'mod-active'
-                              : 'mod-lock'
-                          }`}
-                        >
-                          {mod.score}
-                        </span>
+                      <div className="stage-progress-track">
+                        <div
+                          className="stage-progress-fill"
+                          style={{ width: `${stage.completion}%` }}
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
 
-                <div className="stage-badge-footer">
-                  <AwardIcon size={16} color="#475569" />
-                  <span className="stage-badge-text">Milestone Reward: {stage.badge}</span>
+                  <div className="stage-modules-list">
+                    {stage.modules.map((mod, modIdx) => (
+                      <div key={modIdx} className="stage-module-item">
+                        <div className="module-left">
+                          <span className="module-bullet">
+                            {mod.status === 'done' ? '✓' : '▶'}
+                          </span>
+                          <span className="module-name">{mod.name}</span>
+                        </div>
+                        <div className="module-right">
+                          <span
+                            className={`module-score-badge ${
+                              mod.status === 'done'
+                                ? 'mod-done'
+                                : 'mod-active'
+                            }`}
+                          >
+                            {mod.score}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="stage-badge-footer">
+                    <AwardIcon size={16} color="#475569" />
+                    <span className="stage-badge-text">Milestone Reward: {stage.badge}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </div>
   );

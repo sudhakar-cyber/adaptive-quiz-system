@@ -394,21 +394,7 @@ export const QuizModal = ({
                 <span>Previous</span>
               </button>
 
-              <div className="quiz-footer-center">
-                {selectedAnswers[currentIndex] !== undefined && (
-                  <button
-                    type="button"
-                    className="quiz-clear-btn"
-                    onClick={() => {
-                      const updated = { ...selectedAnswers };
-                      delete updated[currentIndex];
-                      setSelectedAnswers(updated);
-                    }}
-                  >
-                    Clear Choice
-                  </button>
-                )}
-              </div>
+
 
               {currentIndex < totalQuestions - 1 ? (
                 <button

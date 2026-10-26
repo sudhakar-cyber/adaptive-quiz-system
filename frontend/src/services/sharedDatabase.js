@@ -159,35 +159,64 @@ export const syncStudentsFromBackend = async (force = false) => {
     if (res.ok) {
       const backendStudents = await res.json();
       if (Array.isArray(backendStudents)) {
+        const existingStored = loadStoredStudents();
+        const existingMap = new Map();
+        existingStored.forEach((s) => {
+          if (s.email) existingMap.set(s.email.toLowerCase(), s);
+          if (s.id) existingMap.set(String(s.id).toLowerCase(), s);
+          if (s.uid) existingMap.set(String(s.uid).toLowerCase(), s);
+        });
+
         const formatted = backendStudents
           .filter((bs) => bs && bs.email)
-          .map((bs) => ({
-            id: bs.id || bs.uid,
-            uid: bs.uid || bs.id,
-            studentId: (bs.studentId && bs.studentId !== bs.uid && bs.studentId !== bs.id && !bs.studentId.startsWith('Pwip') && bs.studentId.length < 25 ? bs.studentId : null) ||
-                       bs.student_id ||
-                       (bs.email === 'shaikaathif22@gmail.com' ? 'LS-2025-100' : null) ||
-                       (typeof generateStudentId === 'function' ? generateStudentId() : 'LS-2025-100'),
-            name: bs.name,
-            email: bs.email,
-            role: bs.role || 'student',
-            department: bs.department || 'General',
-            phone: bs.phone || '',
-            country: bs.country || '',
-            isActive: bs.is_active !== undefined ? Boolean(bs.is_active) : true,
-            quizzesCompleted: bs.quizzesCompleted ?? 0,
-            avgScore: bs.avgScore ?? 0,
-            highestScore: bs.highestScore ?? 0,
-            topSubject: bs.topSubject || 'General',
-            status: bs.status || 'On Track',
-            statusVariant: bs.statusVariant || 'info',
-            streak: bs.streak ?? 0,
-            subjectMastery: Array.isArray(bs.subjectMastery) ? bs.subjectMastery : [],
-            avatarImage: bs.avatarImage || null,
-            lastActive: bs.lastActive || 'Active',
-            recentSubmissions: Array.isArray(bs.recentSubmissions) ? bs.recentSubmissions : [],
-            avatarInitials: getInitials(bs.name)
-          }));
+          .map((bs) => {
+            const emailKey = bs.email?.toLowerCase();
+            const idKey = String(bs.id || bs.uid || '').toLowerCase();
+            const prev = existingMap.get(emailKey) || existingMap.get(idKey);
+
+            const rawCompleted = bs.quizzesCompleted ?? 0;
+            const rawAvg = bs.avgScore ?? 0;
+            const prevCompleted = prev?.quizzesCompleted ?? 0;
+            const prevAvg = prev?.avgScore ?? 0;
+
+            const finalCompleted = rawCompleted > 0 ? rawCompleted : prevCompleted;
+            const finalAvg = rawCompleted > 0 ? rawAvg : (prevCompleted > 0 ? prevAvg : rawAvg);
+            const finalHigh = Math.max(Number(bs.highestScore ?? 0), Number(prev?.highestScore ?? 0));
+            const finalRecent = (Array.isArray(bs.recentSubmissions) && bs.recentSubmissions.length > 0)
+              ? bs.recentSubmissions
+              : (Array.isArray(prev?.recentSubmissions) ? prev.recentSubmissions : []);
+
+            return {
+              id: bs.id || bs.uid,
+              uid: bs.uid || bs.id,
+              studentId: (bs.studentId && bs.studentId !== bs.uid && bs.studentId !== bs.id && !bs.studentId.startsWith('Pwip') && bs.studentId.length < 25 ? bs.studentId : null) ||
+                         bs.student_id ||
+                         (bs.email === 'shaikaathif22@gmail.com' ? 'LS-2025-100' : null) ||
+                         prev?.studentId ||
+                         (typeof generateStudentId === 'function' ? generateStudentId() : 'LS-2025-100'),
+              name: bs.name,
+              email: bs.email,
+              role: bs.role || 'student',
+              department: bs.department || prev?.department || 'General',
+              phone: bs.phone || prev?.phone || '',
+              country: bs.country || prev?.country || '',
+              isActive: bs.is_active !== undefined ? Boolean(bs.is_active) : true,
+              quizzesCompleted: finalCompleted,
+              avgScore: finalAvg,
+              highestScore: finalHigh,
+              topSubject: bs.topSubject || prev?.topSubject || 'General',
+              status: finalAvg >= 85 ? 'Top Performer' : finalAvg >= 70 ? 'On Track' : (finalCompleted === 0 ? 'On Track' : 'Needs Support'),
+              statusVariant: finalAvg >= 85 ? 'success' : finalAvg >= 70 ? 'info' : (finalCompleted === 0 ? 'info' : 'warning'),
+              streak: Math.max(Number(bs.streak ?? 0), Number(prev?.streak ?? 0)),
+              subjectMastery: (Array.isArray(bs.subjectMastery) && bs.subjectMastery.length > 0)
+                ? bs.subjectMastery
+                : (Array.isArray(prev?.subjectMastery) ? prev.subjectMastery : []),
+              avatarImage: bs.avatarImage || prev?.avatarImage || null,
+              lastActive: (bs.lastActive && bs.lastActive !== 'Active') ? bs.lastActive : (prev?.lastActive || bs.lastActive || 'Active'),
+              recentSubmissions: finalRecent,
+              avatarInitials: getInitials(bs.name)
+            };
+          });
 
         const currentSavedStr = localStorage.getItem(STORAGE_KEY_STUDENTS) || localStorage.getItem(STORAGE_KEY_LEGACY);
         const newFormattedStr = JSON.stringify(formatted);
@@ -1024,24 +1053,93 @@ const notifyAdminSubscribers = () => {
 export const getOwnSubmissions = () => {
   const all = sharedDatabase.getSubmissions();
   const identity = getCurrentIdentity();
-  const email = (identity.email || '').toLowerCase();
-  const uid = identity.uid || '';
+  const email = (identity.email || '').toLowerCase().trim();
+  const uid = String(identity.uid || '').trim();
+  const name = String(identity.name || '').toLowerCase().trim();
 
-  if (!email && !uid) return all;
+  let studentId = '';
+  try {
+    const profile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
+    studentId = String(profile?.studentId || '').trim();
+  } catch {}
 
-  return all.filter((s) => {
-    const subEmail = (s?.studentEmail || '').toLowerCase();
-    const subId = String(s?.studentId || '');
+  if (!email && !uid && !name && !studentId) return all;
+
+  const matched = all.filter((s) => {
+    const subEmail = (s?.studentEmail || '').toLowerCase().trim();
+    const subId = String(s?.studentId || '').trim();
+    const subStudent = (s?.student || '').toLowerCase().trim();
+
     if (email && subEmail && subEmail === email) return true;
-    if (uid && subId && subId === uid) return true;
+    if (uid && subId && (subId === uid || String(s?.id || '').includes(uid))) return true;
+    if (studentId && subId && subId.toLowerCase() === studentId.toLowerCase()) return true;
+    if (name && subStudent && (
+      subStudent === name ||
+      subStudent.replace(/\s+/g, '') === name.replace(/\s+/g, '') ||
+      subStudent.includes(name) ||
+      name.includes(subStudent)
+    )) return true;
+    if (email && subEmail && email.split('@')[0] === subEmail.split('@')[0]) return true;
     return false;
   });
+
+  if (matched.length > 0) return matched;
+
+  // Defensive fallback: if caller is student and backend returned submissions specifically for them
+  const role = getCurrentRole() || identity.role;
+  if (role === 'student' && all.length > 0) {
+    return all;
+  }
+  return [];
 };
 
 /** Aggregated personal performance of the signed-in student (from MySQL). */
 export const getStudentPerformance = () => {
-  const own = getOwnSubmissions();
-  const scores = own.map((s) => {
+  let own = getOwnSubmissions();
+  const identity = getCurrentIdentity();
+  const email = (identity.email || '').toLowerCase().trim();
+  const uid = String(identity.uid || '').trim();
+  const name = String(identity.name || '').toLowerCase().trim();
+
+  // Fallback 1: check student record in loaded students from backend
+  if (!own || own.length === 0) {
+    const allStudents = loadStoredStudents();
+    const student = allStudents.find((s) => {
+      const sEmail = (s.email || '').toLowerCase().trim();
+      const sUid = String(s.uid || s.id || '').trim();
+      const sName = (s.name || '').toLowerCase().trim();
+      return (email && sEmail === email) || (uid && sUid === uid) || (name && sName === name);
+    });
+    if (student && Array.isArray(student.recentSubmissions) && student.recentSubmissions.length > 0) {
+      own = student.recentSubmissions.map((sub, idx) => ({
+        id: sub.id || (10001 + idx),
+        quizId: sub.quizId || sub.quiz_id || null,
+        quizTitle: sub.title || sub.quiz_title || 'Quiz',
+        category: sub.category || 'General',
+        score: sub.score,
+        scoreValue: typeof sub.score === 'string' ? parseFloat(sub.score) : Number(sub.score || 0),
+        status: sub.status || 'Passed',
+        date: sub.date || 'Today',
+        submittedAt: sub.submitted_at || sub.submittedAt || ''
+      }));
+    }
+  }
+
+  // Fallback 2: check student's user-scoped localStorage history
+  if (!own || own.length === 0) {
+    try {
+      const userKey = (email || uid || name || 'default').toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+      const savedHist = JSON.parse(localStorage.getItem(`learnsmart_student_quiz_history_${userKey}`) || '[]');
+      if (Array.isArray(savedHist) && savedHist.length > 0) {
+        own = savedHist.map((h) => ({
+          ...h,
+          scoreValue: typeof h.score === 'number' ? h.score : parseFloat(String(h.score).replace('%', '')) || 0
+        }));
+      }
+    } catch {}
+  }
+
+  const scores = (own || []).map((s) => {
     if (typeof s?.scoreValue === 'number') return s.scoreValue;
     const parsed = parseFloat(String(s?.score ?? '').replace('%', ''));
     return Number.isNaN(parsed) ? 0 : parsed;
@@ -1051,11 +1149,11 @@ export const getStudentPerformance = () => {
   const avgScore = scores.length ? Math.round((total / scores.length) * 10) / 10 : 0;
 
   return {
-    quizzesCompleted: own.length,
+    quizzesCompleted: (own || []).length,
     avgScore,
     highestScore: scores.length ? Math.max(...scores) : 0,
-    completedQuizIds: [...new Set(own.map((s) => s?.quizId).filter(Boolean))],
-    submissions: own
+    completedQuizIds: [...new Set((own || []).map((s) => s?.quizId).filter(Boolean))],
+    submissions: own || []
   };
 };
 
@@ -1211,6 +1309,19 @@ export const sharedDatabase = {
       return updated;
     }
 
+    const userKey = (cleanEmail || uid || fullName).toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+    let initCompleted = 0;
+    let initAvg = 0;
+    let initSubmissions = [];
+    try {
+      const hist = JSON.parse(localStorage.getItem(`learnsmart_student_quiz_history_${userKey}`) || '[]');
+      if (Array.isArray(hist) && hist.length > 0) {
+        initCompleted = hist.length;
+        initAvg = Math.round((hist.reduce((a, b) => a + (Number(b.score) || 0), 0) / hist.length) * 10) / 10;
+        initSubmissions = hist;
+      }
+    } catch {}
+
     const newStudent = {
       id: uid ? `stud-${uid}` : `stud-${Date.now()}`,
       name: fullName,
@@ -1221,12 +1332,12 @@ export const sharedDatabase = {
       studentId: generateStudentId(all),
       role: 'student',
       created_at: new Date().toISOString(),
-      quizzesCompleted: 0,
-      avgScore: 0,
-      highestScore: 0,
+      quizzesCompleted: initCompleted,
+      avgScore: initAvg,
+      highestScore: initSubmissions.length ? Math.max(...initSubmissions.map(s => Number(s.score) || 0)) : 0,
       topSubject: 'General / Onboarding',
-      status: 'On Track',
-      statusVariant: 'info',
+      status: initAvg >= 85 ? 'Top Performer' : initAvg >= 70 ? 'On Track' : 'On Track',
+      statusVariant: initAvg >= 85 ? 'success' : 'info',
       lastActive: 'Just now',
       avatarInitials: getInitials(fullName),
       avatarImage: resolvedAvatar,
@@ -1240,7 +1351,7 @@ export const sharedDatabase = {
         { subject: 'Web Security', score: 0 },
         { subject: 'Others', score: 0 }
       ],
-      recentSubmissions: [],
+      recentSubmissions: initSubmissions,
       feedbackNote: 'New student registered. Welcome to LearnSmart Adaptive Learning!'
     };
 
@@ -2937,9 +3048,13 @@ export const sharedDatabase = {
         const STORAGE_KEY_FEEDBACKS = 'learnsmart_quiz_feedbacks';
         const existing = JSON.parse(localStorage.getItem(STORAGE_KEY_FEEDBACKS) || '[]');
         localStorage.setItem(STORAGE_KEY_FEEDBACKS, JSON.stringify([newFeedback, ...existing]));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('learnsmart_activity_updated', { detail: newFeedback }));
+        }
       } catch (err) {
         console.warn('Failed to cache quiz feedback:', err);
       }
+
 
       return newFeedback;
     } catch (err) {

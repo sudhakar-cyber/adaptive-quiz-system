@@ -131,6 +131,27 @@ def remove_quiz(
     return {"success": True, "message": f"Quiz {quiz_id} deleted."}
 
 
+class StartQuizRequest(BaseModel):
+    studentName: Optional[str] = None
+    studentEmail: Optional[str] = None
+    studentId: Optional[str] = None
+    category: Optional[str] = None
+    quizTitle: Optional[str] = None
+
+    class Config:
+        extra = "allow"
+
+
+@router.post("/{quiz_id}/start")
+def start_quiz_session(
+    quiz_id: str,
+    req: StartQuizRequest,
+    current_user: Dict[str, Any] = Depends(require_authenticated)
+):
+    """Logs when a student begins taking a quiz and notifies relevant educators."""
+    return quiz_controller.start_student_quiz(quiz_id, req.dict(), current_user)
+
+
 @router.post("/{quiz_id}/attempt")
 def submit_quiz_attempt(
     quiz_id: str,
@@ -142,3 +163,4 @@ def submit_quiz_attempt(
         return quiz_controller.record_student_attempt(quiz_id, req.dict(), current_user)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
