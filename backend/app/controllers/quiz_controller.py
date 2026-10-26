@@ -257,7 +257,7 @@ def delete_quiz(quiz_id: str, current_user: Optional[Dict[str, Any]] = None) -> 
             )
 
         conn.execute("DELETE FROM questions WHERE quiz_id = ?", (quiz_id,))
-        conn.execute("DELETE FROM quiz_attempts WHERE quiz_id = ?", (quiz_id,))
+        # Retain student attempts in quiz_attempts so historical student performance and progress are preserved
         cur = conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
         conn.commit()
 
@@ -281,6 +281,54 @@ def delete_quiz(quiz_id: str, current_user: Optional[Dict[str, Any]] = None) -> 
         )
         conn.commit()
         return cur.rowcount > 0
+
+
+def start_student_quiz(quiz_id: str, data: Dict[str, Any], current_user: Dict[str, Any]) -> Dict[str, Any]:
+    """Logs when a student begins an assessment attempt, and notifies educators/admins."""
+    with get_connection() as conn:
+        quiz_row = conn.execute(
+            "SELECT id, title, category, author_id, author_name FROM quizzes WHERE id = ?",
+            (quiz_id,)
+        ).fetchone()
+
+        quiz_title = data.get("quizTitle") or (quiz_row["title"] if quiz_row else quiz_id)
+        category = data.get("category") or (quiz_row["category"] if quiz_row else "General")
+
+        student_name = data.get("studentName") or current_user.get("name") or "Student"
+        student_id = data.get("studentId") or current_user.get("id") or current_user.get("uid") or ""
+        student_email = (data.get("studentEmail") or current_user.get("email") or "").strip().lower()
+
+        # Record activity event in MySQL
+        notification_service.log_activity(
+            conn,
+            {"id": student_id, "name": student_name, "role": "student"},
+            action="quiz.started",
+            entity_type="quiz",
+            entity_id=quiz_id,
+            summary=f"{student_name} started '{quiz_title}' ({category})",
+            metadata={"category": category, "quizTitle": quiz_title, "studentEmail": student_email},
+        )
+        conn.commit()
+
+        if quiz_row:
+            notification_service.notify_educators_of_quiz(
+                conn,
+                dict(quiz_row),
+                title=f"{student_name} started '{quiz_title}'",
+                message=f"{student_name} started taking the '{quiz_title}' assessment.",
+                category="attempt",
+                link="/educator-dashboard",
+                actor={"id": student_id, "name": student_name, "role": "student"},
+            )
+            conn.commit()
+
+    return {
+        "success": True,
+        "quizId": quiz_id,
+        "quizTitle": quiz_title,
+        "startedAt": datetime.now(timezone.utc).isoformat()
+    }
+
 
 def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_user: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -415,6 +463,15 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
                     name = VALUES(name),
                     updated_at = CURRENT_TIMESTAMP
             """, (user_id, student_name, student_email))
+            try:
+                conn.execute("""
+                    UPDATE users
+                    SET streak = GREATEST(COALESCE(streak, 0), 1),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? OR LOWER(email) = ?
+                """, (user_id, (student_email or "").lower()))
+            except Exception:
+                pass
 
         conn.execute("""
             INSERT INTO quiz_attempts (
@@ -549,10 +606,24 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
             )
         elif current_user:
             user_email = (current_user.get("email") or "").lower().strip()
-            user_uid = current_user.get("uid") or current_user.get("id") or ""
+            user_uid = str(current_user.get("uid") or current_user.get("id") or "").strip()
+            user_name = (current_user.get("name") or "").strip()
+            u_cur = conn.execute("SELECT id, name, student_id, email FROM users WHERE id = ? OR LOWER(email) = ?", (user_uid, user_email))
+            u_row = u_cur.fetchone()
+            alt_sid = str(u_row["student_id"]).strip() if u_row and u_row.get("student_id") else user_uid
+            u_id = str(u_row["id"]).strip() if u_row and u_row.get("id") else user_uid
+            db_name = (u_row["name"] if u_row and u_row.get("name") else user_name).strip()
             cur = conn.execute(
-                "SELECT * FROM quiz_attempts WHERE LOWER(student_email) = ? OR student_id = ? ORDER BY submitted_at DESC",
-                (user_email, user_uid)
+                """
+                SELECT * FROM quiz_attempts
+                WHERE (LOWER(student_email) = ? AND student_email != '')
+                   OR (student_id = ? AND student_id != '')
+                   OR (student_id = ? AND student_id != '')
+                   OR (student_id = ? AND student_id != '')
+                   OR (LOWER(student_name) = LOWER(?) AND student_name != '')
+                ORDER BY submitted_at DESC
+                """,
+                (user_email, user_uid, alt_sid, u_id, db_name)
             )
         else:
             return []

@@ -766,19 +766,6 @@ export const EducatorPerformanceView = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <button
             type="button"
-            className="educator-primary-btn"
-            onClick={() => setOpenAddModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-            title="Enroll New Student to Cohort"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>+ Add Student</span>
-          </button>
-          <button
-            type="button"
             className="educator-reset-btn"
             onClick={() => handleOpenResetModal(null)}
             style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -914,19 +901,6 @@ export const EducatorPerformanceView = ({
               Showing active course roster
             </span>
           </div>
-          <button
-            type="button"
-            className="educator-primary-btn sm"
-            onClick={() => setOpenAddModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            title="Enroll New Student"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>+ Add Student</span>
-          </button>
         </div>
 
         <div className="educator-table-wrapper">
@@ -990,31 +964,48 @@ export const EducatorPerformanceView = ({
                       </div>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div
-                          style={{
-                            width: '60px',
-                            height: '6px',
-                            borderRadius: '3px',
-                            background: '#E2E8F0',
-                            overflow: 'hidden'
-                          }}
-                        >
+                      {(student.quizzesCompleted || 0) > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div
                             style={{
-                              width: `${student.avgScore}%`,
-                              height: '100%',
-                              backgroundColor:
-                                student.avgScore >= 85
-                                  ? '#10B981'
-                                  : student.avgScore >= 70
-                                  ? '#3B82F6'
-                                  : '#EF4444'
+                              width: '60px',
+                              height: '6px',
+                              borderRadius: '3px',
+                              background: '#E2E8F0',
+                              overflow: 'hidden'
                             }}
-                          />
+                          >
+                            <div
+                              style={{
+                                width: `${Math.min(100, Math.max(0, student.avgScore || 0))}%`,
+                                height: '100%',
+                                backgroundColor:
+                                  (student.avgScore || 0) >= 85
+                                    ? '#10B981'
+                                    : (student.avgScore || 0) >= 70
+                                    ? '#3B82F6'
+                                    : '#EF4444'
+                              }}
+                            />
+                          </div>
+                          <span style={{ fontWeight: 700, color: '#0F172A' }}>{student.avgScore || 0}%</span>
                         </div>
-                        <span style={{ fontWeight: 700, color: '#0F172A' }}>{student.avgScore}%</span>
-                      </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div
+                            style={{
+                              width: '60px',
+                              height: '6px',
+                              borderRadius: '3px',
+                              background: '#E2E8F0',
+                              overflow: 'hidden'
+                            }}
+                          >
+                            <div style={{ width: '0%', height: '100%', backgroundColor: '#94A3B8' }} />
+                          </div>
+                          <span style={{ fontWeight: 600, color: '#94A3B8' }}>—</span>
+                        </div>
+                      )}
                     </td>
                     <td style={{ color: '#334155', fontWeight: 500 }}>{student.topSubject}</td>
                     <td>{renderStatusBadge(student.status)}</td>

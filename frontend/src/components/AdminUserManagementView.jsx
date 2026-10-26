@@ -12,6 +12,7 @@ import {
   EditIcon
 } from './Icons';
 import sharedDatabase from '../services/sharedDatabase';
+import { LiveActivityFeed } from './LiveActivityFeed';
 
 export const AdminUserManagementView = ({
   users = [],
@@ -385,26 +386,13 @@ export const AdminUserManagementView = ({
                     </div>
                   </div>
 
-                  <h5 className="sub-heading">Recent Quiz Activity</h5>
-                  <div className="recent-activity-list">
-                    {(selectedUser.raw?.recentSubmissions && selectedUser.raw.recentSubmissions.length > 0) ? (
-                      selectedUser.raw.recentSubmissions.map((act, i) => (
-                        <div key={i} className="activity-item-row">
-                          <div className="activity-title-cell">
-                            <BookOpenIcon size={16} color="#6366F1" />
-                            <span>{act.title}</span>
-                          </div>
-                          <span className="activity-score">{act.score}</span>
-                          <span className="status-badge active">{act.status}</span>
-                          <span className="activity-date">{act.date}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.85rem' }}>
-                        No quiz attempts recorded yet. Student has not attended any quizzes.
-                      </div>
-                    )}
-                  </div>
+                  <h5 className="sub-heading">Live Student Activity Log</h5>
+                  <LiveActivityFeed
+                    studentId={selectedUser.id || selectedUser.studentId || selectedUser.email}
+                    role="admin"
+                    showHeader={false}
+                    maxHeight="260px"
+                  />
                 </div>
               )}
 

@@ -48,6 +48,12 @@ const ReportsIcon = ({ size = 19, color = 'currentColor' }) => (
   </svg>
 );
 
+const ActivityIcon = ({ size = 19, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+  </svg>
+);
+
 export const EducatorSidebar = ({
   activeTab = 'Dashboard',
   onSelectTab,
@@ -61,6 +67,7 @@ export const EducatorSidebar = ({
     { id: 'Create Quiz', label: 'Create Quiz', icon: CreateQuizIcon },
     { id: 'Manage Quizzes', label: 'Manage Quizzes', icon: ManageQuizzesIcon },
     { id: 'Student Performance', label: 'Student Performance', icon: StudentPerformanceIcon },
+    { id: 'Student Activity', label: 'Student Activity', icon: ActivityIcon },
     { id: 'Analytics', label: 'Analytics', icon: AnalyticsIcon },
     { id: 'Reports', label: 'Reports', icon: ReportsIcon },
     { id: 'Notifications', label: 'Notifications', icon: BellIcon, badge: notificationCount > 0 ? notificationCount : null },

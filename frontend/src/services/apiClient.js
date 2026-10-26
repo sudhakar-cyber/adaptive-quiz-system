@@ -27,9 +27,18 @@ const ROLE_HOME = {
 /** The dashboard route that belongs to a role. */
 export const homeRouteForRole = (role) => ROLE_HOME[(role || '').toLowerCase()] || '/login';
 
-/** Reads the role of the current session from storage. */
+/** Reads the role of the current session from storage or active URL route. */
 export const getCurrentRole = () => {
   try {
+    if (typeof window !== 'undefined' && window.location) {
+      const path = (window.location.pathname || '').toLowerCase();
+      if (path.includes('/educator') || path.includes('/faculty')) {
+        return ROLE_EDUCATOR;
+      }
+      if (path.includes('/admin')) {
+        return ROLE_ADMIN;
+      }
+    }
     const role =
       (typeof localStorage !== 'undefined' && localStorage.getItem('learnsmart_role')) ||
       (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('learnsmart_role')) ||
@@ -79,14 +88,21 @@ export const getCurrentIdentity = () => {
 
   if (role === ROLE_EDUCATOR) {
     const educator = readJson('learnsmart_educator');
-    email = educator?.email || read('learnsmart_email');
-    uid = educator?.id || educator?.educatorId || read('learnsmart_uid') || 'edu-201';
-    name = educator?.name || educator?.fullName || read('learnsmart_user');
+    const profile = readJson('learnsmart_educator_profile');
+    const isStudentEmail = (em) => {
+      if (!em) return false;
+      const lower = em.toLowerCase();
+      return lower.includes('student') || lower.includes('@gmail.com');
+    };
+    const rawEmail = educator?.email || profile?.email || read('learnsmart_email');
+    email = (!isStudentEmail(rawEmail) && rawEmail) ? rawEmail : 'educator@learnsmart.com';
+    uid = educator?.id || educator?.educatorId || profile?.facultyId || 'edu-201';
+    name = educator?.name || educator?.fullName || profile?.fullName || 'Dr. Sarah Jenkins';
   } else if (role === ROLE_ADMIN) {
     const admin = readJson('learnsmart_admin');
-    email = admin?.email || read('learnsmart_email') || 'admin@learnsmart.edu';
-    uid = admin?.uid || admin?.id || read('learnsmart_uid') || 'admin-system';
-    name = admin?.name || admin?.fullName || read('learnsmart_user') || 'System Administrator';
+    email = admin?.email || 'admin@learnsmart.edu';
+    uid = admin?.uid || admin?.id || 'admin-system';
+    name = admin?.name || admin?.fullName || 'System Administrator';
   } else {
     const profile = readJson('learnsmart_student_profile');
     email = read('learnsmart_email') || profile?.email || auth?.currentUser?.email || '';

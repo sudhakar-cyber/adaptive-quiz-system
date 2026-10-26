@@ -4,6 +4,7 @@ from typing import Optional
 from app.controllers import auth_controller
 from app.db import get_connection
 from app.services.passwords import hash_password, verify_password
+from app.notifications import notification_service
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -207,6 +208,26 @@ def register_endpoint(req: RegisterRequest):
         )
         row = dict(cur.fetchone())
 
+        notification_service.log_activity(
+            conn,
+            {"id": row["id"], "name": row["name"], "role": "student"},
+            action="student.registered",
+            entity_type="user",
+            entity_id=row["id"],
+            summary=f"New student {row['name']} ({row['email']}) registered on LearnSmart",
+            metadata={"department": row.get("department"), "topSubject": row.get("top_subject")},
+        )
+        notification_service.notify_admins(
+            conn,
+            title=f"New Student Registered: {row['name']}",
+            message=f"{row['name']} ({row['email']}) registered an account.",
+            category="user",
+            link="/admin-dashboard",
+            actor={"id": row["id"], "name": row["name"], "role": "student"},
+        )
+        conn.commit()
+
+
     return {
         "success": True,
         "user": {
@@ -278,4 +299,18 @@ def login_endpoint(req: LoginRequest):
             "educatorId": user.get("educator_id") or (user["id"] if (user["role"] or "") == "educator" else None),
         }
 
+        user_role = (user.get("role") or "student").lower()
+        if user_role == "student":
+            notification_service.log_activity(
+                conn,
+                {"id": user["id"], "name": user["name"], "role": "student"},
+                action="student.login",
+                entity_type="user",
+                entity_id=user["id"],
+                summary=f"Student {user['name']} signed in to LearnSmart",
+                metadata={"email": user.get("email"), "department": user.get("department")},
+            )
+            conn.commit()
+
     return {"success": True, "user": profile}
+

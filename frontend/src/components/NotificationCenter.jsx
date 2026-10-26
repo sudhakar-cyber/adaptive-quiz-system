@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BellIcon, CheckCircleIcon, FlameIcon, StarIcon, TrophyIcon } from './Icons';
+import { BellIcon, CheckCircleIcon, FlameIcon, StarIcon, TrophyIcon, TrashIcon } from './Icons';
 import { sharedDatabase } from '../services/sharedDatabase';
 
 const NOTIFICATION_EVENT = 'learnsmart_notifications_updated';
@@ -191,13 +191,29 @@ export const NotificationCenter = ({
               <div className="notif-content-col">
                 <div className="notif-top-row">
                   <h4 className="notif-item-title">{item.title}</h4>
-                  <span className="notif-timestamp">{item.timestamp}</span>
                 </div>
                 <p className="notif-item-message">{item.message}</p>
               </div>
 
               <div className="notif-item-actions">
+                <span className="notif-timestamp">{item.timestamp || item.time || 'Just now'}</span>
                 {item.unread && <span className="unread-dot" title="Unread notification" />}
+                <button
+                  type="button"
+                  className="notif-dismiss-btn notif-delete-btn"
+                  title="Delete notification"
+                  aria-label="Delete notification"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDismissNotification) {
+                      onDismissNotification(item.id);
+                    } else {
+                      sharedDatabase.deleteNotification(item.id);
+                    }
+                  }}
+                >
+                  <TrashIcon size={15} />
+                </button>
               </div>
             </div>
           ))

@@ -15,6 +15,7 @@ import { AdminSettingsView } from '../components/AdminSettingsView';
 import { AdminNotificationsView } from '../components/AdminNotificationsView';
 import { AdminProfileView } from '../components/AdminProfileView';
 import { AdminAddUserModal } from '../components/AdminAddUserModal';
+import { LiveActivityFeed } from '../components/LiveActivityFeed';
 
 import { sharedDatabase, getAuthToken } from '../services/sharedDatabase';
 import { authService } from '../services/authService';
@@ -622,6 +623,32 @@ export const AdminDashboard = ({ onLogout }) => {
                   />
                 </div>
               </div>
+
+              {/* Live Platform Activity Stream */}
+              <div className="ad-activity-section" style={{ marginTop: '24px' }}>
+                <LiveActivityFeed
+                  role="admin"
+                  title="Live Platform Activity & Student Telemetry"
+                  subtitle="System-wide real-time tracking of student quiz attempts, starts, logins, and educator updates"
+                  maxHeight="380px"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Platform Activity Tab */}
+          {activeTab === 'activity' && (
+            <div className="admin-overview-container">
+              <div className="ad-page-header">
+                <h1 className="ad-page-title">Platform Activity Stream</h1>
+                <p className="ad-page-subtitle">Complete real-time telemetry and audit logs across all students, educators, and quizzes</p>
+              </div>
+              <LiveActivityFeed
+                role="admin"
+                title="Full System Telemetry Stream"
+                subtitle="Live synced directly from MySQL database activity_log"
+                maxHeight="680px"
+              />
             </div>
           )}
 
