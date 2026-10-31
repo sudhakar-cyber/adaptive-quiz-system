@@ -31,14 +31,14 @@ export const AIChatBotView = ({
         id: 'msg-welcome',
         sender: 'bot',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        text: `Hello **${username}**! 👋 I'm your **LearnSmart Adaptive AI Tutor**.\n\nI monitor your learning progress and performance in real-time. Based on your profile, here are today's top personalized quiz recommendations for you:`,
+        text: `Hello **${username}**! 👋 I'm your **LearnSmart Adaptive AI Tutor**.\n\nI monitor quizzes published by your Educator (**Dr. Sarah Jenkins**) and **Admin** in real-time, analyzing your attempts to guide your progress. Here are your personalized recommendations:`,
         recommendedQuizzes: recommended,
         suggestedActions: [
+          '👨‍🏫 Show Educator quizzes',
+          '🛡️ Show Admin quizzes',
           '🎯 Recommend a quiz for my skill level',
           '🐍 Show Python quizzes',
-          '🛡️ Test my Cyber Security skills',
-          '🌳 Algorithms & DSA practice',
-          '💡 Explain Time Complexity in DSA'
+          '📊 Where are my learning gaps?'
         ]
       }
     ];
@@ -48,6 +48,22 @@ export const AIChatBotView = ({
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  const isQuizCompleted = (quiz) => {
+    if (!quiz) return false;
+    const qId = String(quiz.id || '').trim();
+    const qTitle = String(quiz.title || '').trim().toLowerCase();
+    return (completedQuizIds || []).some((item) => {
+      if (!item) return false;
+      const itemStr = String(item).trim();
+      return (
+        item === quiz.id ||
+        itemStr === qId ||
+        itemStr.toLowerCase() === qTitle ||
+        (qId && (itemStr === `quiz-${qId}` || qId === `quiz-${itemStr}`))
+      );
+    });
+  };
 
   // Auto-scroll to bottom of conversation
   useEffect(() => {
@@ -176,7 +192,7 @@ export const AIChatBotView = ({
                 {msg.recommendedQuizzes && msg.recommendedQuizzes.length > 0 && (
                   <div className="ai-recommended-quizzes-grid">
                     {msg.recommendedQuizzes.map((quiz) => {
-                      const isCompleted = completedQuizIds.includes(quiz.id);
+                      const isCompleted = isQuizCompleted(quiz);
                       return (
                         <div key={quiz.id} className="ai-quiz-card">
                           <div className="ai-quiz-card-top">
@@ -204,9 +220,13 @@ export const AIChatBotView = ({
                           <p className="ai-quiz-card-desc">{quiz.description}</p>
 
                           <div className="ai-quiz-card-meta">
-                            <span>⏱ {quiz.duration}</span>
+                            <span>⏱ {quiz.duration || '5 mins'}</span>
                             <span>•</span>
-                            <span>❓ {quiz.questionsCount || quiz.questions?.length} Qs</span>
+                            <span>❓ {quiz.questionsCount || quiz.questions?.length || 5} Qs</span>
+                            <span>•</span>
+                            <span style={{ color: '#4338CA', fontWeight: 600 }}>
+                              👤 By {quiz.author_name || quiz.authorName || ((quiz.author_role === 'admin' || (quiz.author_id && String(quiz.author_id).startsWith('admin'))) ? 'Admin' : 'Dr. Sarah Jenkins')}
+                            </span>
                           </div>
 
                           {quiz.recommendationReason && (
@@ -287,30 +307,30 @@ export const AIChatBotView = ({
           <button
             type="button"
             className="ai-footer-chip"
+            onClick={() => handleSendMessage('👨‍🏫 Show Educator quizzes')}
+          >
+            👨‍🏫 Educator Quizzes
+          </button>
+          <button
+            type="button"
+            className="ai-footer-chip"
+            onClick={() => handleSendMessage('🛡️ Show Admin quizzes')}
+          >
+            🛡️ Admin Quizzes
+          </button>
+          <button
+            type="button"
+            className="ai-footer-chip"
             onClick={() => handleSendMessage('🎯 Recommend a quiz for my skill level')}
           >
-            🎯 Best Quiz for Me
+            🎯 Best for Me
           </button>
           <button
             type="button"
             className="ai-footer-chip"
             onClick={() => handleSendMessage('🐍 Show Python quizzes')}
           >
-            🐍 Python Quizzes
-          </button>
-          <button
-            type="button"
-            className="ai-footer-chip"
-            onClick={() => handleSendMessage('🛡️ Test my Cyber Security skills')}
-          >
-            🛡️ Cyber Security
-          </button>
-          <button
-            type="button"
-            className="ai-footer-chip"
-            onClick={() => handleSendMessage('🌳 Algorithms & DSA practice')}
-          >
-            🌳 DSA Practice
+            🐍 Python
           </button>
           <button
             type="button"
@@ -387,11 +407,72 @@ function formatBold(str) {
 function generateAIResponse(query, username, allQuizzes, completedIds) {
   const qLower = query.toLowerCase();
 
+  // 0. Educator Quizzes (Dr. Sarah Jenkins)
+  if (
+    qLower.includes('educator') ||
+    qLower.includes('teacher') ||
+    qLower.includes('instructor') ||
+    qLower.includes('sarah') ||
+    qLower.includes('faculty')
+  ) {
+    const eduQuizzes = allQuizzes.filter((q) => {
+      const aName = (q.author_name || q.authorName || '').toLowerCase();
+      const aRole = (q.author_role || '').toLowerCase();
+      return (
+        aRole === 'educator' ||
+        aName.includes('sarah') ||
+        aName.includes('educator') ||
+        (q.author_id && String(q.author_id).startsWith('edu'))
+      );
+    });
+    return {
+      id: `bot-${Date.now()}`,
+      sender: 'bot',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      text: `👨‍🏫 **Quizzes Created by Educator Dr. Sarah Jenkins:**\n\nYour educator **Dr. Sarah Jenkins** has designed these targeted quizzes to evaluate your progress and strengthen core competencies. Take them to keep your streak and mastery advancing!`,
+      recommendedQuizzes: eduQuizzes.length > 0 ? eduQuizzes : allQuizzes.slice(0, 3),
+      suggestedActions: [
+        '🛡️ Show Admin quizzes',
+        '🐍 Show Python quizzes',
+        '📊 Where are my learning gaps?'
+      ]
+    };
+  }
+
+  // 0b. Admin Quizzes (System Administrator)
+  if (
+    qLower.includes('admin') ||
+    qLower.includes('administrator') ||
+    qLower.includes('system admin')
+  ) {
+    const adminQuizzes = allQuizzes.filter((q) => {
+      const aName = (q.author_name || q.authorName || '').toLowerCase();
+      const aRole = (q.author_role || '').toLowerCase();
+      return (
+        aRole === 'admin' ||
+        aName.includes('admin') ||
+        (q.author_id && String(q.author_id).startsWith('admin'))
+      );
+    });
+    return {
+      id: `bot-${Date.now()}`,
+      sender: 'bot',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      text: `🛡️ **Quizzes Published by System Administrator:**\n\nThese standardized assessments are published by the **System Administrator** to benchmark system performance and technical readiness across all learners:`,
+      recommendedQuizzes: adminQuizzes.length > 0 ? adminQuizzes : allQuizzes.slice(0, 2),
+      suggestedActions: [
+        '👨‍🏫 Show Educator quizzes',
+        '🎯 Recommend a quiz for my skill level',
+        '📊 Where are my learning gaps?'
+      ]
+    };
+  }
+
   // 1. Python Quizzes
   if (qLower.includes('python') || qLower.includes('programming')) {
     const pythonQuizzes = allQuizzes.filter((q) =>
-      q.category.toLowerCase().includes('programming') ||
-      q.title.toLowerCase().includes('python')
+      (q.category || '').toLowerCase().includes('programming') ||
+      (q.title || '').toLowerCase().includes('python')
     );
     return {
       id: `bot-${Date.now()}`,

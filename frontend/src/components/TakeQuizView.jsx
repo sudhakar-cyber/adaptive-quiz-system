@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   PythonIcon,
   ShieldIcon,
@@ -10,19 +10,70 @@ import {
   FlameIcon,
   FilterIcon
 } from './Icons';
+import { sharedDatabase } from '../services/sharedDatabase';
 
 export const TakeQuizView = ({
-  quizzes,
+  quizzes: passedQuizzes,
   onStartQuiz,
   externalSearch = '',
   completedQuizIds = [],
   isRecommendedView = false
 }) => {
+  const [internalQuizzes, setInternalQuizzes] = useState(() => {
+    if (Array.isArray(passedQuizzes) && passedQuizzes.length > 0) return passedQuizzes;
+    return typeof sharedDatabase?.getPublishedQuizzes === 'function' ? sharedDatabase.getPublishedQuizzes() : [];
+  });
+
+  useEffect(() => {
+    if (Array.isArray(passedQuizzes) && passedQuizzes.length > 0) {
+      setInternalQuizzes(passedQuizzes);
+    }
+  }, [passedQuizzes]);
+
+  useEffect(() => {
+    if (typeof sharedDatabase?.syncQuizzesFromBackend === 'function') {
+      sharedDatabase.syncQuizzesFromBackend(true).then((synced) => {
+        if (Array.isArray(synced) && synced.length > 0) {
+          setInternalQuizzes(typeof sharedDatabase?.getPublishedQuizzes === 'function' ? sharedDatabase.getPublishedQuizzes() : synced);
+        }
+      }).catch(() => {});
+    }
+
+    const handleUpdate = () => {
+      if (typeof sharedDatabase?.getPublishedQuizzes === 'function') {
+        setInternalQuizzes(sharedDatabase.getPublishedQuizzes());
+      }
+    };
+    window.addEventListener('learnsmart_quizzes_updated', handleUpdate);
+    return () => window.removeEventListener('learnsmart_quizzes_updated', handleUpdate);
+  }, []);
+
+  const quizzes = internalQuizzes.length > 0
+    ? internalQuizzes
+    : (Array.isArray(passedQuizzes) && passedQuizzes.length > 0 ? passedQuizzes : (typeof sharedDatabase?.getPublishedQuizzes === 'function' ? sharedDatabase.getPublishedQuizzes() : []));
+
   const [selectedCategory, setSelectedCategory] = useState(() =>
     isRecommendedView ? 'Recommended' : 'All'
   );
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
+  const [selectedAuthor, setSelectedAuthor] = useState('All');
   const [localSearch, setLocalSearch] = useState('');
+
+  const isQuizCompleted = (quiz) => {
+    if (!quiz) return false;
+    const qId = String(quiz.id || '').trim();
+    const qTitle = String(quiz.title || '').trim().toLowerCase();
+    return (completedQuizIds || []).some((item) => {
+      if (!item) return false;
+      const itemStr = String(item).trim();
+      return (
+        item === quiz.id ||
+        itemStr === qId ||
+        itemStr.toLowerCase() === qTitle ||
+        (qId && (itemStr === `quiz-${qId}` || qId === `quiz-${itemStr}`))
+      );
+    });
+  };
 
   React.useEffect(() => {
     if (isRecommendedView) {
@@ -53,18 +104,37 @@ export const TakeQuizView = ({
     const quizDiff = (quiz.difficulty || 'Medium').toLowerCase();
     const matchesDiff =
       selectedDifficulty === 'All' || quizDiff === selectedDifficulty.toLowerCase();
+
+    const authorName = (quiz.author_name || quiz.authorName || '').toLowerCase();
+    const authorRole = (quiz.author_role || '').toLowerCase();
+    const isEdu = authorRole === 'educator' || authorName.includes('sarah') || authorName.includes('educator') || (quiz.author_id && String(quiz.author_id).startsWith('edu'));
+    const isAdmin = authorRole === 'admin' || authorName.includes('admin') || (quiz.author_id && String(quiz.author_id).startsWith('admin'));
+
+    let matchesAuth = true;
+    if (selectedAuthor === 'Educator') {
+      matchesAuth = isEdu;
+    } else if (selectedAuthor === 'Admin') {
+      matchesAuth = isAdmin;
+    }
+
     const matchesSearch =
       effectiveSearch === '' ||
       (quiz.title || '').toLowerCase().includes(effectiveSearch) ||
       (quiz.category || '').toLowerCase().includes(effectiveSearch) ||
-      (quiz.description && quiz.description.toLowerCase().includes(effectiveSearch));
+      (quiz.description && quiz.description.toLowerCase().includes(effectiveSearch)) ||
+      authorName.includes(effectiveSearch) ||
+      authorRole.includes(effectiveSearch) ||
+      (effectiveSearch.includes('educator') && isEdu) ||
+      (effectiveSearch.includes('admin') && isAdmin) ||
+      (effectiveSearch.includes('sarah') && isEdu);
 
-    return matchesCat && matchesDiff && matchesSearch;
+    return matchesCat && matchesDiff && matchesAuth && matchesSearch;
   });
 
   const handleResetFilters = () => {
     setSelectedCategory(isRecommendedView ? 'Recommended' : 'All');
     setSelectedDifficulty('All');
+    setSelectedAuthor('All');
     setLocalSearch('');
   };
 
@@ -118,7 +188,7 @@ export const TakeQuizView = ({
             className="banner-cta-button"
             onClick={() => {
               const target =
-                filteredQuizzes.find((q) => !completedQuizIds.includes(q.id)) ||
+                filteredQuizzes.find((q) => !isQuizCompleted(q)) ||
                 filteredQuizzes[0] ||
                 quizzes[0];
               onStartQuiz(target);
@@ -148,6 +218,20 @@ export const TakeQuizView = ({
         </div>
 
         <div className="filters-right-group">
+          <div className="difficulty-select-wrap author-select-wrap">
+            <select
+              className="difficulty-select"
+              value={selectedAuthor}
+              onChange={(e) => setSelectedAuthor(e.target.value)}
+              aria-label="Filter by author"
+              style={{ minWidth: '130px' }}
+            >
+              <option value="All">All Authors</option>
+              <option value="Educator">Educator (Dr. Sarah)</option>
+              <option value="Admin">Admin (System)</option>
+            </select>
+          </div>
+
           <div className="difficulty-select-wrap">
             <FilterIcon size={14} color="#64748B" />
             <select
@@ -210,6 +294,16 @@ export const TakeQuizView = ({
                   >
                     {quiz.difficulty}
                   </span>
+                  <span
+                    className="quiz-badge"
+                    style={{
+                      backgroundColor: (quiz.author_role === 'admin' || (quiz.author_id && String(quiz.author_id).startsWith('admin'))) ? '#EDE9FE' : '#E0F2FE',
+                      color: (quiz.author_role === 'admin' || (quiz.author_id && String(quiz.author_id).startsWith('admin'))) ? '#6D28D9' : '#0369A1',
+                      fontWeight: 600
+                    }}
+                  >
+                    👤 {quiz.author_name || quiz.authorName || ((quiz.author_role === 'admin' || (quiz.author_id && String(quiz.author_id).startsWith('admin'))) ? 'Admin' : 'Dr. Sarah Jenkins')}
+                  </span>
                 </div>
               </div>
 
@@ -236,17 +330,20 @@ export const TakeQuizView = ({
                   <StarIcon size={14} color="#F59E0B" />
                   <span>Pass: 70%</span>
                 </span>
+                <span className="catalog-meta-item" style={{ color: '#475569', fontWeight: 500 }}>
+                  <span>By {quiz.author_name || quiz.authorName || ((quiz.author_role === 'admin' || (quiz.author_id && String(quiz.author_id).startsWith('admin'))) ? 'System Admin' : 'Dr. Sarah Jenkins')}</span>
+                </span>
               </div>
 
               <div className="catalog-card-footer">
                 <button
                   type="button"
-                  className={`start-quiz-full-btn ${completedQuizIds.includes(quiz.id) ? 'completed-btn' : ''}`}
+                  className={`start-quiz-full-btn ${isQuizCompleted(quiz) ? 'completed-btn' : ''}`}
                   onClick={() => onStartQuiz(quiz)}
-                  title={completedQuizIds.includes(quiz.id) ? 'Quiz already completed' : `Start ${quiz.title}`}
+                  title={isQuizCompleted(quiz) ? 'Quiz already completed' : `Start ${quiz.title}`}
                 >
-                  <span>{completedQuizIds.includes(quiz.id) ? 'Completed ✓' : 'Take Quiz Now'}</span>
-                  <span>{completedQuizIds.includes(quiz.id) ? '' : '→'}</span>
+                  <span>{isQuizCompleted(quiz) ? 'Completed ✓' : 'Take Quiz Now'}</span>
+                  <span>{isQuizCompleted(quiz) ? '' : '→'}</span>
                 </button>
               </div>
             </div>

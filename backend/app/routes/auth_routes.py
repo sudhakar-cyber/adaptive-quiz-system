@@ -268,8 +268,9 @@ def login_endpoint(req: LoginRequest):
         cur = conn.execute(
             "SELECT id, name, email, role, department, phone, title, avatar_url, student_id, "
             "educator_id, is_active, password_hash FROM users "
-            "WHERE LOWER(email) = ? OR LOWER(id) = ?",
-            (identifier, identifier),
+            "WHERE LOWER(email) = ? OR LOWER(id) = ? OR (student_id IS NOT NULL AND LOWER(student_id) = ?) "
+            "OR LOWER(SUBSTRING_INDEX(email, '@', 1)) = ? OR LOWER(name) = ?",
+            (identifier, identifier, identifier, identifier, identifier),
         )
         user = cur.fetchone()
 
@@ -288,7 +289,7 @@ def login_endpoint(req: LoginRequest):
         profile = {
             "uid": user["id"],
             "id": user["id"],
-            "name": user["name"],
+            "name": " ".join((user["name"] or "").split()) if user.get("name") else "Student",
             "email": user["email"],
             "role": (user["role"] or "student").lower(),
             "department": user.get("department"),

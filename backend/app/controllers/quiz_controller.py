@@ -63,6 +63,14 @@ def _serialize_quiz(conn, row: Dict[str, Any]) -> Dict[str, Any]:
     q["submissionsCount"] = q.get("submissions_count") or 0
     q["avgScore"] = q.get("avg_score") or 0.0
     q["passRate"] = q.get("pass_rate") or 0.0
+
+    author_id_str = str(q.get("author_id") or "").lower()
+    author_name_str = str(q.get("author_name") or "").lower()
+    if "admin" in author_id_str or "admin" in author_name_str:
+        q["author_role"] = "admin"
+    else:
+        q["author_role"] = "educator"
+
     return q
 
 
@@ -387,16 +395,21 @@ def record_student_attempt(quiz_id: str, attempt_data: Dict[str, Any], current_u
         auto_cat = attempt_data.get("category") or "General"
         auto_q_count = int(attempt_data.get("totalQuestions") or 5)
         with get_connection() as conn:
+            edu_cur = conn.execute("SELECT id, name FROM users WHERE role = 'educator' ORDER BY id ASC LIMIT 1")
+            edu_row = edu_cur.fetchone()
+            auth_id = edu_row["id"] if edu_row and edu_row.get("id") else "edu-201"
+            auth_name = edu_row["name"] if edu_row and edu_row.get("name") else "Dr. Sarah Jenkins"
+
             conn.execute("""
                 INSERT INTO quizzes (
                     id, title, category, difficulty, duration, status, is_recommended,
                     description, questions_count, author_id, author_name, created_at, updated_at
-                ) VALUES (?, ?, ?, 'Medium', '15 mins', 'Active', 1, 'Assessment Quiz', ?, 'educator', 'Educator', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, 'Medium', '15 mins', 'Active', 1, 'Assessment Quiz', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON DUPLICATE KEY UPDATE
                     title = VALUES(title),
                     status = 'Active',
                     updated_at = CURRENT_TIMESTAMP
-            """, (quiz_id, auto_title, auto_cat, auto_q_count))
+            """, (quiz_id, auto_title, auto_cat, auto_q_count, auth_id, auth_name))
             conn.commit()
         quiz = get_quiz_by_id(quiz_id, role="educator")
 
@@ -613,6 +626,7 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
             alt_sid = str(u_row["student_id"]).strip() if u_row and u_row.get("student_id") else user_uid
             u_id = str(u_row["id"]).strip() if u_row and u_row.get("id") else user_uid
             db_name = (u_row["name"] if u_row and u_row.get("name") else user_name).strip()
+            db_name_norm = db_name.replace(" ", "").lower()
             cur = conn.execute(
                 """
                 SELECT * FROM quiz_attempts
@@ -621,9 +635,11 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
                    OR (student_id = ? AND student_id != '')
                    OR (student_id = ? AND student_id != '')
                    OR (LOWER(student_name) = LOWER(?) AND student_name != '')
+                   OR (REPLACE(LOWER(student_name), ' ', '') = ? AND student_name != '')
+                   OR (student_name LIKE ? AND student_name != '')
                 ORDER BY submitted_at DESC
                 """,
-                (user_email, user_uid, alt_sid, u_id, db_name)
+                (user_email, user_uid, alt_sid, u_id, db_name, db_name_norm, f"%{db_name}%")
             )
         else:
             return []

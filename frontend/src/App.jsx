@@ -17,11 +17,11 @@ function AppRoutes() {
   const [studentUser, setStudentUser] = useState(() => {
     try {
       const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
-      if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
+      if (savedProfile?.fullName && savedProfile.fullName.trim() && savedProfile.fullName !== 'Student') {
         return savedProfile.fullName.trim();
       }
       const storedUser = localStorage.getItem('learnsmart_user');
-      if (storedUser && storedUser.trim() && storedUser !== 'Student' && !storedUser.includes('@')) {
+      if (storedUser && storedUser.trim() && storedUser !== 'Student') {
         return storedUser.trim();
       }
       const fbUser = auth.currentUser;
@@ -39,13 +39,13 @@ function AppRoutes() {
     const syncCurrentName = () => {
       try {
         const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
-        if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
+        if (savedProfile?.fullName && savedProfile.fullName.trim() && savedProfile.fullName !== 'Student') {
           setStudentUser(savedProfile.fullName.trim());
           return;
         }
       } catch {}
       const activeUser = localStorage.getItem('learnsmart_user');
-      if (activeUser && activeUser.trim() && activeUser !== 'Student' && !activeUser.includes('@')) {
+      if (activeUser && activeUser.trim() && activeUser !== 'Student') {
         setStudentUser(activeUser.trim());
       }
     };
@@ -64,7 +64,7 @@ function AppRoutes() {
       }
       try {
         const savedProfile = JSON.parse(localStorage.getItem('learnsmart_student_profile') || 'null');
-        if (savedProfile?.fullName && savedProfile.fullName.trim() && !savedProfile.fullName.includes('@') && savedProfile.fullName !== 'Student') {
+        if (savedProfile?.fullName && savedProfile.fullName.trim() && savedProfile.fullName !== 'Student') {
           setStudentUser(savedProfile.fullName.trim());
           return;
         }
@@ -98,8 +98,8 @@ function AppRoutes() {
     } else if (resolvedRole === 'educator') {
       authService.loginEducator(profile || user);
     } else {
-      authService.loginStudent(profile || user);
-      setStudentUser(typeof user === 'string' ? user : user?.name || 'Student');
+      const activeStudent = authService.loginStudent(profile || user);
+      setStudentUser(activeStudent?.name || (typeof user === 'string' ? user : profile?.name || 'Student'));
     }
 
     navigate(homeRouteForRole(resolvedRole));

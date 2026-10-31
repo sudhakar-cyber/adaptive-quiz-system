@@ -95,7 +95,7 @@ export const LoginForm = ({ initialUsername = '', successNotice = '', onSwitchTo
           }
           resolvedRole = profile.role || 'student';
           resolvedProfile = profile;
-          resolvedName = profile.name || 'Learner';
+          resolvedName = profile.name || (trimmedUser.includes('@') ? trimmedUser.split('@')[0] : trimmedUser) || 'Student';
         }
       } catch (backendErr) {
         if (backendErr?.status === 403) {

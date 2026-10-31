@@ -55,49 +55,58 @@ export const ProgressView = ({
     };
   }, []);
 
-  // Filter quiz history strictly based on active quizzes added by educator and admin
+  // Display all student quiz history items, enriching with active quiz data when available
   const displayQuizHistory = useMemo(() => {
-    if (!activeQuizzes || activeQuizzes.length === 0) {
+    let rawList = quizHistory;
+    if (!rawList || rawList.length === 0) {
+      try {
+        const perf = sharedDatabase.getStudentPerformance ? sharedDatabase.getStudentPerformance() : null;
+        if (perf && Array.isArray(perf.submissions) && perf.submissions.length > 0) {
+          rawList = perf.submissions;
+        }
+      } catch {}
+    }
+
+    if (!rawList || rawList.length === 0) {
       return [];
     }
-    if (!quizHistory || quizHistory.length === 0) {
-      return [];
-    }
 
-    return quizHistory
-      .filter((item) => {
-        const hQuizId = String(item.quizId || item.id || '').trim().toLowerCase();
-        const hTitle = String(item.title || item.quizTitle || '').trim().toLowerCase();
+    return rawList.map((item, idx) => {
+      const hQuizId = String(item.quizId || item.id || '').trim().toLowerCase();
+      const hTitle = String(item.title || item.quizTitle || '').trim().toLowerCase();
 
-        return activeQuizzes.some((q) => {
-          const qId = String(q.id || '').trim().toLowerCase();
-          const qTitle = String(q.title || '').trim().toLowerCase();
-          return (
-            (qId && hQuizId && qId === hQuizId) ||
-            (qTitle && hTitle && qTitle === hTitle) ||
-            (qId && hTitle && qId === hTitle)
-          );
-        });
-      })
-      .map((item) => {
-        const matchingQuiz = activeQuizzes.find((q) => {
-          const qId = String(q.id || '').trim().toLowerCase();
-          const qTitle = String(q.title || '').trim().toLowerCase();
-          const hQuizId = String(item.quizId || item.id || '').trim().toLowerCase();
-          const hTitle = String(item.title || item.quizTitle || '').trim().toLowerCase();
-          return (
-            (qId && hQuizId && qId === hQuizId) ||
-            (qTitle && hTitle && qTitle === hTitle) ||
-            (qId && hTitle && qId === hTitle)
-          );
-        });
-
-        return {
-          ...item,
-          title: matchingQuiz?.title || item.title,
-          category: matchingQuiz?.category || item.category || 'General'
-        };
+      const matchingQuiz = (activeQuizzes || []).find((q) => {
+        const qId = String(q.id || '').trim().toLowerCase();
+        const qTitle = String(q.title || '').trim().toLowerCase();
+        return (
+          (qId && hQuizId && (qId === hQuizId || hQuizId.includes(qId) || qId.includes(hQuizId))) ||
+          (qTitle && hTitle && qTitle === hTitle) ||
+          (qId && hTitle && qId === hTitle)
+        );
       });
+
+      const totalQ = Number(item.totalQuestions || matchingQuiz?.questions?.length || 5);
+      const scoreVal = Number(item.scoreValue ?? (typeof item.score === 'string' ? parseFloat(item.score) : item.score) ?? 0);
+      const correctC = item.correctCount !== undefined && item.correctCount !== null
+        ? Number(item.correctCount)
+        : Math.round((scoreVal / 100) * totalQ);
+      const wrongC = item.wrongCount !== undefined && item.wrongCount !== null
+        ? Number(item.wrongCount)
+        : Math.max(0, totalQ - correctC);
+
+      return {
+        ...item,
+        id: item.id || `hist-${idx}`,
+        title: matchingQuiz?.title || item.title || item.quizTitle || 'Quiz',
+        category: matchingQuiz?.category || item.category || 'General',
+        score: scoreVal,
+        totalQuestions: totalQ,
+        correctCount: correctC,
+        wrongCount: wrongC,
+        status: item.status || (scoreVal >= 80 ? 'Mastered' : scoreVal >= 70 ? 'Passed' : 'Needs Review'),
+        date: item.date || 'Today'
+      };
+    });
   }, [quizHistory, activeQuizzes]);
 
   const getMastery = (score) => {
@@ -108,26 +117,93 @@ export const ProgressView = ({
     return 'Developing';
   };
 
-  const subjectBreakdown = useMemo(() => {
-    if (!subjectProgress || subjectProgress.length === 0) return [];
+  const SUBJECT_COLORS = {
+    'programming': { color: '#0284C7', bgLight: '#E0F2FE' },
+    'web development': { color: '#BE185D', bgLight: '#FCE7F3' },
+    'cyber security': { color: '#B91C1C', bgLight: '#FEE2E2' },
+    'dsa': { color: '#6D28D9', bgLight: '#EDE9FE' },
+    'mathematics': { color: '#D97706', bgLight: '#FEF3C7' },
+    'machine learning': { color: '#059669', bgLight: '#D1FAE5' }
+  };
 
-    return subjectProgress.map((subj) => {
-      const takenCount = Number(subj.quizzesTaken) || 0;
-      const availableCount = Number(subj.quizzesAvailable) || takenCount;
-      const attempted = !isReset && (Number(subj.attemptsCount) || 0) > 0;
+  const subjectBreakdown = useMemo(() => {
+    const allSubjectsMap = new Map();
+
+    const standardSubjects = ['Programming', 'Web Development', 'Cyber Security', 'DSA', 'Mathematics'];
+    standardSubjects.forEach((subj) => {
+      allSubjectsMap.set(subj.toLowerCase(), subj);
+    });
+
+    (activeQuizzes || []).forEach((q) => {
+      if (q.category && q.category.trim()) {
+        allSubjectsMap.set(q.category.trim().toLowerCase(), q.category.trim());
+      }
+    });
+
+    (displayQuizHistory || []).forEach((h) => {
+      if (h.category && h.category.trim()) {
+        allSubjectsMap.set(h.category.trim().toLowerCase(), h.category.trim());
+      }
+    });
+
+    const subjectsList = Array.from(allSubjectsMap.values());
+
+    return subjectsList.map((subjectName) => {
+      const subLower = subjectName.toLowerCase();
+      const style = SUBJECT_COLORS[subLower] || { color: '#2563EB', bgLight: '#EFF6FF' };
+
+      const subjectQuizzes = (activeQuizzes || []).filter((q) => {
+        const cat = (q.category || '').toLowerCase().trim();
+        return cat === subLower || cat.includes(subLower) || subLower.includes(cat);
+      });
+      const availableCount = Math.max(1, subjectQuizzes.length);
+
+      const subjectAttempts = (displayQuizHistory || []).filter((h) => {
+        const cat = (h.category || '').toLowerCase().trim();
+        const matchesCat = cat === subLower || cat.includes(subLower) || subLower.includes(cat);
+        const matchesQuiz = subjectQuizzes.some((q) => {
+          const qId = String(q.id || '').trim().toLowerCase();
+          const qTitle = String(q.title || '').trim().toLowerCase();
+          const hQuizId = String(h.quizId || h.id || '').trim().toLowerCase();
+          const hTitle = String(h.title || h.quizTitle || '').trim().toLowerCase();
+          return (qId && hQuizId === qId) || (qTitle && hTitle === qTitle);
+        });
+        return matchesCat || matchesQuiz;
+      });
+
+      const uniqueAttemptedQuizIds = new Set(
+        subjectAttempts.map((a) => String(a.quizId || a.id || a.title || '').trim().toLowerCase()).filter(Boolean)
+      );
+      const takenCount = uniqueAttemptedQuizIds.size;
+
+      const totalCorrect = subjectAttempts.reduce((sum, a) => sum + (Number(a.correctCount) || 0), 0);
+      const totalWrong = subjectAttempts.reduce((sum, a) => sum + (Number(a.wrongCount) || 0), 0);
+      const totalQuestions = subjectAttempts.reduce((sum, a) => sum + (Number(a.totalQuestions) || 5), 0);
+
+      const attempted = !isReset && subjectAttempts.length > 0;
+      const score = attempted
+        ? Math.round(
+            subjectAttempts.reduce((sum, a) => sum + (Number(a.scoreValue ?? parseFloat(a.score) ?? a.score) || 0), 0) /
+              subjectAttempts.length
+          )
+        : 0;
 
       return {
-        name: subj.name,
-        score: attempted ? Number(subj.score) || 0 : 0,
-        color: subj.color,
-        mastery: attempted ? getMastery(Number(subj.score) || 0) : 'Not Started',
+        name: subjectName,
+        score,
+        color: style.color,
+        bgLight: style.bgLight,
+        mastery: attempted ? getMastery(score) : 'Not Started',
         topicsCompleted: `${takenCount} / ${availableCount} Quizzes`,
         quizzesTaken: takenCount,
         quizzesAvailable: availableCount,
-        bgLight: subj.bgLight || '#F8FAFC'
+        correctCount: totalCorrect,
+        wrongCount: totalWrong,
+        totalQuestions: totalQuestions,
+        isAttempted: attempted
       };
     });
-  }, [subjectProgress, isReset]);
+  }, [activeQuizzes, displayQuizHistory, isReset]);
 
 
   const numericAvg = useMemo(() => {
@@ -437,7 +513,10 @@ export const ProgressView = ({
                     </span>
                   </div>
                   <div className="subject-bar-score-group">
-                    <span className="topics-count-text">{subj.topicsCompleted}</span>
+                    <span className="topics-count-text">
+                      {subj.topicsCompleted}
+                      {subj.quizzesTaken > 0 && ` • ${subj.correctCount} Correct / ${subj.wrongCount} Wrong`}
+                    </span>
                     <span className="subject-score-percent">{subj.score}%</span>
                   </div>
                 </div>
@@ -548,6 +627,7 @@ export const ProgressView = ({
                 <th>Quiz Name</th>
                 <th>Category</th>
                 <th>Score</th>
+                <th>Accuracy</th>
                 <th>Status</th>
                 <th>Date Taken</th>
               </tr>
@@ -562,6 +642,11 @@ export const ProgressView = ({
                     </td>
                     <td>
                       <span className="score-cell-badge">{item.score}%</span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: item.correctCount === item.totalQuestions ? '#059669' : '#1E293B' }}>
+                        {item.correctCount} / {item.totalQuestions} Correct
+                      </span>
                     </td>
                     <td>
                       <span
@@ -581,8 +666,8 @@ export const ProgressView = ({
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5" className="text-center text-muted py-4">
-                    No recent quizzes found. Take a quiz to view your history!
+                  <td colSpan="6" className="text-center text-muted py-4">
+                    No recent quizzes found for this student. Take a quiz to view your history!
                   </td>
                 </tr>
               )}

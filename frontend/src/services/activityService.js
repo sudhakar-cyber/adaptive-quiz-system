@@ -10,10 +10,31 @@ export const activityService = {
    */
   getFallbackActivities: (studentIdFilter = null) => {
     try {
+      // 1. First check explicitly saved activity records
+      let savedActivities = [];
+      try {
+        const rawSaved = localStorage.getItem('learnsmart_saved_activities');
+        if (rawSaved) savedActivities = JSON.parse(rawSaved);
+      } catch {}
+
+      if (Array.isArray(savedActivities) && savedActivities.length > 0) {
+        if (!studentIdFilter) return savedActivities;
+        const sFilter = String(studentIdFilter).toLowerCase().trim();
+        const filtered = savedActivities.filter((a) => {
+          return (
+            String(a.actorId || '').toLowerCase().includes(sFilter) ||
+            String(a.actorName || '').toLowerCase().includes(sFilter) ||
+            String(a.summary || '').toLowerCase().includes(sFilter)
+          );
+        });
+        if (filtered.length > 0) return filtered;
+      }
+
+      // 2. Synthesize activities from shared submissions and student quiz history
       let submissions = [];
       try {
-        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_submissions') : null;
-        if (raw) submissions = JSON.parse(raw);
+        const rawSub = localStorage.getItem('learnsmart_shared_submissions') || localStorage.getItem('learnsmart_submissions');
+        if (rawSub) submissions = JSON.parse(rawSub);
       } catch {}
 
       if (!Array.isArray(submissions) || submissions.length === 0) {
@@ -21,6 +42,35 @@ export const activityService = {
           submissions = sharedDatabase.getSubmissions();
         }
       }
+
+      // Also check local student quiz history
+      try {
+        const identity = getCurrentIdentity();
+        const userKey = (identity.email || identity.uid || identity.name || 'default').toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+        const userHistRaw = localStorage.getItem(`learnsmart_student_quiz_history_${userKey}`) || localStorage.getItem('learnsmart_student_quiz_history');
+        if (userHistRaw) {
+          const parsedHist = JSON.parse(userHistRaw);
+          if (Array.isArray(parsedHist)) {
+            parsedHist.forEach((h) => {
+              if (!submissions.some((s) => (s.quizId && s.quizId === h.quizId) || s.title === h.title || s.quizTitle === h.title)) {
+                submissions.push({
+                  id: h.id,
+                  quizId: h.quizId,
+                  title: h.title,
+                  category: h.category,
+                  score: h.score,
+                  status: h.status,
+                  student: identity.name || 'Student',
+                  studentEmail: identity.email || '',
+                  studentId: identity.uid || '',
+                  date: h.date || 'Today',
+                  submittedAt: h.createdAt || ''
+                });
+              }
+            });
+          }
+        }
+      } catch {}
 
       if (!Array.isArray(submissions)) return [];
 
@@ -44,7 +94,7 @@ export const activityService = {
 
         const scoreRaw = String(sub.score || '0').replace('%', '').trim();
         const score = parseFloat(scoreRaw) || 0;
-        const isPass = sub.status === 'Passed' || (score >= 70);
+        const isPass = sub.status === 'Passed' || sub.status === 'Mastered' || (score >= 70);
         const quizTitle = sub.title || sub.quizTitle || 'Quiz Assessment';
 
         list.push({
@@ -105,6 +155,9 @@ export const activityService = {
       const data = await apiGet(`/api/activity${query}`);
       const entries = Array.isArray(data?.entries) ? data.entries : [];
       if (entries.length > 0) {
+        try {
+          localStorage.setItem('learnsmart_saved_activities', JSON.stringify(entries));
+        } catch {}
         return entries;
       }
       return activityService.getFallbackActivities(studentId);
@@ -146,6 +199,27 @@ export const activityService = {
         student_name: resolvedStudentName,
         student_email: resolvedEmail
       };
+
+      // 1. Immediately cache in local storage so the activity appears instantly and persists across reloads
+      try {
+        const newAct = {
+          id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          actorId: resolvedStudentId,
+          actorName: resolvedStudentName,
+          actorRole: 'student',
+          action,
+          entityType,
+          entityId,
+          summary: payload.summary,
+          metadata: payload.metadata,
+          createdAt: new Date().toISOString()
+        };
+        const currentSaved = JSON.parse(localStorage.getItem('learnsmart_saved_activities') || '[]');
+        const updatedSaved = [newAct, ...currentSaved].slice(0, 100);
+        localStorage.setItem('learnsmart_saved_activities', JSON.stringify(updatedSaved));
+      } catch (cacheErr) {
+        console.warn('Local activity cache note:', cacheErr);
+      }
 
       const result = await apiPost('/api/activity', payload);
 

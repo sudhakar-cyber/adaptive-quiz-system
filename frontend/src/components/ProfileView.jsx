@@ -66,7 +66,7 @@ export const ProfileView = ({
           if (isCleanStudentId(parsed.studentId)) {
             resolvedStudentId = parsed.studentId;
           }
-          if (parsed.fullName && parsed.fullName.trim() && !parsed.fullName.includes('@') && parsed.fullName !== 'Student') {
+          if (parsed.fullName && parsed.fullName.trim() && parsed.fullName !== 'Student') {
             savedName = parsed.fullName.trim();
           }
           if (!resolvedStudentId) {
@@ -81,7 +81,7 @@ export const ProfileView = ({
           }
           return {
             fullName: savedName || (displayName !== 'Student' ? displayName : '') || parsed.fullName || 'Student',
-            email: userEmail || parsed.email || '',
+            email: userEmail || parsed.email || localStorage.getItem('learnsmart_email') || '',
             phone: parsed.phone || '',
             major: parsed.major || 'Computer Science & Engineering',
             studentId: resolvedStudentId,
@@ -127,7 +127,7 @@ export const ProfileView = ({
     let savedName = '';
     try {
       const saved = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
-      if (saved?.fullName && saved.fullName.trim() && !saved.fullName.includes('@') && saved.fullName !== 'Student') {
+      if (saved?.fullName && saved.fullName.trim() && saved.fullName !== 'Student') {
         savedName = saved.fullName.trim();
       }
     } catch (e) {}
@@ -180,14 +180,19 @@ export const ProfileView = ({
         });
         if (res.ok) {
           const data = await res.json();
-          if (data && data.studentId && isCleanStudentId(data.studentId)) {
+          if (data) {
+            const freshStudentId = (data.studentId && isCleanStudentId(data.studentId)) ? data.studentId : null;
             setFormData((prev) => ({
               ...prev,
-              studentId: data.studentId
+              fullName: (data.name && data.name.trim() && data.name !== 'Student') ? data.name.trim() : prev.fullName,
+              email: (data.email && data.email.trim()) ? data.email.trim() : prev.email,
+              studentId: freshStudentId || prev.studentId
             }));
             try {
               const current = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
-              current.studentId = data.studentId;
+              if (data.name) current.fullName = data.name;
+              if (data.email) current.email = data.email;
+              if (freshStudentId) current.studentId = freshStudentId;
               localStorage.setItem('learnsmart_student_profile', JSON.stringify(current));
             } catch {}
           }

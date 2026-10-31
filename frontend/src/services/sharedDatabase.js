@@ -129,6 +129,51 @@ export const syncSubmissionsFromBackend = async (force = false) => {
             window.dispatchEvent(new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: formatted }));
           }
         }
+
+        // Guarantee user-scoped & global completed quizzes and quiz history are locked with MySQL data
+        try {
+          const identity = getCurrentIdentity();
+          const userKey = (identity.email || identity.uid || identity.name || 'default').toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+          const completedFromBackend = formatted.flatMap((s) => [s.quizId, String(s.quizId), s.quizTitle]).filter(Boolean);
+          if (completedFromBackend.length > 0) {
+            const curGlobal = JSON.parse(localStorage.getItem('learnsmart_completed_quizzes') || '[]');
+            const curUser = JSON.parse(localStorage.getItem(`learnsmart_completed_quizzes_${userKey}`) || '[]');
+            const mergedCompleted = Array.from(new Set([...curGlobal, ...curUser, ...completedFromBackend]));
+            localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify(mergedCompleted));
+            localStorage.setItem(`learnsmart_completed_quizzes_${userKey}`, JSON.stringify(mergedCompleted));
+          }
+
+          // Populate quiz history cache from authentic MySQL attempts
+          if (formatted.length > 0) {
+            const histItems = formatted.map((s) => {
+              const parsed = s.submittedAt ? Date.parse(s.submittedAt) : NaN;
+              return {
+                id: s.id,
+                quizId: s.quizId,
+                timestamp: Number.isNaN(parsed) ? Date.now() : parsed,
+                createdAt: s.submittedAt || new Date().toISOString(),
+                title: s.quizTitle,
+                category: s.category || 'General',
+                score: s.scoreValue,
+                status: s.status,
+                date: s.date || 'Today'
+              };
+            });
+            const curHist = JSON.parse(localStorage.getItem(`learnsmart_student_quiz_history_${userKey}`) || '[]');
+            const curGlobalHist = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || '[]');
+            const histMap = new Map();
+            [...histItems, ...curHist, ...curGlobalHist].forEach((item) => {
+              if (!item) return;
+              const k = item.id || `${item.quizId}_${item.title}`;
+              if (!histMap.has(k)) histMap.set(k, item);
+            });
+            const mergedHist = Array.from(histMap.values());
+            localStorage.setItem(`learnsmart_student_quiz_history_${userKey}`, JSON.stringify(mergedHist));
+            localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify(mergedHist));
+          }
+        } catch (e) {
+          console.warn('Completed quiz sync note:', e);
+        }
         return formatted;
       }
     }
@@ -948,7 +993,7 @@ const performCleanSlateReset = () => {
           const sanitized = parsed.filter((s) => {
             if (!s) return false;
             const k = (s.uid || s.email || s.id || s.name || '').toLowerCase();
-            if (k.includes('stud-dev') || k.includes('demo') || k.includes('student@learnsmart.edu') || k.includes('alex morgan')) return false;
+            if (k.includes('stud-dev') || k.includes('demo') || k.includes('alex morgan')) return false;
             return true;
           });
           if (sanitized.length !== parsed.length) {
@@ -1050,9 +1095,9 @@ const notifyAdminSubscribers = () => {
  * The backend already scopes `/api/results/submissions` to the caller, so the
  * cache only needs a defensive filter for the shared admin/educator cache.
  */
-export const getOwnSubmissions = () => {
+export const getOwnSubmissions = (customIdentity = null) => {
   const all = sharedDatabase.getSubmissions();
-  const identity = getCurrentIdentity();
+  const identity = customIdentity || getCurrentIdentity();
   const email = (identity.email || '').toLowerCase().trim();
   const uid = String(identity.uid || '').trim();
   const name = String(identity.name || '').toLowerCase().trim();
@@ -1063,23 +1108,23 @@ export const getOwnSubmissions = () => {
     studentId = String(profile?.studentId || '').trim();
   } catch {}
 
-  if (!email && !uid && !name && !studentId) return all;
+  const cleanName = (name && name !== 'student') ? name.replace(/\s+/g, '') : '';
 
   const matched = all.filter((s) => {
     const subEmail = (s?.studentEmail || '').toLowerCase().trim();
     const subId = String(s?.studentId || '').trim();
     const subStudent = (s?.student || '').toLowerCase().trim();
+    const cleanSub = subStudent.replace(/\s+/g, '');
 
     if (email && subEmail && subEmail === email) return true;
     if (uid && subId && (subId === uid || String(s?.id || '').includes(uid))) return true;
     if (studentId && subId && subId.toLowerCase() === studentId.toLowerCase()) return true;
-    if (name && subStudent && (
-      subStudent === name ||
-      subStudent.replace(/\s+/g, '') === name.replace(/\s+/g, '') ||
-      subStudent.includes(name) ||
-      name.includes(subStudent)
+    if (cleanName && cleanSub && (
+      cleanSub === cleanName ||
+      cleanSub.includes(cleanName) ||
+      cleanName.includes(cleanSub)
     )) return true;
-    if (email && subEmail && email.split('@')[0] === subEmail.split('@')[0]) return true;
+    if (email && subEmail && email.split('@')[0] === subEmail.split('@')[0] && email.split('@')[0] !== 'student') return true;
     return false;
   });
 
@@ -1088,15 +1133,25 @@ export const getOwnSubmissions = () => {
   // Defensive fallback: if caller is student and backend returned submissions specifically for them
   const role = getCurrentRole() || identity.role;
   if (role === 'student' && all.length > 0) {
+    const studentAttempts = all.filter((s) => {
+      const sMail = (s?.studentEmail || '').toLowerCase().trim();
+      const sName = (s?.student || '').toLowerCase().replace(/\s+/g, '');
+      return (
+        (email && sMail === email) ||
+        (cleanName && (sName === cleanName || sName.includes(cleanName) || cleanName.includes(sName))) ||
+        (uid && String(s?.studentId || '') === uid)
+      );
+    });
+    if (studentAttempts.length > 0) return studentAttempts;
     return all;
   }
   return [];
 };
 
-/** Aggregated personal performance of the signed-in student (from MySQL). */
-export const getStudentPerformance = () => {
-  let own = getOwnSubmissions();
-  const identity = getCurrentIdentity();
+/** Aggregated personal performance of the signed-in student (from MySQL & local cache). */
+export const getStudentPerformance = (customIdentity = null) => {
+  let own = getOwnSubmissions(customIdentity);
+  const identity = customIdentity || getCurrentIdentity();
   const email = (identity.email || '').toLowerCase().trim();
   const uid = String(identity.uid || '').trim();
   const name = String(identity.name || '').toLowerCase().trim();
@@ -1139,6 +1194,19 @@ export const getStudentPerformance = () => {
     } catch {}
   }
 
+  // Fallback 3: check global student quiz history
+  if (!own || own.length === 0) {
+    try {
+      const globalHist = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || '[]');
+      if (Array.isArray(globalHist) && globalHist.length > 0) {
+        own = globalHist.map((h) => ({
+          ...h,
+          scoreValue: typeof h.score === 'number' ? h.score : parseFloat(String(h.score).replace('%', '')) || 0
+        }));
+      }
+    } catch {}
+  }
+
   const scores = (own || []).map((s) => {
     if (typeof s?.scoreValue === 'number') return s.scoreValue;
     const parsed = parseFloat(String(s?.score ?? '').replace('%', ''));
@@ -1148,11 +1216,64 @@ export const getStudentPerformance = () => {
   const total = scores.reduce((acc, value) => acc + value, 0);
   const avgScore = scores.length ? Math.round((total / scores.length) * 10) / 10 : 0;
 
+  // Retrieve any stored completed quiz keys for this user as well
+  const userKey = (email || uid || name || 'default').toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+  const userSavedCompleted = (() => {
+    try {
+      const rawUser = localStorage.getItem(`learnsmart_completed_quizzes_${userKey}`);
+      const rawGlobal = localStorage.getItem('learnsmart_completed_quizzes');
+      const u = rawUser ? JSON.parse(rawUser) : [];
+      const g = rawGlobal ? JSON.parse(rawGlobal) : [];
+      return [...(Array.isArray(u) ? u : []), ...(Array.isArray(g) ? g : [])];
+    } catch { return []; }
+  })();
+
+  const completedQuizIds = Array.from(new Set([
+    ...(own || []).map((s) => s?.quizId).filter(Boolean),
+    ...(own || []).map((s) => String(s?.quizId)).filter(Boolean),
+    ...(own || []).map((s) => s?.quizTitle || s?.title).filter(Boolean),
+    ...userSavedCompleted
+  ])).filter(Boolean);
+
+  const allStoredQuizzes = loadStoredQuizzes();
+  const canonicalCompletedSet = new Set();
+  (own || []).forEach((s) => {
+    if (!s) return;
+    const sId = String(s.quizId || s.quiz_id || '').trim();
+    const sTitle = String(s.quizTitle || s.title || '').trim().toLowerCase();
+    const matched = allStoredQuizzes.find((q) =>
+      (sId && String(q.id).trim() === sId) ||
+      (sTitle && String(q.title || '').trim().toLowerCase() === sTitle)
+    );
+    if (matched) {
+      canonicalCompletedSet.add(String(matched.id));
+    } else if (sId || sTitle) {
+      canonicalCompletedSet.add(sId || sTitle);
+    }
+  });
+
+  (userSavedCompleted || []).forEach((k) => {
+    if (!k) return;
+    const kStr = String(k).trim();
+    const kLower = kStr.toLowerCase();
+    const matched = allStoredQuizzes.find((q) =>
+      String(q.id).trim() === kStr ||
+      String(q.title || '').trim().toLowerCase() === kLower
+    );
+    if (matched) {
+      canonicalCompletedSet.add(String(matched.id));
+    } else if (kStr.startsWith('quiz-') || !isNaN(Number(kStr))) {
+      canonicalCompletedSet.add(kStr);
+    }
+  });
+
+  const quizzesCompleted = canonicalCompletedSet.size;
+
   return {
-    quizzesCompleted: (own || []).length,
+    quizzesCompleted,
     avgScore,
     highestScore: scores.length ? Math.max(...scores) : 0,
-    completedQuizIds: [...new Set((own || []).map((s) => s?.quizId).filter(Boolean))],
+    completedQuizIds,
     submissions: own || []
   };
 };
@@ -1188,8 +1309,8 @@ export const sharedDatabase = {
   syncAllFromBackend: () => syncAllFromBackend(),
   getNotifications: () => getCachedNotifications(),
   getAnalytics: () => getCachedAnalytics().analytics,
-  getOwnSubmissions: () => getOwnSubmissions(),
-  getStudentPerformance: () => getStudentPerformance(),
+  getOwnSubmissions: (customIdentity = null) => getOwnSubmissions(customIdentity),
+  getStudentPerformance: (customIdentity = null) => getStudentPerformance(customIdentity),
   getStudentBenchmark: () => getStudentBenchmark(),
   markNotificationRead: (id) => markNotificationRead(id),
   markAllNotificationsRead: () => markAllNotificationsRead(),
@@ -1233,9 +1354,20 @@ export const sharedDatabase = {
     match = all.find((s) => s.email && s.email.toLowerCase() === lower);
     if (match) return match;
 
-    // 2. Direct name match
-    match = all.find((s) => s.name && s.name.toLowerCase() === lower);
-    if (match) return match;
+    // 2. Direct name match - with smart disambiguation for multiple accounts
+    const nameMatches = all.filter((s) => s.name && s.name.toLowerCase() === lower);
+    if (nameMatches.length > 0) {
+      const activeEmail = (typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_email') : '')?.toLowerCase();
+      const activeUid = typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_uid') : '';
+      const sessionMatch = nameMatches.find((s) =>
+        (activeEmail && s.email && s.email.toLowerCase() === activeEmail) ||
+        (activeUid && s.uid && s.uid === activeUid)
+      );
+      if (sessionMatch) return sessionMatch;
+      const progressMatch = nameMatches.find((s) => (s.quizzesCompleted > 0 || (Array.isArray(s.recentSubmissions) && s.recentSubmissions.length > 0)));
+      if (progressMatch) return progressMatch;
+      return nameMatches[0];
+    }
 
     // 3. Match username before @ or without spaces
     match = all.find((s) => {
@@ -2167,6 +2299,44 @@ export const sharedDatabase = {
         };
         const updatedList = [newEntry, ...list];
         localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(updatedList));
+
+        // Guarantee user-scoped and global completed quizzes keys are updated immediately
+        try {
+          const userKey = (realEmail || realUid || realName || 'default').toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+          const existingGlobal = JSON.parse(localStorage.getItem('learnsmart_completed_quizzes') || '[]');
+          const existingUser = JSON.parse(localStorage.getItem(`learnsmart_completed_quizzes_${userKey}`) || '[]');
+          const completedSet = Array.from(new Set([
+            ...existingGlobal,
+            ...existingUser,
+            quizId,
+            String(quizId),
+            quizTitle
+          ])).filter(Boolean);
+          localStorage.setItem('learnsmart_completed_quizzes', JSON.stringify(completedSet));
+          localStorage.setItem(`learnsmart_completed_quizzes_${userKey}`, JSON.stringify(completedSet));
+
+          // Also update user quiz history cache
+          const existingHistory = JSON.parse(localStorage.getItem(`learnsmart_student_quiz_history_${userKey}`) || '[]');
+          const globalHistory = JSON.parse(localStorage.getItem('learnsmart_student_quiz_history') || '[]');
+          const historyItem = {
+            id: Date.now(),
+            quizId,
+            timestamp: Date.now(),
+            createdAt: new Date().toISOString(),
+            title: quizTitle,
+            category: category || subName,
+            score,
+            status: passStatus,
+            date: 'Today'
+          };
+          const nextHist = [historyItem, ...existingHistory.filter((h) => h.quizId !== quizId && h.title !== quizTitle)];
+          const nextGlobalHist = [historyItem, ...globalHistory.filter((h) => h.quizId !== quizId && h.title !== quizTitle)];
+          localStorage.setItem(`learnsmart_student_quiz_history_${userKey}`, JSON.stringify(nextHist));
+          localStorage.setItem('learnsmart_student_quiz_history', JSON.stringify(nextGlobalHist));
+        } catch (e) {
+          console.warn('Completed quiz lock note:', e);
+        }
+
         if (typeof window !== 'undefined') {
           window.dispatchEvent(
             new CustomEvent(EVENT_SUBMISSIONS_UPDATED, { detail: updatedList })
@@ -2456,14 +2626,14 @@ export const sharedDatabase = {
     const result = [];
 
     storedActive.forEach((q) => {
-      const idKey = (q.id || '').toLowerCase();
-      const titleKey = (q.title || '').trim().toLowerCase();
+      const idKey = String(q.id || '').toLowerCase();
+      const titleKey = String(q.title || '').trim().toLowerCase();
       if (!seenIds.has(idKey) && !seenTitles.has(titleKey)) {
         seenIds.add(idKey);
         seenTitles.add(titleKey);
         result.push({
           ...q,
-          isRecommended: q.isRecommended !== undefined ? q.isRecommended : true,
+          isRecommended: q.isRecommended !== undefined ? Boolean(q.isRecommended) : true,
           questionsCount: q.questionsCount || (q.questions || []).length || 5,
           duration: q.duration || '15 mins',
           difficulty: q.difficulty || 'Medium',

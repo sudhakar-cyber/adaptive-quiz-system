@@ -318,6 +318,15 @@ export const authService = {
   // Log in as Student
   loginStudent: (studentDataOrName) => {
     try {
+      // 1. Purge lingering educator / admin sessions so educator data never leaks into student dashboard
+      try {
+        localStorage.removeItem('learnsmart_admin');
+        localStorage.removeItem('learnsmart_educator');
+        localStorage.removeItem('learnsmart_educator_profile');
+        sessionStorage.removeItem('learnsmart_admin');
+        sessionStorage.removeItem('learnsmart_educator');
+      } catch {}
+
       let student = null;
       let studentName = '';
       let studentEmail = '';
@@ -331,7 +340,7 @@ export const authService = {
         studentName = studentDataOrName.name || studentDataOrName.displayName || '';
         studentEmail = studentDataOrName.email || '';
         avatarImage = studentDataOrName.avatarImage || studentDataOrName.photoURL || null;
-        uid = studentDataOrName.uid || '';
+        uid = studentDataOrName.uid || studentDataOrName.id || '';
 
         // Safe fallback to email username only when displayName / studentName is empty
         if (!studentName || !studentName.trim()) {
@@ -399,23 +408,46 @@ export const authService = {
         }
       }
 
-      const activeStudent = student || {
-        name: studentName || 'Student',
-        email: studentEmail || '',
-        avatarImage: avatarImage || null,
-        uid: uid || '',
+      const resolvedName = (studentName && studentName.trim() && studentName !== 'Student')
+        ? studentName.trim()
+        : (student?.name && student.name !== 'Student')
+          ? student.name.trim()
+          : (studentEmail && studentEmail.includes('@') ? studentEmail.split('@')[0] : 'Student');
+
+      const resolvedEmail = (studentEmail && studentEmail.trim())
+        ? studentEmail.trim()
+        : (student?.email && student.email.trim())
+          ? student.email.trim()
+          : '';
+
+      const activeStudent = {
+        ...(student || {}),
+        name: resolvedName,
+        email: resolvedEmail,
+        avatarImage: avatarImage || student?.avatarImage || null,
+        uid: uid || student?.uid || '',
         studentId: assignedStudentId,
         role: 'student'
       };
 
+      // If Firebase Auth currentUser is signed in with a different email (e.g. educator/admin), sign out
+      if (auth?.currentUser) {
+        const currentFbEmail = (auth.currentUser.email || '').toLowerCase();
+        if (activeStudent.email && currentFbEmail && currentFbEmail !== activeStudent.email.toLowerCase()) {
+          firebaseSignOut(auth).catch(() => {});
+        }
+      }
+
       localStorage.setItem('learnsmart_role', 'student');
       localStorage.setItem('learnsmart_user', activeStudent.name);
-      if (activeStudent.email) {
-        localStorage.setItem('learnsmart_email', activeStudent.email);
-      }
-      if (activeStudent.uid) {
-        localStorage.setItem('learnsmart_uid', activeStudent.uid);
-      }
+      localStorage.setItem('learnsmart_email', activeStudent.email || '');
+      localStorage.setItem('learnsmart_uid', activeStudent.uid || '');
+
+      sessionStorage.setItem('learnsmart_role', 'student');
+      sessionStorage.setItem('learnsmart_user', activeStudent.name);
+      sessionStorage.setItem('learnsmart_email', activeStudent.email || '');
+      sessionStorage.setItem('learnsmart_uid', activeStudent.uid || '');
+
       if (activeStudent.avatarImage) {
         localStorage.setItem('learnsmart_avatar', activeStudent.avatarImage);
       } else {
@@ -430,20 +462,29 @@ export const authService = {
           avatarImage: activeStudent.avatarImage || null,
           photoURL: activeStudent.avatarImage || null,
           uid: activeStudent.uid || '',
-          phone: activeStudent.phone || '',
+          phone: activeStudent.phone || student?.phone || '',
           studentId: activeStudent.studentId || assignedStudentId,
-          major: activeStudent.topSubject || 'General / Onboarding',
+          major: activeStudent.topSubject || student?.topSubject || 'Computer Science & Engineering',
           role: 'student'
         })
       );
 
-      sessionStorage.setItem('learnsmart_role', 'student');
-      sessionStorage.setItem('learnsmart_user', activeStudent.name);
-      if (activeStudent.email) {
-        sessionStorage.setItem('learnsmart_email', activeStudent.email);
-      }
-      if (activeStudent.uid) {
-        sessionStorage.setItem('learnsmart_uid', activeStudent.uid);
+      // Notify open components of the updated student profile
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('learnsmart_user_profile_updated', {
+          detail: {
+            fullName: activeStudent.name,
+            email: activeStudent.email,
+            profileImage: activeStudent.avatarImage
+          }
+        }));
+        window.dispatchEvent(new CustomEvent('learnsmart_user_updated', {
+          detail: {
+            fullName: activeStudent.name,
+            email: activeStudent.email,
+            profileImage: activeStudent.avatarImage
+          }
+        }));
       }
 
       // Log student.login activity to MySQL so educators and admins see live sign-in event

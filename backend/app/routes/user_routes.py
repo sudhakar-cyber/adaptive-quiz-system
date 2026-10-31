@@ -92,7 +92,11 @@ def get_current_user_profile(current_user: Dict[str, Any] = Depends(require_auth
     email = (current_user.get("email") or "").strip().lower()
     with get_connection() as conn:
         cur = conn.execute(
-            "SELECT id, name, email, role, department, phone, title, student_id, is_active FROM users WHERE id = ? OR LOWER(email) = ?",
+            """
+            SELECT id, name, email, role, department, phone, title, student_id,
+                   is_active, streak, subject_mastery, top_subject, avatar_url, country, last_login_date
+            FROM users WHERE id = ? OR LOWER(email) = ?
+            """,
             (user_id, email)
         )
         row = cur.fetchone()
@@ -101,6 +105,16 @@ def get_current_user_profile(current_user: Dict[str, Any] = Depends(require_auth
             res["uid"] = res["id"]
             res["studentId"] = res.get("student_id") or ("LS-2025-100" if email == "shaikaathif22@gmail.com" else None)
             res["isActive"] = bool(res.get("is_active", True))
+            res["streak"] = int(res.get("streak") or 0)
+            mastery = res.get("subject_mastery")
+            if isinstance(mastery, str):
+                try:
+                    res["subjectMastery"] = json.loads(mastery)
+                except Exception:
+                    res["subjectMastery"] = []
+            else:
+                res["subjectMastery"] = mastery if isinstance(mastery, list) else []
+            res["topSubject"] = res.get("top_subject") or res.get("department") or "Computer Science"
             return res
 
     return {
@@ -430,7 +444,7 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
                 u.country,
                 u.streak,
                 u.subject_mastery,
-                COUNT(qa.id) as quizzesCompleted,
+                COUNT(DISTINCT qa.quiz_id) as quizzesCompleted,
                 COALESCE(ROUND(AVG(qa.score), 1), 0.0) as avgScore,
                 COALESCE(MAX(qa.score), 0.0) as highestScore,
                 CASE
@@ -451,6 +465,7 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
                     qa.student_id = u.id
                     OR (u.student_id IS NOT NULL AND u.student_id != '' AND qa.student_id = u.student_id)
                     OR (qa.student_email IS NOT NULL AND LOWER(qa.student_email) = LOWER(u.email))
+                    OR (qa.student_name IS NOT NULL AND LOWER(REPLACE(qa.student_name, ' ', '')) = LOWER(REPLACE(u.name, ' ', '')) AND u.name != 'Student')
                 )
             WHERE {where_clause}
             GROUP BY u.id, u.name, u.email, u.role, u.department, u.phone, u.title, u.is_active, u.created_at, u.student_id, u.top_subject, u.avatar_url, u.country, u.streak, u.subject_mastery
@@ -481,10 +496,11 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
                     student_id = ?
                     OR (student_id IS NOT NULL AND student_id = ?)
                     OR (student_email IS NOT NULL AND LOWER(student_email) = LOWER(?))
+                    OR (student_name IS NOT NULL AND LOWER(REPLACE(student_name, ' ', '')) = LOWER(REPLACE(?, ' ', '')) AND ? != 'Student')
                 )
                 ORDER BY submitted_at DESC
                 LIMIT 5
-            """, (d["id"], stud_sid, d["email"]))
+            """, (d["id"], stud_sid, d["email"], d["name"], d["name"]))
 
             recent = []
             for srow in sub_cur.fetchall():
