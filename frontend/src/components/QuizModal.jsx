@@ -147,10 +147,57 @@ export const QuizModal = ({
     // ATTEMPT LOCK: Remove active attempt and record completed quiz ID
     try {
       localStorage.removeItem(STORAGE_KEY);
+      const userKey = (() => {
+        try {
+          const em = localStorage.getItem('learnsmart_email') || '';
+          const uid = localStorage.getItem('learnsmart_uid') || '';
+          const uname = localStorage.getItem('learnsmart_user') || studentName || '';
+          if (em) return em.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+          if (uid) return uid.replace(/[^a-zA-Z0-9_-]/g, '_');
+          if (uname) return uname.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+        } catch {}
+        return 'default';
+      })();
       const existing = JSON.parse(localStorage.getItem(COMPLETED_KEY) || '[]');
-      if (!existing.includes(quiz.id)) {
-        existing.push(quiz.id);
-        localStorage.setItem(COMPLETED_KEY, JSON.stringify(existing));
+      const userExisting = JSON.parse(localStorage.getItem(`${COMPLETED_KEY}_${userKey}`) || '[]');
+      const merged = Array.from(new Set([
+        ...existing,
+        ...userExisting,
+        quiz.id,
+        String(quiz.id),
+        quiz.title
+      ])).filter(Boolean);
+      localStorage.setItem(COMPLETED_KEY, JSON.stringify(merged));
+      localStorage.setItem(`${COMPLETED_KEY}_${userKey}`, JSON.stringify(merged));
+
+      // Calculate score immediately from answers and save attempt to MySQL so it persists even if project is stopped
+      try {
+        const answers = selectedAnswersRef.current || selectedAnswers || {};
+        const questions = (quiz && Array.isArray(quiz.questions)) ? quiz.questions : [];
+        const totalQuestions = questions.length || 1;
+        const correctCount = questions.reduce((acc, q, idx) => {
+          return answers[idx] === q.correctIndex ? acc + 1 : acc;
+        }, 0);
+        const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
+
+        const activeUid = localStorage.getItem('learnsmart_uid') || '';
+        const activeEmail = localStorage.getItem('learnsmart_email') || '';
+        const activeName = localStorage.getItem('learnsmart_user') || studentName || 'Student';
+
+        sharedDatabase.recordQuizAttempt({
+          studentName: activeName,
+          studentEmail: activeEmail,
+          studentId: activeUid,
+          quizTitle: quiz.title,
+          score: scorePercentage,
+          category: quiz.category || 'General',
+          quizId: quiz.id,
+          answers,
+          correctCount,
+          totalQuestions
+        });
+      } catch (attErr) {
+        console.warn('Initial quiz attempt save note:', attErr);
       }
     } catch (err) {
       console.warn('Failed to lock completed quiz attempt:', err);

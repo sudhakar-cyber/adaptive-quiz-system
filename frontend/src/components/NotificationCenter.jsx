@@ -107,6 +107,7 @@ const getNotificationIcon = (category) => {
 export const NotificationCenter = ({
   notifications = [],
   loading = false,
+  onMarkAsRead,
   onMarkAllAsRead,
   onDismissNotification,
   onNotificationAction,
@@ -133,12 +134,17 @@ export const NotificationCenter = ({
         </div>
 
         <div className="notifications-header-actions">
-          {unreadCount > 0 && (
-            <button type="button" className="mark-all-read-btn" onClick={onMarkAllAsRead}>
-              <CheckCircleIcon size={15} color="#1A6BFF" />
-              <span>Mark all as read</span>
-            </button>
-          )}
+          <button
+            type="button"
+            className="mark-all-read-btn"
+            disabled={unreadCount === 0}
+            onClick={onMarkAllAsRead}
+            title={unreadCount > 0 ? 'Mark all notifications as read' : 'All notifications are read'}
+            style={unreadCount === 0 ? { opacity: 0.5, cursor: 'default' } : {}}
+          >
+            <CheckCircleIcon size={15} color={unreadCount > 0 ? '#1A6BFF' : '#94A3B8'} />
+            <span>Mark all as read</span>
+          </button>
         </div>
       </div>
 
@@ -197,7 +203,33 @@ export const NotificationCenter = ({
 
               <div className="notif-item-actions">
                 <span className="notif-timestamp">{item.timestamp || item.time || 'Just now'}</span>
-                {item.unread && <span className="unread-dot" title="Unread notification" />}
+                {item.unread ? (
+                  <>
+                    <span className="unread-dot" title="Unread notification" />
+                    <button
+                      type="button"
+                      className="notif-mark-read-btn"
+                      title="Mark as read"
+                      aria-label="Mark as read"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onMarkAsRead) {
+                          onMarkAsRead(item.id);
+                        } else {
+                          sharedDatabase.markNotificationRead(item.id);
+                        }
+                      }}
+                    >
+                      <CheckCircleIcon size={14} color="#10B981" />
+                      <span>Mark as Read</span>
+                    </button>
+                  </>
+                ) : (
+                  <span className="notif-read-indicator" title="Notification read">
+                    <CheckCircleIcon size={13} color="#94A3B8" />
+                    <span>Read</span>
+                  </span>
+                )}
                 <button
                   type="button"
                   className="notif-dismiss-btn notif-delete-btn"

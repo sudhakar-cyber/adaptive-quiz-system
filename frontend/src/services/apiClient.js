@@ -108,6 +108,9 @@ export const getCurrentIdentity = () => {
     email = read('learnsmart_email') || profile?.email || auth?.currentUser?.email || '';
     uid = read('learnsmart_uid') || profile?.uid || auth?.currentUser?.uid || '';
     name = read('learnsmart_user') || profile?.fullName || auth?.currentUser?.displayName || '';
+    if (!email) {
+      email = 'student@learnsmart.edu';
+    }
   }
 
   return { role, email, uid, name };
