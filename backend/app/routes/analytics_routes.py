@@ -7,7 +7,7 @@ from app.middleware.role_check import require_authenticated, require_educator_or
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
-require_student_only = require_roles(["student"])
+require_student_only = require_roles(["student", "educator", "admin"])
 
 
 @router.get("/overview")

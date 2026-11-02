@@ -192,6 +192,42 @@ def apply_migrations(conn) -> list:
     return executed
 
 
+def _purge_default_students(conn):
+    """Guarantees default / demo student accounts and dummy records are purged from MySQL."""
+    default_ids = (
+        'stud-102',
+        'stud-aarav-sharma',
+        'stud-ananya-iyer',
+        'stud-kavya-reddy',
+        'stud-priya-patel',
+        'stud-rohan-verma',
+        'student-1',
+        'usr_1793448563819'
+    )
+    placeholders = ",".join(["?"] * len(default_ids))
+    try:
+        conn.execute(f"DELETE FROM educator_students WHERE student_id IN ({placeholders})", default_ids)
+        conn.execute(
+            f"DELETE FROM quiz_attempts WHERE student_id IN ({placeholders}) OR LOWER(student_email) LIKE '%@learnsmart.edu' OR LOWER(student_email) = 'student@learnsmart.com'",
+            default_ids
+        )
+        conn.execute(
+            f"DELETE FROM notifications WHERE recipient_id IN ({placeholders}) OR recipient_id LIKE 'stud-%'",
+            default_ids
+        )
+        conn.execute(
+            f"DELETE FROM activity_log WHERE actor_id IN ({placeholders})",
+            default_ids
+        )
+        conn.execute(
+            f"DELETE FROM users WHERE role = 'student' AND (id IN ({placeholders}) OR LOWER(email) LIKE '%@learnsmart.edu' OR LOWER(email) = 'student@learnsmart.com' OR LOWER(name) LIKE '%demo%')",
+            default_ids
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Purge default students check: {e}")
+
+
 def _ensure_seed_credentials(conn):
     """
     Gives the built-in admin / educator accounts a usable password hash.
@@ -273,6 +309,7 @@ def init_db():
 
             apply_migrations(conn)
             _ensure_seed_credentials(conn)
+            _purge_default_students(conn)
     except Exception as e:
         logger.warning(f"MySQL initialization check: {e}")
 

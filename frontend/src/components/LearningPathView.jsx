@@ -10,6 +10,7 @@ import { sharedDatabase } from '../services/sharedDatabase';
 
 export const LearningPathView = ({
   onStartQuizByTopic,
+  onReviewQuiz,
   completedQuizIds = [],
   quizHistory = [],
   totalQuizzesTaken = null,
@@ -50,12 +51,56 @@ export const LearningPathView = ({
     };
   }, []);
 
+  // Determine authentic student quiz history with fallback to sharedDatabase
+  const displayQuizHistory = useMemo(() => {
+    let list = Array.isArray(quizHistory) && quizHistory.length > 0 ? [...quizHistory] : [];
+    try {
+      const perf = sharedDatabase.getStudentPerformance ? sharedDatabase.getStudentPerformance() : null;
+      if (perf && Array.isArray(perf.submissions) && perf.submissions.length > 0) {
+        perf.submissions.forEach((sub) => {
+          const sQuizId = String(sub.quizId || sub.quiz_id || sub.id || '').trim().toLowerCase();
+          const sTitle = String(sub.quizTitle || sub.title || '').trim().toLowerCase();
+          const exists = list.some((item) => {
+            const iQuizId = String(item.quizId || item.id || '').trim().toLowerCase();
+            const iTitle = String(item.title || item.quizTitle || '').trim().toLowerCase();
+            return (
+              (sQuizId && iQuizId && (sQuizId === iQuizId || sQuizId.includes(iQuizId) || iQuizId.includes(sQuizId))) ||
+              (sTitle && iTitle && sTitle === iTitle)
+            );
+          });
+          if (!exists) {
+            list.push(sub);
+          }
+        });
+      }
+    } catch {}
+    return list;
+  }, [quizHistory]);
+
+  const effectiveCompletedQuizIds = useMemo(() => {
+    const set = new Set((completedQuizIds || []).map((id) => String(id).trim().toLowerCase()));
+    try {
+      const perf = sharedDatabase.getStudentPerformance ? sharedDatabase.getStudentPerformance() : null;
+      if (perf && Array.isArray(perf.completedQuizIds)) {
+        perf.completedQuizIds.forEach((id) => set.add(String(id).trim().toLowerCase()));
+      }
+      if (perf && Array.isArray(perf.submissions)) {
+        perf.submissions.forEach((sub) => {
+          if (sub.quizId) set.add(String(sub.quizId).trim().toLowerCase());
+          if (sub.quiz_id) set.add(String(sub.quiz_id).trim().toLowerCase());
+          if (sub.quizTitle) set.add(String(sub.quizTitle).trim().toLowerCase());
+          if (sub.title) set.add(String(sub.title).trim().toLowerCase());
+        });
+      }
+    } catch {}
+    return set;
+  }, [completedQuizIds]);
+
   // Determine if student has 0 attempts / reset state
   const isReset =
-    totalQuizzesTaken === 0 ||
-    (totalQuizzesTaken === null &&
-      (!completedQuizIds || completedQuizIds.length === 0) &&
-      (!quizHistory || quizHistory.length === 0));
+    totalQuizzesTaken === 0 &&
+    effectiveCompletedQuizIds.size === 0 &&
+    displayQuizHistory.length === 0;
 
   // Build stages strictly based on published quizzes added by educator and admin
   const roadmapStages = useMemo(() => {
@@ -66,34 +111,50 @@ export const LearningPathView = ({
     return activeQuizzes.map((quiz, index) => {
       const quizId = String(quiz.id || '').trim();
       const quizTitle = String(quiz.title || '').trim();
+      const qId = quizId.toLowerCase();
+      const qTitle = quizTitle.toLowerCase();
 
       // Check if student has completed this specific quiz added by educator/admin
-      const attempt = (quizHistory || []).find((h) => {
-        const hQuizId = String(h.quizId || h.id || '').trim();
+      const attempt = (displayQuizHistory || []).find((h) => {
+        const hQuizId = String(h.quizId || h.id || '').trim().toLowerCase();
         const hTitle = String(h.title || h.quizTitle || '').trim().toLowerCase();
         return (
-          (quizId && hQuizId === quizId) ||
-          (quizTitle && hTitle === quizTitle.toLowerCase())
+          (qId && hQuizId && (
+            hQuizId === qId ||
+            hQuizId === `quiz-${qId}` ||
+            qId === `quiz-${hQuizId}` ||
+            hQuizId.includes(qId) ||
+            qId.includes(hQuizId)
+          )) ||
+          (qTitle && hTitle && qTitle === hTitle) ||
+          (qId && hTitle && qId === hTitle)
         );
       });
 
-      const isDone =
-        !isReset &&
-        (Boolean(
-          completedQuizIds &&
-            (completedQuizIds.includes(quiz.id) ||
-              (quizId && completedQuizIds.includes(quizId)) ||
-              (quizTitle && completedQuizIds.some((cId) => String(cId).toLowerCase() === quizTitle.toLowerCase())))
-        ) ||
-          Boolean(attempt));
+      const isCompletedInSet =
+        effectiveCompletedQuizIds.has(qId) ||
+        effectiveCompletedQuizIds.has(qTitle) ||
+        (qId && (
+          effectiveCompletedQuizIds.has(`quiz-${qId}`) ||
+          (qId.startsWith('quiz-') && effectiveCompletedQuizIds.has(qId.replace('quiz-', '')))
+        ));
+
+      const isDone = !isReset && (isCompletedInSet || Boolean(attempt));
 
       let score = 0;
       if (attempt) {
         const rawScore =
           attempt.scoreValue ??
-          (typeof attempt.score === 'number' ? attempt.score : parseFloat(attempt.score));
-        score = isNaN(rawScore) ? 100 : Math.round(rawScore);
+          (typeof attempt.score === 'number'
+            ? attempt.score
+            : parseFloat(String(attempt.score ?? '').replace('%', '')));
+        score = isNaN(rawScore) || rawScore <= 0 ? 100 : Math.round(rawScore);
       } else if (isDone) {
+        score = 100;
+      }
+
+      // If quiz is completed, it must reflect 100% (or student's authentic passing score, never 0%)
+      if (isDone && (!score || score <= 0)) {
         score = 100;
       }
 
@@ -135,7 +196,7 @@ export const LearningPathView = ({
           {
             name: 'Applied Scenario Practice & Critical Analysis',
             status: isDone ? 'done' : 'in-progress',
-            score: isDone ? `${Math.max(60, score - 5)}%` : 'Queued'
+            score: isDone ? `${score}%` : 'Queued'
           },
           {
             name: `Milestone Assessment Evaluation (${questions.length || quiz.questionsCount || 5} Questions)`,
@@ -164,10 +225,11 @@ export const LearningPathView = ({
         badge: `${quizTitle} Certified 🏅`,
         difficulty: quiz.difficulty || 'Medium',
         duration: quiz.duration || '15 mins',
-        questionsCount: questions.length || quiz.questionsCount || 5
+        questionsCount: questions.length || quiz.questionsCount || 5,
+        quizObject: quiz
       };
     });
-  }, [activeQuizzes, isReset, completedQuizIds, quizHistory]);
+  }, [activeQuizzes, isReset, effectiveCompletedQuizIds, displayQuizHistory]);
 
   // Dynamic statistics calculated directly from stage statuses
   const completedStagesCount = useMemo(() => {
@@ -321,7 +383,11 @@ export const LearningPathView = ({
                         <button
                           type="button"
                           className="stage-action-outline-btn"
-                          onClick={() => onStartQuizByTopic && onStartQuizByTopic(stage.quizId)}
+                          onClick={() => {
+                            if (onReviewQuiz) onReviewQuiz(stage.quizObject || stage.quizId);
+                            else if (onStartQuizByTopic) onStartQuizByTopic(stage.quizId);
+                          }}
+                          title="Click to review answers"
                         >
                           <span>Review Material</span>
                         </button>
@@ -369,6 +435,15 @@ export const LearningPathView = ({
                                 ? 'mod-done'
                                 : 'mod-active'
                             }`}
+                            onClick={(e) => {
+                              if (mod.status === 'done') {
+                                e.stopPropagation();
+                                if (onReviewQuiz) onReviewQuiz(stage.quizId);
+                                else if (onStartQuizByTopic) onStartQuizByTopic(stage.quizId);
+                              }
+                            }}
+                            style={mod.status === 'done' ? { cursor: 'pointer' } : {}}
+                            title={mod.status === 'done' ? 'Click to review quiz answers' : ''}
                           >
                             {mod.score}
                           </span>

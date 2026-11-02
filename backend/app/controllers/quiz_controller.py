@@ -662,6 +662,8 @@ def get_all_submissions(role: str = "student", current_user: Optional[Dict[str, 
                 "totalQuestions": s["total_questions"],
                 "correctCount": s["correct_count"],
                 "status": s["status"],
+                "answers": s.get("answers_json"),
+                "answers_json": s.get("answers_json"),
                 "date": formatted_date,
                 "submittedAt": sub_date.isoformat() if hasattr(sub_date, "isoformat") else str(sub_date or "")
             })
