@@ -58,6 +58,7 @@ def list_notifications(
 ):
     """Returns the notifications addressed to the signed-in account."""
     recipient_id = current_user.get("id") or current_user.get("uid")
+    user_role = (current_user.get("role") or "").lower()
     with get_connection() as conn:
         where = "recipient_id = ?"
         params: List[Any] = [recipient_id]
@@ -68,14 +69,22 @@ def list_notifications(
             f"SELECT * FROM notifications WHERE {where} ORDER BY created_at DESC LIMIT ?",
             tuple(params),
         )
-        rows = [notification_service.serialize_notification(dict(r)) for r in cur.fetchall()]
+        raw_rows = [dict(r) for r in cur.fetchall()]
 
-        unread_cur = conn.execute(
-            "SELECT COUNT(*) AS c FROM notifications WHERE recipient_id = ? AND is_read = 0",
-            (recipient_id,),
-        )
-        unread_row = unread_cur.fetchone()
-        unread = int(unread_row["c"]) if unread_row else 0
+        # Filter out orphaned notifications for quizzes that no longer exist
+        if user_role == "student":
+            quiz_cur = conn.execute("SELECT id FROM quizzes")
+            valid_quiz_ids = {str(q["id"]) for q in quiz_cur.fetchall()}
+            filtered_rows = []
+            for r in raw_rows:
+                if r.get("entity_type") == "quiz" and r.get("entity_id"):
+                    if str(r.get("entity_id")) not in valid_quiz_ids:
+                        continue
+                filtered_rows.append(r)
+            raw_rows = filtered_rows
+
+        rows = [notification_service.serialize_notification(r) for r in raw_rows]
+        unread = sum(1 for r in raw_rows if not r.get("is_read"))
 
         return {"notifications": rows, "unreadCount": unread, "total": len(rows)}
 
@@ -86,27 +95,74 @@ def mark_notification_read(
     current_user: Dict[str, Any] = Depends(require_authenticated),
 ):
     recipient_id = current_user.get("id") or current_user.get("uid")
+    user_role = (current_user.get("role") or "").lower()
+    user_ids = {current_user.get("id"), current_user.get("uid"), current_user.get("email")}
+    user_ids = {u for u in user_ids if u}
+    if user_role == "student":
+        user_ids.update(["student-1", "stud-102"])
+
     with get_connection() as conn:
+        placeholders = ",".join(["?"] * len(user_ids))
         cur = conn.execute(
-            "UPDATE notifications SET is_read = 1 WHERE id = ? AND recipient_id = ?",
-            (notification_id, recipient_id),
+            f"UPDATE notifications SET is_read = 1 WHERE id = ? AND (recipient_id IN ({placeholders}) OR recipient_id = ?)",
+            (notification_id,) + tuple(user_ids) + (recipient_id,),
         )
         conn.commit()
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Notification not found.")
         return {"success": True, "id": notification_id, "isRead": True}
 
 
 @router.post("/read-all")
 def mark_all_notifications_read(current_user: Dict[str, Any] = Depends(require_authenticated)):
     recipient_id = current_user.get("id") or current_user.get("uid")
+    user_role = (current_user.get("role") or "").lower()
+    user_ids = {current_user.get("id"), current_user.get("uid"), current_user.get("email")}
+    user_ids = {u for u in user_ids if u}
+    if user_role == "student":
+        user_ids.update(["student-1", "stud-102"])
+
     with get_connection() as conn:
+        placeholders = ",".join(["?"] * len(user_ids))
         cur = conn.execute(
-            "UPDATE notifications SET is_read = 1 WHERE recipient_id = ? AND is_read = 0",
-            (recipient_id,),
+            f"UPDATE notifications SET is_read = 1 WHERE (recipient_id IN ({placeholders}) OR recipient_id = ?) AND is_read = 0",
+            tuple(user_ids) + (recipient_id,),
         )
         conn.commit()
         return {"success": True, "updated": cur.rowcount}
+
+
+@router.delete("/clear-all")
+def clear_all_notifications_alt(current_user: Dict[str, Any] = Depends(require_authenticated)):
+    return clear_all_notifications(current_user=current_user)
+
+
+@router.delete("")
+def clear_all_notifications(current_user: Dict[str, Any] = Depends(require_authenticated)):
+    recipient_id = current_user.get("id") or current_user.get("uid")
+    user_role = (current_user.get("role") or "").lower()
+    user_ids = {current_user.get("id"), current_user.get("uid"), current_user.get("email")}
+    user_ids = {u for u in user_ids if u}
+
+    with get_connection() as conn:
+        if user_role == "admin":
+            cur = conn.execute(
+                "DELETE FROM notifications WHERE recipient_role = 'admin' OR recipient_id = 'admin-system'"
+            )
+        elif user_role == "educator":
+            placeholders = ",".join(["?"] * len(user_ids))
+            cur = conn.execute(
+                f"DELETE FROM notifications WHERE recipient_id IN ({placeholders}) OR (recipient_role = 'educator' AND recipient_id = 'edu-201')",
+                tuple(user_ids),
+            )
+        else:
+            all_student_ids = list(user_ids | {"student-1", "stud-102"})
+            placeholders = ",".join(["?"] * len(all_student_ids))
+            cur = conn.execute(
+                f"DELETE FROM notifications WHERE recipient_id IN ({placeholders}) OR recipient_id = ?",
+                tuple(all_student_ids) + (recipient_id,),
+            )
+        conn.commit()
+        deleted_count = cur.rowcount if cur else 0
+        return {"success": True, "deleted": deleted_count}
 
 
 @router.delete("/{notification_id}")
@@ -115,14 +171,35 @@ def delete_notification(
     current_user: Dict[str, Any] = Depends(require_authenticated),
 ):
     recipient_id = current_user.get("id") or current_user.get("uid")
+    user_role = (current_user.get("role") or "").lower()
+    user_ids = {current_user.get("id"), current_user.get("uid"), current_user.get("email")}
+    user_ids = {u for u in user_ids if u}
+    if user_role == "student":
+        user_ids.update(["student-1", "stud-102"])
+
     with get_connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM notifications WHERE id = ? AND recipient_id = ?",
-            (notification_id, recipient_id),
+        cur = conn.execute("SELECT * FROM notifications WHERE id = ?", (notification_id,))
+        row = cur.fetchone()
+        if not row:
+            # Already deleted or not found: return success so client cache is cleanly cleared
+            return {"success": True, "id": notification_id}
+
+        row_dict = dict(row)
+        notif_recip = row_dict.get("recipient_id")
+        notif_role = (row_dict.get("recipient_role") or "").lower()
+
+        allowed = (
+            user_role == "admin"
+            or notif_recip in user_ids
+            or (user_role == "student" and (notif_role == "student" or notif_recip in {"student-1", "stud-102"}))
+            or (user_role == "educator" and (notif_role == "educator" or notif_recip == "edu-201"))
         )
+
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this notification.")
+
+        conn.execute("DELETE FROM notifications WHERE id = ?", (notification_id,))
         conn.commit()
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Notification not found.")
         return {"success": True, "id": notification_id}
 
 

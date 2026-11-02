@@ -406,7 +406,7 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
                     CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP
                 FROM quiz_attempts
-                WHERE student_email IS NOT NULL AND student_email != ''
+                WHERE student_email IS NOT NULL AND student_email != '' AND LOWER(student_email) NOT LIKE '%@learnsmart.edu' AND LOWER(student_email) != 'student@learnsmart.com' AND LOWER(student_name) NOT LIKE '%demo%'
                 ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP
             """)
             conn.commit()
@@ -423,7 +423,7 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
             cohort_placeholders = None
             cohort_params = []
 
-        where_clause = "u.role = 'student'"
+        where_clause = "u.role = 'student' AND u.is_active = 1 AND LOWER(u.email) NOT LIKE '%@learnsmart.edu' AND LOWER(u.email) != 'student@learnsmart.com'"
         if cohort_placeholders:
             where_clause += f" AND u.id IN ({cohort_placeholders})"
 

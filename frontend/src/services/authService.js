@@ -1258,6 +1258,7 @@ export const authService = {
       localStorage.removeItem('learnsmart_student_profile');
       localStorage.removeItem('learnsmart_auth_token');
       localStorage.removeItem('learnsmart_avatar');
+      localStorage.removeItem('learnsmart_notifications_cache');
       sessionStorage.removeItem('learnsmart_role');
       sessionStorage.removeItem('learnsmart_user');
       sessionStorage.removeItem('learnsmart_email');
@@ -1265,6 +1266,7 @@ export const authService = {
       sessionStorage.removeItem('learnsmart_admin');
       sessionStorage.removeItem('learnsmart_educator');
       sessionStorage.removeItem('learnsmart_auth_token');
+      sessionStorage.removeItem('learnsmart_notifications_cache');
     } catch (err) {
       console.error('Failed to clear session:', err);
     }

@@ -263,12 +263,29 @@ def get_current_user_from_token(
         if expected_role:
             if not uid and not email:
                 if expected_role == "student":
-                    email = "student@learnsmart.edu"
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Please sign in with an authorized student account.",
+                    )
                 else:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Session token provided without a user identity. Please sign in again.",
                     )
+
+            # Reject default/demo student markers
+            default_student_markers = (
+                "stud-102", "student-1", "student@learnsmart.edu", "student@learnsmart.com",
+                "stud-aarav-sharma", "stud-ananya-iyer", "stud-kavya-reddy", "stud-priya-patel", "stud-rohan-verma", "usr_1793448563819"
+            )
+            if expected_role == "student" and (
+                (uid and uid in default_student_markers) or
+                (email and any(m in email.lower() for m in ["student@learnsmart.edu", "student@learnsmart.com", "aarav.sharma", "ananya.iyer", "kavya.reddy", "priya.patel", "rohan.verma", "alex@learnsmart.edu"]))
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Default demo student accounts have been disabled. Please sign in with an authorized account.",
+                )
 
             row = _find_user(conn, uid, email)
             # If the session token is specifically for an educator, but the resolved user is not an educator
@@ -283,27 +300,10 @@ def get_current_user_from_token(
                     row = admin_row
 
             if not row:
-                if expected_role != "student":
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="No registered account matches this session. Please contact an administrator.",
-                    )
-                # Brand new student: register them so they are tracked from here on.
-                clean_email = email or f"{uid}@user.learnsmart"
-                clean_name = name or (clean_email.split("@")[0] if clean_email else "Learner")
-                user_id = uid or f"usr_{int(time.time() * 1000)}"
-                conn.execute(
-                    """
-                    INSERT INTO users (id, name, email, role, is_active, created_at, updated_at)
-                    VALUES (?, ?, ?, 'student', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON DUPLICATE KEY UPDATE
-                        name = VALUES(name),
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    (user_id, clean_name, clean_email),
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Student account not found or not authorized. Please register or sign in with valid credentials.",
                 )
-                conn.commit()
-                row = _find_user(conn, user_id, clean_email)
 
             if not row:
                 raise HTTPException(

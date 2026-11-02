@@ -19,8 +19,10 @@ export const QuizModal = ({
   studentName = 'Student',
   onClose,
   onComplete,
-  showToast
+  showToast,
+  isReview = false
 }) => {
+  const isReviewMode = Boolean(quiz?.isReviewMode || isReview);
   if (!quiz || !quiz.questions || quiz.questions.length === 0) {
     return null;
   }
@@ -40,6 +42,7 @@ export const QuizModal = ({
 
   // Restore saved in-progress attempt if matching this quiz
   const getSavedAttempt = () => {
+    if (isReviewMode) return null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -56,8 +59,53 @@ export const QuizModal = ({
 
   const initialAttempt = getSavedAttempt();
 
+  const getInitialSelectedAnswers = () => {
+    if (isReviewMode) {
+      let raw = quiz?.reviewAnswers;
+      if (typeof raw === 'string') {
+        try { raw = JSON.parse(raw); } catch {}
+      }
+      if (raw && typeof raw === 'object' && Array.isArray(raw.answers)) {
+        raw = raw.answers;
+      }
+      const normalized = {};
+      let hasAnyAnswers = false;
+
+      if (Array.isArray(raw)) {
+        raw.forEach((ans, idx) => {
+          if (typeof ans === 'number' || (typeof ans === 'string' && !isNaN(parseInt(ans, 10)))) {
+            normalized[idx] = Number(ans);
+            hasAnyAnswers = true;
+          }
+        });
+      } else if (raw && typeof raw === 'object') {
+        Object.entries(raw).forEach(([k, v]) => {
+          let idx = parseInt(k, 10);
+          if (isNaN(idx) && String(k).startsWith('q')) {
+            idx = parseInt(String(k).replace('q', ''), 10) - 1;
+          }
+          if (!isNaN(idx) && (typeof v === 'number' || (typeof v === 'string' && !isNaN(parseInt(v, 10))))) {
+            normalized[idx] = Number(v);
+            hasAnyAnswers = true;
+          }
+        });
+      }
+
+      // If answers could not be restored and student score was 100%, fallback to correctIndex
+      if (!hasAnyAnswers && (quiz?.reviewScore === 100 || quiz?.reviewStatus === 'Passed')) {
+        (quiz?.questions || []).forEach((q, idx) => {
+          if (normalized[idx] === undefined) {
+            normalized[idx] = q.correctIndex;
+          }
+        });
+      }
+      return normalized;
+    }
+    return initialAttempt?.selectedAnswers ?? {};
+  };
+
   const [currentIndex, setCurrentIndex] = useState(() => initialAttempt?.currentIndex ?? 0);
-  const [selectedAnswers, setSelectedAnswers] = useState(() => initialAttempt?.selectedAnswers ?? {});
+  const [selectedAnswers, setSelectedAnswers] = useState(() => getInitialSelectedAnswers());
   const [timeLeft, setTimeLeft] = useState(() => {
     if (initialAttempt && typeof initialAttempt.timeLeft === 'number') {
       return initialAttempt.timeLeft;
@@ -66,10 +114,10 @@ export const QuizModal = ({
   });
 
   // Phases: 'test' -> 'feedback' (compulsory) -> 'results'
-  const [quizPhase, setQuizPhase] = useState('test');
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [quizPhase, setQuizPhase] = useState(() => (isReviewMode ? 'results' : 'test'));
+  const [isSubmitted, setIsSubmitted] = useState(() => isReviewMode);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showReview, setShowReview] = useState(false);
+  const [showReview, setShowReview] = useState(() => isReviewMode);
   const [submittedFeedback, setSubmittedFeedback] = useState(null);
 
   // Prevention of duplicate submissions
@@ -306,10 +354,15 @@ export const QuizModal = ({
     }));
   };
 
-  const correctCount = quiz.questions.reduce((acc, q, idx) => {
+  const calculatedCorrect = quiz.questions.reduce((acc, q, idx) => {
     return selectedAnswers[idx] === q.correctIndex ? acc + 1 : acc;
   }, 0);
-  const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
+  const correctCount = (isReviewMode && typeof quiz?.reviewCorrectCount === 'number' && calculatedCorrect === 0)
+    ? quiz.reviewCorrectCount
+    : calculatedCorrect;
+  const scorePercentage = isReviewMode && typeof quiz?.reviewScore === 'number'
+    ? Math.round(quiz.reviewScore)
+    : Math.round((correctCount / totalQuestions) * 100);
 
   const handleFinishAndSave = () => {
     localStorage.removeItem(STORAGE_KEY);
@@ -491,7 +544,9 @@ export const QuizModal = ({
               </div>
 
               <h3 className="results-heading">
-                {scorePercentage >= 80
+                {isReviewMode
+                  ? 'Quiz Review: Answers & Solutions 📖'
+                  : scorePercentage >= 80
                   ? 'Fantastic Performance! 🎉'
                   : scorePercentage >= 60
                   ? 'Great Effort! 👍'
@@ -499,7 +554,11 @@ export const QuizModal = ({
               </h3>
 
               <p className="results-subtext">
-                You have completed <strong>{quiz.title}</strong>.
+                {isReviewMode ? (
+                  <>Showing verified answers and explanations for your completed assessment: <strong>{quiz.title}</strong>.</>
+                ) : (
+                  <>You have completed <strong>{quiz.title}</strong>.</>
+                )}
               </p>
 
               <div className="results-score-display">
@@ -520,10 +579,10 @@ export const QuizModal = ({
                   <span className="stat-label">Incorrect</span>
                   <span className="stat-num">{totalQuestions - correctCount}</span>
                 </div>
-                <div className="results-stat-box stat-blue">
+                <div className={`results-stat-box ${scorePercentage >= 70 ? 'stat-green' : 'stat-red'}`}>
                   <span className="stat-label">Status</span>
                   <span className="stat-num">
-                    {scorePercentage >= 70 ? 'Passed' : 'Needs Review'}
+                    {scorePercentage >= 70 ? 'Passed' : 'Failed'}
                   </span>
                 </div>
               </div>
@@ -648,10 +707,10 @@ export const QuizModal = ({
               <button
                 type="button"
                 className="quiz-action-btn btn-finish"
-                onClick={handleFinishAndSave}
+                onClick={isReviewMode ? onClose : handleFinishAndSave}
                 id="finish-quiz-btn"
               >
-                <span>Finish & Return to Dashboard</span>
+                <span>{isReviewMode ? 'Close Review' : 'Finish & Return to Dashboard'}</span>
                 <ArrowRightIcon size={16} />
               </button>
             </div>

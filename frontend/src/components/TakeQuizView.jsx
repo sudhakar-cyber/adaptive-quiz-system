@@ -15,6 +15,7 @@ import { sharedDatabase } from '../services/sharedDatabase';
 export const TakeQuizView = ({
   quizzes: passedQuizzes,
   onStartQuiz,
+  onReviewQuiz,
   externalSearch = '',
   completedQuizIds = [],
   isRecommendedView = false
@@ -339,10 +340,18 @@ export const TakeQuizView = ({
                 <button
                   type="button"
                   className={`start-quiz-full-btn ${isQuizCompleted(quiz) ? 'completed-btn' : ''}`}
-                  onClick={() => onStartQuiz(quiz)}
-                  title={isQuizCompleted(quiz) ? 'Quiz already completed' : `Start ${quiz.title}`}
+                  onClick={() => {
+                    if (isQuizCompleted(quiz)) {
+                      if (onReviewQuiz) onReviewQuiz(quiz);
+                      else onStartQuiz(quiz);
+                    } else {
+                      onStartQuiz(quiz);
+                    }
+                  }}
+                  title={isQuizCompleted(quiz) ? 'Click to review quiz answers' : `Start ${quiz.title}`}
+                  style={isQuizCompleted(quiz) ? { cursor: 'pointer' } : {}}
                 >
-                  <span>{isQuizCompleted(quiz) ? 'Completed ✓' : 'Take Quiz Now'}</span>
+                  <span>{isQuizCompleted(quiz) ? 'Completed ✓ (Review Answers)' : 'Take Quiz Now'}</span>
                   <span>{isQuizCompleted(quiz) ? '' : '→'}</span>
                 </button>
               </div>

@@ -20,6 +20,29 @@ const STORAGE_KEY_EDUCATORS = 'learnsmart_shared_educators';
 const STORAGE_KEY_QUIZZES = 'learnsmart_educator_quizzes';
 const STORAGE_KEY_SUBMISSIONS = 'learnsmart_shared_submissions';
 const STORAGE_KEY_NOTIFICATIONS = 'learnsmart_notifications_cache';
+const STORAGE_KEY_DELETED_NOTIFICATIONS = 'learnsmart_deleted_notifications';
+
+export const getDeletedNotificationIds = () => {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY_DELETED_NOTIFICATIONS) : null;
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+};
+
+export const recordDeletedNotificationId = (id) => {
+  if (!id) return;
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const set = getDeletedNotificationIds();
+    set.add(String(id));
+    localStorage.setItem(STORAGE_KEY_DELETED_NOTIFICATIONS, JSON.stringify(Array.from(set)));
+  } catch (err) {
+    console.warn('Failed to record deleted notification id:', err);
+  }
+};
 const STORAGE_KEY_ANALYTICS = 'learnsmart_analytics_cache';
 const STORAGE_KEY_BENCHMARK = 'learnsmart_student_benchmark_cache';
 
@@ -116,6 +139,8 @@ export const syncSubmissionsFromBackend = async (force = false) => {
           totalQuestions: s.totalQuestions || s.total_questions || 0,
           correctCount: s.correctCount || s.correct_count || 0,
           status: s.status || (Number(s.scoreValue || 0) >= 70 ? 'Passed' : 'Failed'),
+          answers: s.answers || s.answers_json || s.selectedAnswers,
+          answers_json: s.answers_json || s.answers || s.selectedAnswers,
           date: s.date ? (typeof s.date === 'string' && s.date.includes('T') ? new Date(s.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : s.date) : 'Today',
           submittedAt: s.submittedAt || s.submitted_at || ''
         }));
@@ -213,7 +238,25 @@ export const syncStudentsFromBackend = async (force = false) => {
         });
 
         const formatted = backendStudents
-          .filter((bs) => bs && bs.email)
+          .filter((bs) => {
+            if (!bs || !bs.email) return false;
+            const k = (bs.uid || bs.email || bs.id || bs.name || '').toLowerCase();
+            if (
+              k.includes('stud-dev') ||
+              k.includes('demo') ||
+              k.includes('student@learnsmart.edu') ||
+              k.includes('student@learnsmart.com') ||
+              k.includes('aarav') ||
+              k.includes('ananya') ||
+              k.includes('kavya') ||
+              k.includes('priya') ||
+              k.includes('rohan') ||
+              k.includes('alex morgan') ||
+              k.includes('student user') ||
+              (k.includes('@learnsmart.edu') && !k.includes('admin'))
+            ) return false;
+            return true;
+          })
           .map((bs) => {
             const emailKey = bs.email?.toLowerCase();
             const idKey = String(bs.id || bs.uid || '').toLowerCase();
@@ -400,7 +443,8 @@ export const getCachedNotifications = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_NOTIFICATIONS);
     const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list : [];
+    const deletedIds = getDeletedNotificationIds();
+    return (Array.isArray(list) ? list : []).filter((n) => n?.id && !deletedIds.has(String(n.id)));
   } catch {
     return [];
   }
@@ -423,7 +467,10 @@ const persistNotifications = (notifications) => {
 export const syncNotificationsFromBackend = async (force = false) => {
   try {
     const data = await apiGet('/api/notifications?limit=100');
-    const notifications = Array.isArray(data?.notifications) ? data.notifications.map(mapServerNotification) : [];
+    const deletedIds = getDeletedNotificationIds();
+    const notifications = (Array.isArray(data?.notifications) ? data.notifications : [])
+      .filter((n) => n?.id && !deletedIds.has(String(n.id)))
+      .map(mapServerNotification);
     persistNotifications(notifications);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: notifications }));
@@ -475,18 +522,40 @@ export const markAllNotificationsRead = async () => {
 /** Deletes one notification (server side) and updates the cache. */
 export const deleteNotification = async (notificationId) => {
   if (!notificationId) return getCachedNotifications();
+  recordDeletedNotificationId(notificationId);
   try {
     await apiDelete(`/api/notifications/${encodeURIComponent(notificationId)}`);
   } catch (err) {
     console.warn('Backend delete notification notice:', err.message);
   }
-  const updated = getCachedNotifications().filter((n) => n.id !== notificationId);
+  const updated = getCachedNotifications().filter((n) => String(n.id) !== String(notificationId));
   persistNotifications(updated);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: updated }));
+    window.dispatchEvent(new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: updated }));
     window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: updated }));
   }
   return updated;
+};
+
+/** Clears every notification for the signed-in account in MySQL and updates cache. */
+export const clearAllNotifications = async () => {
+  try {
+    await apiDelete('/api/notifications/clear-all');
+  } catch (err) {
+    console.warn('Backend clear all notifications notice:', err.message);
+  }
+  const current = getCachedNotifications();
+  for (const item of current) {
+    if (item && item.id) recordDeletedNotificationId(item.id);
+  }
+  persistNotifications([]);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: [] }));
+    window.dispatchEvent(new CustomEvent(EVENT_STUDENT_NOTIFICATIONS_UPDATED, { detail: [] }));
+    window.dispatchEvent(new CustomEvent(EVENT_EDUCATOR_NOTIFICATIONS_UPDATED, { detail: [] }));
+  }
+  return [];
 };
 
 /** Sends a notification through MySQL to the given audience. */
@@ -676,7 +745,20 @@ const loadStoredStudents = () => {
         return parsed.filter((s) => {
           if (!s) return false;
           const k = (s.uid || s.email || s.id || s.name || '').toLowerCase();
-          if (k.includes('stud-dev') || k.includes('demo') || k.includes('student@learnsmart.edu') || k.includes('alex morgan')) return false;
+          if (
+            k.includes('stud-dev') ||
+            k.includes('demo') ||
+            k.includes('student@learnsmart.edu') ||
+            k.includes('student@learnsmart.com') ||
+            k.includes('aarav') ||
+            k.includes('ananya') ||
+            k.includes('kavya') ||
+            k.includes('priya') ||
+            k.includes('rohan') ||
+            k.includes('alex morgan') ||
+            k.includes('student user') ||
+            (k.includes('@learnsmart.edu') && !k.includes('admin'))
+          ) return false;
           return true;
         });
       }
@@ -1315,6 +1397,9 @@ export const sharedDatabase = {
   markNotificationRead: (id) => markNotificationRead(id),
   markAllNotificationsRead: () => markAllNotificationsRead(),
   deleteNotification: (id) => deleteNotification(id),
+  clearAllNotifications: () => clearAllNotifications(),
+  clearStudentNotifications: () => clearAllNotifications(),
+  deleteStudentNotification: (id) => deleteNotification(id),
   sendNotification: (payload) => sendNotification(payload),
 
   syncStudentsFromFirestore: (force = false) => {
@@ -3143,6 +3228,16 @@ export const sharedDatabase = {
     const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
     if (targetId) await deleteNotification(targetId);
     return getCachedNotifications();
+  },
+
+  deleteStudentNotification: async (idOrNotif) => {
+    const targetId = typeof idOrNotif === 'object' && idOrNotif !== null ? idOrNotif.id : idOrNotif;
+    if (targetId) await deleteNotification(targetId);
+    return getCachedNotifications();
+  },
+
+  clearAllStudentNotifications: async () => {
+    return clearAllNotifications();
   },
 
   clearAllEducatorNotifications: async () => {
