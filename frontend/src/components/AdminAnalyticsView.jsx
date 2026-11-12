@@ -8,7 +8,8 @@ import {
   ActivityIcon,
   CheckCircleIcon
 } from './Icons';
-import sharedDatabase, { getAuthToken } from '../services/sharedDatabase';
+import sharedDatabase from '../services/sharedDatabase';
+import { apiGet } from '../services/apiClient';
 
 export const AdminAnalyticsView = ({
   students = [],
@@ -20,27 +21,27 @@ export const AdminAnalyticsView = ({
   const [liveDbAnalytics, setLiveDbAnalytics] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Sync real-time analytics directly from MySQL/SQLite database API
+  // Sync real-time analytics directly from MySQL backend API with authentic auth headers
   useEffect(() => {
     let isMounted = true;
 
     const fetchDatabaseAnalytics = async () => {
       try {
         setIsLoading(true);
-        const token = typeof getAuthToken === 'function' ? await getAuthToken() : 'admin-session-token';
-        const res = await fetch('/api/results/analytics', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted && data && data.kpis) {
-            setLiveDbAnalytics(data);
-          }
+        // apiGet automatically attaches session token, UID, and role headers
+        const data = await apiGet('/api/analytics');
+        if (isMounted && data && data.kpis) {
+          setLiveDbAnalytics(data);
         }
       } catch (err) {
-        // Fallback to local data layer if offline
+        try {
+          const fallbackData = await apiGet('/api/results/analytics');
+          if (isMounted && fallbackData && fallbackData.kpis) {
+            setLiveDbAnalytics(fallbackData);
+          }
+        } catch {
+          // Fallback to local data layer
+        }
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -49,12 +50,14 @@ export const AdminAnalyticsView = ({
     fetchDatabaseAnalytics();
 
     const handleUpdate = () => fetchDatabaseAnalytics();
+    window.addEventListener('learnsmart_analytics_updated', handleUpdate);
     window.addEventListener('learnsmart_submissions_updated', handleUpdate);
     window.addEventListener('learnsmart_quizzes_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
 
     return () => {
       isMounted = false;
+      window.removeEventListener('learnsmart_analytics_updated', handleUpdate);
       window.removeEventListener('learnsmart_submissions_updated', handleUpdate);
       window.removeEventListener('learnsmart_quizzes_updated', handleUpdate);
       window.removeEventListener('storage', handleUpdate);
@@ -71,9 +74,16 @@ export const AdminAnalyticsView = ({
     if (liveDbAnalytics?.kpis?.avgScore) {
       return liveDbAnalytics.kpis.avgScore;
     }
+    if (stats?.avgScore && stats.avgScore !== '0%') {
+      return stats.avgScore;
+    }
     if (safeSubmissions.length > 0) {
       const sum = safeSubmissions.reduce((acc, sub) => {
-        const sc = typeof sub.score === 'number' ? sub.score : parseFloat(String(sub.score).replace('%', '')) || 0;
+        const sc = typeof sub.scoreValue === 'number'
+          ? sub.scoreValue
+          : typeof sub.score === 'number'
+          ? sub.score
+          : parseFloat(String(sub.score || '0').replace('%', '')) || 0;
         return acc + sc;
       }, 0);
       return `${Math.round((sum / safeSubmissions.length) * 10) / 10}%`;
@@ -83,28 +93,38 @@ export const AdminAnalyticsView = ({
       const sum = withScores.reduce((acc, s) => acc + s.avgScore, 0);
       return `${Math.round((sum / withScores.length) * 10) / 10}%`;
     }
-    return stats.avgScore || '0%';
-  }, [liveDbAnalytics, safeSubmissions, safeStudents, stats.avgScore]);
+    return stats?.avgScore || '0%';
+  }, [liveDbAnalytics, safeSubmissions, safeStudents, stats]);
 
   // 2. Exact Quiz Pass Rate (Benchmark >= 70%)
   const quizPassRate = useMemo(() => {
     if (liveDbAnalytics?.kpis?.passRate) {
       return liveDbAnalytics.kpis.passRate;
     }
+    if (stats?.passRate && stats.passRate !== '0%') {
+      return stats.passRate;
+    }
     if (safeSubmissions.length > 0) {
       const passed = safeSubmissions.filter((sub) => {
-        const sc = typeof sub.score === 'number' ? sub.score : parseFloat(String(sub.score).replace('%', '')) || 0;
+        const sc = typeof sub.scoreValue === 'number'
+          ? sub.scoreValue
+          : typeof sub.score === 'number'
+          ? sub.score
+          : parseFloat(String(sub.score || '0').replace('%', '')) || 0;
         return sc >= 70;
       }).length;
       return `${Math.round((passed / safeSubmissions.length) * 100)}%`;
     }
-    return stats.passRate || '0%';
-  }, [liveDbAnalytics, safeSubmissions, stats.passRate]);
+    return stats?.passRate || '0%';
+  }, [liveDbAnalytics, safeSubmissions, stats]);
 
   // 3. Exact Platform Completion Rate
   const completionRate = useMemo(() => {
     if (liveDbAnalytics?.kpis?.completionRate) {
       return liveDbAnalytics.kpis.completionRate;
+    }
+    if (stats?.completionRate && stats.completionRate !== '0%') {
+      return stats.completionRate;
     }
     if (safeSubmissions.length === 0) return '0%';
     const activeQuizzesCount = safeQuizzes.filter((q) => {
@@ -113,18 +133,28 @@ export const AdminAnalyticsView = ({
     }).length;
     const targetQuizzes = Math.max(1, activeQuizzesCount);
     const targetStudents = Math.max(1, safeStudents.length);
-    const completedCount = safeSubmissions.filter((s) => (s.status || '').toLowerCase() === 'completed').length;
+    // Distinct student-quiz completed pairs from authentic database attempts
+    const completedPairs = new Set();
+    safeSubmissions.forEach((s) => {
+      const st = s.studentEmail || s.studentId || s.student;
+      const q = s.quizId || s.quizTitle || s.id;
+      if (st && q) completedPairs.add(`${st}_${q}`);
+    });
+    const completedCount = completedPairs.size > 0 ? completedPairs.size : safeSubmissions.length;
     const pct = Math.min(100, Math.round((completedCount / (targetStudents * targetQuizzes)) * 100));
     return `${pct}%`;
-  }, [liveDbAnalytics, safeSubmissions, safeQuizzes, safeStudents]);
+  }, [liveDbAnalytics, safeSubmissions, safeQuizzes, safeStudents, stats]);
 
   // 4. Exact Total Quiz Submissions Count
   const totalSubmissions = useMemo(() => {
     if (liveDbAnalytics?.kpis?.totalSubmissions !== undefined) {
       return liveDbAnalytics.kpis.totalSubmissions;
     }
+    if (stats?.totalSubmissions !== undefined && stats.totalSubmissions > 0) {
+      return stats.totalSubmissions;
+    }
     return safeSubmissions.length;
-  }, [liveDbAnalytics, safeSubmissions]);
+  }, [liveDbAnalytics, safeSubmissions, stats]);
 
   // 5. Highest Performing Students (From database or stored student accounts)
   const topStudents = useMemo(() => {
@@ -168,48 +198,6 @@ export const AdminAnalyticsView = ({
         </div>
       </div>
 
-      {/* Top 4 Performance KPIs - Computed Authentically from Database Attempts */}
-      <div className="admin-stats-grid">
-        <div className="admin-stat-card stat-blue">
-          <div className="stat-icon-box">
-            <TrophyIcon size={24} color="#3B82F6" />
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Platform Avg Score</span>
-            <span className="stat-value">{platformAvgScore}</span>
-          </div>
-        </div>
-
-        <div className="admin-stat-card stat-green">
-          <div className="stat-icon-box">
-            <CheckCircleIcon size={24} color="#10B981" />
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Quiz Pass Rate</span>
-            <span className="stat-value">{quizPassRate}</span>
-          </div>
-        </div>
-
-        <div className="admin-stat-card stat-orange">
-          <div className="stat-icon-box">
-            <FlameIcon size={24} color="#F97316" />
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Completion Rate</span>
-            <span className="stat-value">{completionRate}</span>
-          </div>
-        </div>
-
-        <div className="admin-stat-card stat-purple">
-          <div className="stat-icon-box">
-            <ActivityIcon size={24} color="#8B5CF6" />
-          </div>
-          <div className="stat-content">
-            <span className="stat-label">Quiz Submissions</span>
-            <span className="stat-value">{totalSubmissions}</span>
-          </div>
-        </div>
-      </div>
 
       {/* Two Columns: Top Performers vs Students Needing Intervention */}
       <div className="admin-charts-grid" style={{ marginBottom: '24px' }}>

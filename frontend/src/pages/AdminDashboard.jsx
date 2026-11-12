@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import AdminHeader from '../components/admin/AdminHeader';
 import AdminSidebar from '../components/admin/AdminSidebar';
 import StatCard from '../components/admin/StatCard';
@@ -6,6 +6,12 @@ import UserGrowthChart from '../components/admin/UserGrowthChart';
 import QuizCategoryChart from '../components/admin/QuizCategoryChart';
 import RecentUsers from '../components/admin/RecentUsers';
 import QuickActions from '../components/admin/QuickActions';
+import {
+  TrophyIcon,
+  CheckCircleIcon,
+  FlameIcon,
+  ActivityIcon
+} from '../components/Icons';
 
 import { AdminUserManagementView } from '../components/AdminUserManagementView';
 import { AdminQuizManagementView } from '../components/AdminQuizManagementView';
@@ -254,16 +260,23 @@ export const AdminDashboard = ({ onLogout }) => {
         if (res.ok) {
           const data = await res.json();
           if (data && data.name) {
-            setAdminProfile((prev) => ({
-              ...prev,
-              fullName: data.name || prev.fullName,
-              email: data.email || prev.email,
-              phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
-              department: data.department || prev.department,
-              title: data.title || prev.title,
-              bio: data.bio || prev.bio,
-              avatarImage: data.avatar_url || prev.avatarImage
-            }));
+            setAdminProfile((prev) => {
+              const synced = {
+                ...prev,
+                fullName: data.name || prev.fullName,
+                name: data.name || prev.name,
+                email: data.email || prev.email,
+                phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
+                department: data.department || prev.department,
+                title: data.title || prev.title,
+                bio: data.bio || prev.bio,
+                avatarImage: data.avatar_url || prev.avatarImage
+              };
+              try {
+                localStorage.setItem('learnsmart_admin_profile', JSON.stringify(synced));
+              } catch {}
+              return synced;
+            });
           }
         }
       } catch (err) {
@@ -292,14 +305,22 @@ export const AdminDashboard = ({ onLogout }) => {
     };
   }, []);
 
-  const handleToggleUserStatus = (userId, role) => {
-    sharedDatabase.toggleUserStatus(userId, role);
+  const handleToggleUserStatus = async (userId, role) => {
+    if (typeof sharedDatabase.toggleUserStatusAsync === 'function') {
+      await sharedDatabase.toggleUserStatusAsync(userId, role);
+    } else {
+      sharedDatabase.toggleUserStatus(userId, role);
+    }
     refreshData();
     showToast('User account status updated.');
   };
 
-  const handleDeleteUser = (userId, role) => {
-    sharedDatabase.deleteUser(userId, role);
+  const handleDeleteUser = async (userId, role) => {
+    if (typeof sharedDatabase.deleteUserAsync === 'function') {
+      await sharedDatabase.deleteUserAsync(userId, role);
+    } else {
+      sharedDatabase.deleteUser(userId, role);
+    }
     refreshData();
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
@@ -395,6 +416,62 @@ export const AdminDashboard = ({ onLogout }) => {
     setNotifications(updated);
     showToast('All notifications cleared successfully');
   };
+
+  // Platform Performance KPIs synchronized with MySQL database
+  const platformAvgScore = useMemo(() => {
+    if (stats.avgScore && stats.avgScore !== '0%') return stats.avgScore;
+    if (submissions.length > 0) {
+      const sum = submissions.reduce((acc, s) => {
+        const val = typeof s.scoreValue === 'number'
+          ? s.scoreValue
+          : typeof s.score === 'number'
+          ? s.score
+          : parseFloat(String(s.score || '0').replace('%', '')) || 0;
+        return acc + val;
+      }, 0);
+      return `${Math.round((sum / submissions.length) * 10) / 10}%`;
+    }
+    return '0%';
+  }, [stats.avgScore, submissions]);
+
+  const quizPassRate = useMemo(() => {
+    if (stats.passRate && stats.passRate !== '0%') return stats.passRate;
+    if (submissions.length > 0) {
+      const passed = submissions.filter((s) => {
+        const val = typeof s.scoreValue === 'number'
+          ? s.scoreValue
+          : typeof s.score === 'number'
+          ? s.score
+          : parseFloat(String(s.score || '0').replace('%', '')) || 0;
+        return val >= 70;
+      }).length;
+      return `${Math.round((passed / submissions.length) * 100)}%`;
+    }
+    return '0%';
+  }, [stats.passRate, submissions]);
+
+  const completionRate = useMemo(() => {
+    if (stats.completionRate && stats.completionRate !== '0%') return stats.completionRate;
+    if (submissions.length === 0) return '0%';
+    const activeQuizzesCount = Math.max(1, quizzes.filter((q) => (q.status || '').toLowerCase() !== 'draft').length);
+    const targetStudents = Math.max(1, students.length);
+    const completedPairs = new Set();
+    submissions.forEach((s) => {
+      const st = s.studentEmail || s.studentId || s.student;
+      const q = s.quizId || s.quizTitle || s.id;
+      if (st && q) completedPairs.add(`${st}_${q}`);
+    });
+    const completedCount = completedPairs.size > 0 ? completedPairs.size : submissions.length;
+    const pct = Math.min(100, Math.round((completedCount / (targetStudents * activeQuizzesCount)) * 100));
+    return `${pct}%`;
+  }, [stats.completionRate, submissions, quizzes, students]);
+
+  const totalSubmissions = useMemo(() => {
+    if (stats.totalSubmissions !== undefined && stats.totalSubmissions !== null && stats.totalSubmissions > 0) {
+      return stats.totalSubmissions;
+    }
+    return submissions.length;
+  }, [stats.totalSubmissions, submissions]);
 
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
   const activeQuizzesCount = quizzes.filter((q) => q.status === 'Active' || !q.status).length;
@@ -560,6 +637,69 @@ export const AdminDashboard = ({ onLogout }) => {
                 ))}
               </div>
 
+              {/* Platform Performance & Quality KPIs */}
+              <div className="admin-stats-grid" style={{ marginBottom: '24px' }}>
+                <div
+                  className="admin-stat-card stat-blue"
+                  onClick={() => setActiveTab('analytics')}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to view detailed platform analytics"
+                >
+                  <div className="stat-icon-box">
+                    <TrophyIcon size={24} color="#3B82F6" />
+                  </div>
+                  <div className="stat-content">
+                    <span className="stat-label">Platform Avg Score</span>
+                    <span className="stat-value">{platformAvgScore}</span>
+                  </div>
+                </div>
+
+                <div
+                  className="admin-stat-card stat-green"
+                  onClick={() => setActiveTab('analytics')}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to view quiz pass rate details"
+                >
+                  <div className="stat-icon-box">
+                    <CheckCircleIcon size={24} color="#10B981" />
+                  </div>
+                  <div className="stat-content">
+                    <span className="stat-label">Quiz Pass Rate</span>
+                    <span className="stat-value">{quizPassRate}</span>
+                  </div>
+                </div>
+
+                <div
+                  className="admin-stat-card stat-orange"
+                  onClick={() => setActiveTab('analytics')}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to view completion rate breakdown"
+                >
+                  <div className="stat-icon-box">
+                    <FlameIcon size={24} color="#F97316" />
+                  </div>
+                  <div className="stat-content">
+                    <span className="stat-label">Completion Rate</span>
+                    <span className="stat-value">{completionRate}</span>
+                  </div>
+                </div>
+
+                <div
+                  className="admin-stat-card stat-purple"
+                  onClick={() => setActiveTab('analytics')}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to view quiz submissions"
+                >
+                  <div className="stat-icon-box">
+                    <ActivityIcon size={24} color="#8B5CF6" />
+                  </div>
+                  <div className="stat-content">
+                    <span className="stat-label">Quiz Submissions</span>
+                    <span className="stat-value">{totalSubmissions}</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Charts Row */}
               <div className="ad-charts-row">
                 <div className="ad-chart-card ad-growth-card">
@@ -659,6 +799,7 @@ export const AdminDashboard = ({ onLogout }) => {
               onToggleStatus={handleToggleUserStatus}
               onDeleteUser={handleDeleteUser}
               onOpenAddUser={() => setIsAddUserModalOpen(true)}
+              onUserUpdated={refreshData}
             />
           )}
 

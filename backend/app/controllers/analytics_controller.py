@@ -302,28 +302,22 @@ def compute_growth(current_user: Dict[str, Any], timeframe: str = "6 Months") ->
     Returns [{ label, count }] where count is the cumulative user total.
     """
     from datetime import datetime, timedelta
+    import calendar
 
     with get_connection() as conn:
-        students = _fetch_students(conn, current_user)
-        educators = _fetch_educators(conn, current_user)
-        people = students + educators
+        role = (current_user.get("role") or "student").lower() if current_user else "student"
+        if role == "admin":
+            cur = conn.execute("SELECT * FROM users WHERE is_active = 1")
+            people = [dict(r) for r in cur.fetchall()]
+        elif role == "educator":
+            students = _fetch_students(conn, current_user)
+            educators = _fetch_educators(conn, current_user)
+            people = students + educators
+        else:
+            people = []
 
         now = datetime.now()
-        if timeframe == "7 Days":
-            buckets = [(now - timedelta(days=6 - i)).strftime("%a") for i in range(7)]
-            span_start = now - timedelta(days=7)
-        elif timeframe == "30 Days":
-            buckets = [f"Week {i + 1}" for i in range(4)]
-            span_start = now - timedelta(days=30)
-        elif timeframe == "3 Months":
-            buckets = [f"Month {i + 1}" for i in range(3)]
-            span_start = now - timedelta(days=90)
-        elif timeframe == "1 Year":
-            buckets = [f"Q{i + 1}" for i in range(4)]
-            span_start = now - timedelta(days=365)
-        else:
-            buckets = [(now - timedelta(days=150 - (i * 30))).strftime("%b") for i in range(6)]
-            span_start = now - timedelta(days=180)
+        tf = (timeframe or "6M").strip().upper()
 
         def created_at(user: Dict[str, Any]):
             value = user.get("created_at")
@@ -331,39 +325,53 @@ def compute_growth(current_user: Dict[str, Any], timeframe: str = "6 Months") ->
                 return value
             if isinstance(value, str):
                 try:
-                    return datetime.fromisoformat(value)
-                except ValueError:
+                    return datetime.fromisoformat(value.replace("Z", ""))
+                except Exception:
                     return None
             return None
 
         points = []
-        if timeframe == "7 Days":
-            for index, label in enumerate(buckets):
-                day = now - timedelta(days=6 - index)
-                count = sum(
-                    1
-                    for u in people
-                    if created_at(u) and created_at(u).date() == day.date()
-                )
+        if tf in ("7D", "7 DAYS", "7DAYS"):
+            for i in range(6, -1, -1):
+                cutoff = (now - timedelta(days=i)).replace(hour=23, minute=59, second=59)
+                if i == 0:
+                    cutoff = now
+                label = cutoff.strftime("%a")
+                count = sum(1 for u in people if not created_at(u) or created_at(u) <= cutoff)
+                points.append({"label": label, "count": count})
+        elif tf in ("30D", "30 DAYS", "30DAYS"):
+            for i in range(3, -1, -1):
+                cutoff = (now - timedelta(days=i * 7)).replace(hour=23, minute=59, second=59)
+                if i == 0:
+                    cutoff = now
+                label = f"Wk {4 - i}"
+                count = sum(1 for u in people if not created_at(u) or created_at(u) <= cutoff)
+                points.append({"label": label, "count": count})
+        elif tf in ("1Y", "1 YEAR", "1YEAR"):
+            for i in range(3, -1, -1):
+                cutoff = (now - timedelta(days=i * 90)).replace(hour=23, minute=59, second=59)
+                if i == 0:
+                    cutoff = now
+                label = f"Q{4 - i}"
+                count = sum(1 for u in people if not created_at(u) or created_at(u) <= cutoff)
                 points.append({"label": label, "count": count})
         else:
-            total = 0
-            per_bucket = max(1, len(buckets))
-            width = 30 if timeframe in ("30 Days", "3 Months", "6 Months") else 90
-            for index, label in enumerate(buckets):
-                bucket_end = span_start + timedelta(days=width * (index + 1))
-                added = sum(
-                    1
-                    for u in people
-                    if created_at(u) and span_start <= created_at(u) < bucket_end
-                )
-                total += added
-                points.append({"label": label, "count": total})
+            # 6 Months default
+            for i in range(5, -1, -1):
+                m = now.month - i
+                y = now.year
+                while m <= 0:
+                    m += 12
+                    y -= 1
+                _, last_day = calendar.monthrange(y, m)
+                cutoff = datetime(y, m, last_day, 23, 59, 59)
+                if i == 0:
+                    cutoff = now
+                label = datetime(y, m, 1).strftime("%b")
+                count = sum(1 for u in people if not created_at(u) or created_at(u) <= cutoff)
+                points.append({"label": label, "count": count})
 
-        if not points:
-            points = [{"label": label, "count": 0} for label in buckets]
         return points
-
 
 def compute_analytics(current_user: Dict[str, Any], timeframe: str = "Last 30 Days") -> Dict[str, Any]:
     """

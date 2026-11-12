@@ -186,12 +186,18 @@ export const ProfileView = ({
               ...prev,
               fullName: (data.name && data.name.trim() && data.name !== 'Student') ? data.name.trim() : prev.fullName,
               email: (data.email && data.email.trim()) ? data.email.trim() : prev.email,
+              phone: data.phone !== undefined && data.phone !== null ? data.phone : prev.phone,
+              major: data.department || data.topSubject || prev.major,
+              bio: data.bio !== undefined && data.bio !== null ? data.bio : prev.bio,
               studentId: freshStudentId || prev.studentId
             }));
             try {
               const current = JSON.parse(localStorage.getItem('learnsmart_student_profile') || '{}');
               if (data.name) current.fullName = data.name;
               if (data.email) current.email = data.email;
+              if (data.phone !== undefined) current.phone = data.phone;
+              if (data.department) current.major = data.department;
+              if (data.bio !== undefined) current.bio = data.bio;
               if (freshStudentId) current.studentId = freshStudentId;
               localStorage.setItem('learnsmart_student_profile', JSON.stringify(current));
             } catch {}

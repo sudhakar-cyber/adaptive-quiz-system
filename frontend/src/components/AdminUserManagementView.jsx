@@ -27,6 +27,50 @@ export const AdminUserManagementView = ({
   const [attendanceFilter, setAttendanceFilter] = useState('all');
   const [sortBy, setSortBy] = useState('joined');
   const [selectedUser, setSelectedUser] = useState(null); // For details modal
+  const [isEditingUser, setIsEditingUser] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDepartment, setEditDepartment] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [isSavingUser, setIsSavingUser] = useState(false);
+
+  const handleStartEdit = (u) => {
+    setEditName(u.name || '');
+    setEditDepartment(u.department || u.raw?.department || u.raw?.top_subject || u.raw?.topSubject || 'Computer Science');
+    setEditPhone(u.raw?.phone || u.phone || '');
+    setIsEditingUser(true);
+  };
+
+  const handleSaveUser = async () => {
+    if (!selectedUser || !editName.trim()) return;
+    setIsSavingUser(true);
+    try {
+      const r = (selectedUser.role || '').toLowerCase();
+      const payload = {
+        name: editName.trim(),
+        department: editDepartment.trim(),
+        phone: editPhone.trim()
+      };
+      if (r === 'student') {
+        sharedDatabase.updateStudent(selectedUser.id, payload);
+      } else if (r === 'educator') {
+        sharedDatabase.updateEducator(selectedUser.id, payload);
+      } else if (r === 'admin') {
+        sharedDatabase.updateAdmin(selectedUser.id, payload);
+      }
+      setSelectedUser((prev) => ({
+        ...prev,
+        name: editName.trim(),
+        department: editDepartment.trim(),
+        phone: editPhone.trim()
+      }));
+      setIsEditingUser(false);
+      if (onUserUpdated) onUserUpdated();
+    } catch (err) {
+      console.warn('Failed to update user:', err);
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
 
   const rawUsers = Array.isArray(users) && users.length > 0 ? users : (typeof sharedDatabase?.getUsers === 'function' ? sharedDatabase.getUsers() : []);
 
@@ -205,7 +249,10 @@ export const AdminUserManagementView = ({
                       <td>
                         <div
                           className="user-cell clickable"
-                          onClick={() => setSelectedUser(u)}
+                          onClick={() => {
+                            setSelectedUser(u);
+                            setIsEditingUser(false);
+                          }}
                           title="Click to view detailed profile"
                         >
                           <div className={`user-avatar-sm role-${u.role?.toLowerCase()}`}>
@@ -270,7 +317,10 @@ export const AdminUserManagementView = ({
                           <button
                             className="btn-icon-subtle"
                             title="View Profile & Analytics"
-                            onClick={() => setSelectedUser(u)}
+                            onClick={() => {
+                            setSelectedUser(u);
+                            setIsEditingUser(false);
+                          }}
                           >
                             <EditIcon size={16} color="#6366F1" />
                           </button>
@@ -333,31 +383,74 @@ export const AdminUserManagementView = ({
             </div>
 
             <div className="admin-modal-body">
-              {/* Common User Info */}
-              <div className="profile-detail-grid">
-                <div className="profile-field">
-                  <label>Email Address</label>
-                  <span>{selectedUser.email}</span>
+              {/* Edit Mode Form */}
+              {isEditingUser ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155' }}>Full Name *</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      style={{ padding: '8px 12px', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '0.9rem' }}
+                      placeholder="Enter full name"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155' }}>Department / Field</label>
+                    <input
+                      type="text"
+                      value={editDepartment}
+                      onChange={(e) => setEditDepartment(e.target.value)}
+                      style={{ padding: '8px 12px', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '0.9rem' }}
+                      placeholder="e.g. Computer Science"
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#334155' }}>Phone Number</label>
+                    <input
+                      type="text"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      style={{ padding: '8px 12px', border: '1px solid #CBD5E1', borderRadius: '6px', fontSize: '0.9rem' }}
+                      placeholder="e.g. +1 (555) 019-2834"
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: '#64748B', margin: 0 }}>
+                    Updates are committed directly to MySQL database and immediately synchronized across all views.
+                  </p>
                 </div>
-                <div className="profile-field">
-                  <label>{selectedUser.role === 'Educator' ? 'Educator ID' : 'Student ID'}</label>
-                  <span>{selectedUser.educatorId || selectedUser.studentId || 'LS-2025-ADMIN'}</span>
+              ) : (
+                /* Common User Info */
+                <div className="profile-detail-grid">
+                  <div className="profile-field">
+                    <label>Email Address</label>
+                    <span>{selectedUser.email}</span>
+                  </div>
+                  <div className="profile-field">
+                    <label>{selectedUser.role === 'Educator' ? 'Educator ID' : selectedUser.role === 'Admin' ? 'Admin ID' : 'Student ID'}</label>
+                    <span>{selectedUser.educatorId || selectedUser.studentId || selectedUser.id || 'LS-2025-ADMIN'}</span>
+                  </div>
+                  <div className="profile-field">
+                    <label>Department</label>
+                    <span>{selectedUser.department || selectedUser.raw?.department || 'Computer Science'}</span>
+                  </div>
+                  <div className="profile-field">
+                    <label>Account Status</label>
+                    <span className={`status-badge ${selectedUser.isActive !== false ? 'active' : 'inactive'}`}>
+                      {selectedUser.isActive !== false ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  <div className="profile-field">
+                    <label>Registration Date</label>
+                    <span>{selectedUser.joinedDate || '15 Aug 2025'}</span>
+                  </div>
+                  <div className="profile-field">
+                    <label>Last Active</label>
+                    <span>{selectedUser.lastActive || 'Today'}</span>
+                  </div>
                 </div>
-                <div className="profile-field">
-                  <label>Account Status</label>
-                  <span className={`status-badge ${selectedUser.isActive !== false ? 'active' : 'inactive'}`}>
-                    {selectedUser.isActive !== false ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-                <div className="profile-field">
-                  <label>Registration Date</label>
-                  <span>{selectedUser.joinedDate || '15 Aug 2025'}</span>
-                </div>
-                <div className="profile-field">
-                  <label>Last Active</label>
-                  <span>{selectedUser.lastActive || 'Today'}</span>
-                </div>
-              </div>
+              )}
 
               {/* Student Specific Analytics */}
               {selectedUser.role === 'Student' && (
@@ -432,22 +525,42 @@ export const AdminUserManagementView = ({
             </div>
 
             <div className="admin-modal-footer">
-              <button className="admin-secondary-btn" onClick={() => setSelectedUser(null)}>
-                Close
-              </button>
-              {selectedUser.role !== 'Admin' && (
-                <button
-                  className={`admin-status-action-btn ${selectedUser.isActive !== false ? 'btn-warn' : 'btn-success'}`}
-                  onClick={() => {
-                    onToggleStatus(selectedUser.id, selectedUser.role);
-                    setSelectedUser({
-                      ...selectedUser,
-                      isActive: selectedUser.isActive === false
-                    });
-                  }}
-                >
-                  {selectedUser.isActive !== false ? 'Deactivate Account' : 'Reactivate Account'}
-                </button>
+              {isEditingUser ? (
+                <>
+                  <button className="admin-secondary-btn" onClick={() => setIsEditingUser(false)} disabled={isSavingUser}>
+                    Cancel
+                  </button>
+                  <button className="admin-primary-btn" onClick={handleSaveUser} disabled={isSavingUser}>
+                    {isSavingUser ? 'Saving to Database...' : 'Save Changes'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="admin-secondary-btn"
+                    style={{ background: '#EEF2FF', color: '#4F46E5', borderColor: '#C7D2FE' }}
+                    onClick={() => handleStartEdit(selectedUser)}
+                  >
+                    Edit Details
+                  </button>
+                  <button className="admin-secondary-btn" onClick={() => setSelectedUser(null)}>
+                    Close
+                  </button>
+                  {selectedUser.role !== 'Admin' && (
+                    <button
+                      className={`admin-status-action-btn ${selectedUser.isActive !== false ? 'btn-warn' : 'btn-success'}`}
+                      onClick={() => {
+                        onToggleStatus(selectedUser.id, selectedUser.role);
+                        setSelectedUser({
+                          ...selectedUser,
+                          isActive: selectedUser.isActive === false
+                        });
+                      }}
+                    >
+                      {selectedUser.isActive !== false ? 'Deactivate Account' : 'Reactivate Account'}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

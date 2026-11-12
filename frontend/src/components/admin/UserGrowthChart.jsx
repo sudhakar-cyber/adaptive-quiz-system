@@ -1,67 +1,133 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { apiGet } from '../../services/apiClient';
 
 const W = 400;
 const H = 180;
 const PAD = { top: 18, right: 16, bottom: 28, left: 36 };
 
+/** Computes authentic cumulative user growth from the users list based on real created_at timestamps */
+const computeLocalUserGrowth = (usersList, timeframe) => {
+  const list = Array.isArray(usersList) ? usersList : [];
+  const now = new Date();
+
+  const parseCreated = (u) => {
+    const raw = u.createdAt || u.created_at || u.joinedDate;
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  if (timeframe === '7D') {
+    const points = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      d.setHours(23, 59, 59, 999);
+      const label = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const count = list.filter((u) => {
+        const dt = parseCreated(u);
+        return dt ? dt <= d : true;
+      }).length;
+      points.push({ label, value: count });
+    }
+    return points;
+  }
+
+  if (timeframe === '30D') {
+    const points = [];
+    for (let i = 3; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      d.setHours(23, 59, 59, 999);
+      const label = `Wk ${4 - i}`;
+      const count = list.filter((u) => {
+        const dt = parseCreated(u);
+        return dt ? dt <= d : true;
+      }).length;
+      points.push({ label, value: count });
+    }
+    return points;
+  }
+
+  if (timeframe === '1Y') {
+    const points = [];
+    for (let i = 3; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 90);
+      d.setHours(23, 59, 59, 999);
+      const label = `Q${4 - i}`;
+      const count = list.filter((u) => {
+        const dt = parseCreated(u);
+        return dt ? dt <= d : true;
+      }).length;
+      points.push({ label, value: count });
+    }
+    return points;
+  }
+
+  // Default: '6M' - past 6 calendar months ending with current month
+  const points = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+    const label = new Date(now.getFullYear(), now.getMonth() - i, 1).toLocaleDateString('en-US', { month: 'short' });
+    const count = list.filter((u) => {
+      const dt = parseCreated(u);
+      return dt ? dt <= d : true;
+    }).length;
+    points.push({ label, value: count });
+  }
+  return points;
+};
+
 export const UserGrowthChart = ({ users = [], onSelectPoint }) => {
   const [timeframe, setTimeframe] = useState('6M');
   const [tooltip, setTooltip] = useState(null);
+  const [growthPoints, setGrowthPoints] = useState(null);
 
   const totalUsers = Array.isArray(users) ? users.length : 0;
   const activeUsers = Array.isArray(users)
     ? users.filter((u) => u.status !== 'Inactive' && u.isActive !== false).length
     : 0;
 
-  // Generate real cumulative data for each timeframe ending at totalUsers
+  // Real-time synchronization from MySQL backend
+  useEffect(() => {
+    let isMounted = true;
+    const fetchGrowth = async () => {
+      try {
+        const tfParam = timeframe === '7D' ? '7D' : timeframe === '30D' ? '30D' : timeframe === '1Y' ? '1Y' : '6M';
+        const res = await apiGet(`/api/analytics/growth?timeframe=${encodeURIComponent(tfParam)}`);
+        if (isMounted && res && Array.isArray(res.points) && res.points.length > 0) {
+          setGrowthPoints(res.points);
+        }
+      } catch (err) {
+        // Fallback to local computation
+      }
+    };
+
+    fetchGrowth();
+    const handleUpdate = () => fetchGrowth();
+    window.addEventListener('learnsmart_students_updated', handleUpdate);
+    window.addEventListener('learnsmart_admin_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('learnsmart_students_updated', handleUpdate);
+      window.removeEventListener('learnsmart_admin_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, [timeframe]);
+
+  // Compute authentic dataset
   const data = useMemo(() => {
-    if (totalUsers === 0) {
-      const labels = timeframe === '7D'
-        ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-        : timeframe === '30D'
-        ? ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4']
-        : timeframe === '1Y'
-        ? ['Q1', 'Q2', 'Q3', 'Q4']
-        : ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr'];
-      return labels.map((label) => ({ label, value: 0 }));
+    if (Array.isArray(growthPoints) && growthPoints.length > 0) {
+      return growthPoints.map((pt) => ({
+        label: pt.label,
+        value: typeof pt.count === 'number' ? pt.count : Number(pt.count || 0)
+      }));
     }
-
-    if (timeframe === '7D') {
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      return days.map((label, idx) => {
-        // Progressive ramp up to totalUsers
-        const ratio = (idx + 1) / days.length;
-        const val = Math.max(1, Math.round(totalUsers * (0.65 + 0.35 * ratio)));
-        return { label, value: idx === days.length - 1 ? totalUsers : Math.min(totalUsers, val) };
-      });
-    }
-
-    if (timeframe === '30D') {
-      const weeks = ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4'];
-      return weeks.map((label, idx) => {
-        const ratio = (idx + 1) / weeks.length;
-        const val = Math.max(1, Math.round(totalUsers * (0.4 + 0.6 * ratio)));
-        return { label, value: idx === weeks.length - 1 ? totalUsers : Math.min(totalUsers, val) };
-      });
-    }
-
-    if (timeframe === '1Y') {
-      const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
-      return quarters.map((label, idx) => {
-        const ratio = (idx + 1) / quarters.length;
-        const val = Math.max(1, Math.round(totalUsers * (0.25 + 0.75 * ratio)));
-        return { label, value: idx === quarters.length - 1 ? totalUsers : Math.min(totalUsers, val) };
-      });
-    }
-
-    // Default '6M'
-    const months = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr'];
-    return months.map((label, idx) => {
-      const ratio = (idx + 1) / months.length;
-      const val = Math.max(1, Math.round(totalUsers * (0.2 + 0.8 * ratio)));
-      return { label, value: idx === months.length - 1 ? totalUsers : Math.min(totalUsers, val) };
-    });
-  }, [timeframe, totalUsers]);
+    return computeLocalUserGrowth(users, timeframe);
+  }, [growthPoints, users, timeframe]);
 
   // Dynamically compute maxY based on actual user counts
   const maxY = useMemo(() => {
@@ -99,8 +165,8 @@ export const UserGrowthChart = ({ users = [], onSelectPoint }) => {
     }, '');
   }, [data, maxY]);
 
-  const firstPt = { x: plotX(0), y: plotY(data[0].value) };
-  const lastPt = { x: plotX(data.length - 1), y: plotY(data[data.length - 1].value) };
+  const firstPt = { x: plotX(0), y: plotY(data[0]?.value || 0) };
+  const lastPt = { x: plotX(Math.max(0, data.length - 1)), y: plotY(data[data.length - 1]?.value || 0) };
   const bottomY = H - PAD.bottom;
   const areaPath = `${linePath} L${lastPt.x.toFixed(2)},${bottomY} L${firstPt.x.toFixed(2)},${bottomY} Z`;
 

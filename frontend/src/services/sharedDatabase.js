@@ -17,6 +17,7 @@ export { getAuthToken, getAuthHeaders };
 const STORAGE_KEY_STUDENTS = 'learnsmart_shared_students';
 const STORAGE_KEY_LEGACY = 'learnsmart_educator_students';
 const STORAGE_KEY_EDUCATORS = 'learnsmart_shared_educators';
+const STORAGE_KEY_ADMINS = 'learnsmart_shared_admins';
 const STORAGE_KEY_QUIZZES = 'learnsmart_educator_quizzes';
 const STORAGE_KEY_SUBMISSIONS = 'learnsmart_shared_submissions';
 const STORAGE_KEY_NOTIFICATIONS = 'learnsmart_notifications_cache';
@@ -388,6 +389,65 @@ export const syncEducatorsFromBackend = async (force = false) => {
   return loadStoredEducators();
 };
 
+let isSyncingAdmins = false;
+let lastAdminsSyncTime = 0;
+
+// Sync admins from backend MySQL database
+export const syncAdminsFromBackend = async (force = false) => {
+  const now = Date.now();
+  if (!force && (isSyncingAdmins || (now - lastAdminsSyncTime < 3000))) {
+    return loadStoredAdmins();
+  }
+  isSyncingAdmins = true;
+  lastAdminsSyncTime = now;
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch('/api/users/admins', {
+      headers
+    });
+    if (res.ok) {
+      const backendAdmins = await res.json();
+      if (Array.isArray(backendAdmins) && backendAdmins.length > 0) {
+        const formatted = backendAdmins.map((ba) => ({
+          id: ba.id || ba.uid,
+          uid: ba.uid || ba.id,
+          name: ba.name,
+          email: ba.email,
+          role: 'Admin',
+          userType: 'admin',
+          department: ba.department || 'Platform Operations & Infrastructure',
+          phone: ba.phone || '',
+          title: ba.title || 'Senior Platform Administrator',
+          isActive: ba.isActive !== undefined ? Boolean(ba.isActive) : (ba.is_active !== undefined ? Boolean(ba.is_active) : true),
+          status: ba.status || (ba.isActive !== false ? 'Active' : 'Inactive'),
+          statusVariant: ba.statusVariant || (ba.isActive !== false ? 'success' : 'danger'),
+          joinedDate: ba.created_at
+            ? new Date(ba.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+            : '01 Jan 2025',
+          lastActive: 'Now',
+          avatarInitials: getInitials(ba.name || 'System Admin'),
+          avatarImage: ba.avatarImage || ba.avatar_url || null
+        }));
+
+        const currentSavedStr = localStorage.getItem(STORAGE_KEY_ADMINS);
+        const newMergedStr = JSON.stringify(formatted);
+        if (currentSavedStr !== newMergedStr) {
+          persistAdmins(formatted);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(EVENT_ADMIN_UPDATED, { detail: formatted }));
+          }
+        }
+        return formatted;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to sync admins from backend MySQL:', err);
+  } finally {
+    isSyncingAdmins = false;
+  }
+  return loadStoredAdmins();
+};
+
 // ---------------------------------------------------------------------------
 // Notifications - stored in MySQL, shared by every dashboard
 // ---------------------------------------------------------------------------
@@ -674,11 +734,12 @@ export const getStudentBenchmark = () => {
 
 // Sync all platform data from backend MySQL database for live tracking
 export const syncAllFromBackend = async () => {
-  const [quizzes, submissions, students, educators] = await Promise.allSettled([
+  const [quizzes, submissions, students, educators, admins] = await Promise.allSettled([
     syncQuizzesFromBackend(),
     syncSubmissionsFromBackend(),
     syncStudentsFromBackend(),
-    syncEducatorsFromBackend()
+    syncEducatorsFromBackend(),
+    syncAdminsFromBackend()
   ]);
   const [analytics, notifications] = await Promise.allSettled([
     syncAnalyticsFromBackend(),
@@ -689,6 +750,7 @@ export const syncAllFromBackend = async () => {
     submissions: submissions.status === 'fulfilled' ? submissions.value : [],
     students: students.status === 'fulfilled' ? students.value : [],
     educators: educators.status === 'fulfilled' ? educators.value : [],
+    admins: admins.status === 'fulfilled' ? admins.value : [],
     analytics: analytics.status === 'fulfilled' ? analytics.value : null,
     notifications: notifications.status === 'fulfilled' ? notifications.value : []
   };
@@ -940,6 +1002,69 @@ const persistEducators = (educators) => {
     localStorage.setItem(STORAGE_KEY_EDUCATORS, JSON.stringify(educators));
   } catch (err) {
     console.error('Failed to persist educators:', err);
+  }
+  notifyAdminSubscribers();
+};
+
+const loadStoredAdmins = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_ADMINS);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load admins from localStorage:', err);
+  }
+  try {
+    const raw = localStorage.getItem('learnsmart_admin_profile') || localStorage.getItem('learnsmart_admin');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.email) {
+        return [{
+          id: parsed.id || parsed.uid || 'admin-system',
+          uid: parsed.uid || parsed.id || 'admin-system',
+          name: parsed.name || parsed.fullName || 'System Administrator',
+          email: parsed.email || 'admin@learnsmart.edu',
+          role: 'Admin',
+          userType: 'admin',
+          status: 'Active',
+          statusVariant: 'success',
+          joinedDate: '01 Jan 2025',
+          lastActive: 'Now',
+          avatarInitials: getInitials(parsed.name || parsed.fullName || 'System Admin'),
+          department: parsed.department || 'Platform Operations & Infrastructure',
+          title: parsed.title || 'Senior Platform Administrator',
+          isActive: true
+        }];
+      }
+    }
+  } catch {}
+  return [{
+    id: 'admin-system',
+    uid: 'admin-system',
+    name: 'System Administrator',
+    email: 'admin@learnsmart.edu',
+    role: 'Admin',
+    userType: 'admin',
+    status: 'Active',
+    statusVariant: 'success',
+    joinedDate: '01 Jan 2025',
+    lastActive: 'Now',
+    avatarInitials: 'SA',
+    department: 'Platform Operations & Infrastructure',
+    title: 'Senior Platform Administrator',
+    isActive: true
+  }];
+};
+
+const persistAdmins = (admins) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_ADMINS, JSON.stringify(admins));
+  } catch (err) {
+    console.error('Failed to persist admins:', err);
   }
   notifyAdminSubscribers();
 };
@@ -1385,6 +1510,7 @@ export const sharedDatabase = {
   syncSubmissionsFromBackend: () => syncSubmissionsFromBackend(),
   syncStudentsFromBackend: () => syncStudentsFromBackend(),
   syncEducatorsFromBackend: () => syncEducatorsFromBackend(),
+  syncAdminsFromBackend: (force = false) => syncAdminsFromBackend(force),
   syncNotificationsFromBackend: (force = false) => syncNotificationsFromBackend(force),
   syncAnalyticsFromBackend: (force = false) => syncAnalyticsFromBackend(force),
   syncStudentBenchmark: () => syncStudentBenchmark(),
@@ -1692,8 +1818,8 @@ export const sharedDatabase = {
     // Delete student (or unlink them from the cohort) in backend MySQL
     (async () => {
       try {
-        const targetParam = removedTarget?.email || removedTarget?.id || cleanId;
-        await apiDelete(`/api/users/cohort/students/${encodeURIComponent(targetParam)}`);
+        const targetParam = removedTarget?.studentId || removedTarget?.id || removedTarget?.email || cleanId;
+        await apiDelete(`/api/users/${encodeURIComponent(targetParam)}`);
         await syncStudentsFromBackend(true);
         await syncSubmissionsFromBackend(true);
       } catch (err) {
@@ -2025,7 +2151,7 @@ export const sharedDatabase = {
   // Ensures assigned studentId is strictly non-editable
   updateStudent: (studentId, updates = {}) => {
     const all = loadStoredStudents();
-    const idx = all.findIndex((s) => s.id === studentId || s.studentId === studentId);
+    const idx = all.findIndex((s) => s.id === studentId || s.studentId === studentId || (updates.email && s.email?.toLowerCase() === updates.email.toLowerCase()));
     if (idx !== -1) {
       // Strip out any attempts to overwrite the permanent unique studentId
       const { studentId: _attemptedChange, ...safeUpdates } = updates;
@@ -2034,6 +2160,29 @@ export const sharedDatabase = {
         ...safeUpdates
       };
       persistStudents(all);
+
+      // Persist student updates to backend MySQL
+      (async () => {
+        try {
+          const target = all[idx];
+          const targetParam = target.studentId || target.id || studentId;
+          await apiPut(`/api/users/${encodeURIComponent(targetParam)}`, {
+            name: updates.name || target.name,
+            email: updates.email || target.email,
+            phone: updates.phone !== undefined ? updates.phone : target.phone,
+            department: updates.department || updates.topSubject || target.department,
+            studentId: target.studentId,
+            topSubject: updates.topSubject || target.topSubject,
+            country: updates.country || target.country,
+            avatarUrl: updates.avatarImage || target.avatarImage,
+            isActive: updates.isActive !== undefined ? updates.isActive : target.isActive
+          });
+          await syncStudentsFromBackend(true);
+        } catch (err) {
+          console.warn('Backend student update note:', err.message);
+        }
+      })();
+
       return all[idx];
     }
     return null;
@@ -2159,11 +2308,17 @@ export const sharedDatabase = {
       // Sync to backend MySQL
       (async () => {
         try {
-          await apiPut('/api/users/me', {
-            name: all[idx].name,
-            department: all[idx].department,
-            title: all[idx].title,
-            phone: all[idx].phone
+          const target = all[idx];
+          const targetParam = target.educatorId || target.id || id;
+          await apiPut(`/api/users/${encodeURIComponent(targetParam)}`, {
+            name: updates.name || target.name,
+            email: updates.email || target.email,
+            department: updates.department !== undefined ? updates.department : target.department,
+            title: updates.title !== undefined ? updates.title : target.title,
+            phone: updates.phone !== undefined ? updates.phone : target.phone,
+            educatorId: target.educatorId,
+            avatarUrl: updates.avatarImage || target.avatarImage,
+            isActive: updates.isActive !== undefined ? updates.isActive : target.isActive
           });
           await syncEducatorsFromBackend(true);
         } catch (err) {
@@ -2191,8 +2346,8 @@ export const sharedDatabase = {
     // Sync to backend MySQL
     (async () => {
       try {
-        const param = target?.email || target?.id || cleanId;
-        await apiDelete(`/api/users/educators/${encodeURIComponent(param)}`);
+        const param = target?.educatorId || target?.id || target?.email || cleanId;
+        await apiDelete(`/api/users/${encodeURIComponent(param)}`);
         await syncEducatorsFromBackend(true);
       } catch (err) {
         console.warn('Backend educator delete note:', err.message);
@@ -2952,35 +3107,39 @@ export const sharedDatabase = {
       raw: e
     }));
 
-    // The administrator account comes from the signed in session, which is
-    // itself loaded from MySQL.
-    const adminProfile = (() => {
-      try {
-        const raw = localStorage.getItem('learnsmart_admin_profile') || localStorage.getItem('learnsmart_admin');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && parsed.email) return parsed;
-        }
-      } catch { }
-      return null;
-    })();
-
-    const admin = {
-      id: adminProfile?.id || adminProfile?.uid || 'admin-001',
-      name: adminProfile?.name || adminProfile?.fullName || 'System Admin',
-      email: adminProfile?.email || 'admin@learnsmart.edu',
+    const storedAdmins = loadStoredAdmins();
+    const admins = (storedAdmins.length > 0 ? storedAdmins : [{
+      id: 'admin-system',
+      name: 'System Administrator',
+      email: 'admin@learnsmart.edu',
       role: 'Admin',
       userType: 'admin',
       status: 'Active',
       statusVariant: 'success',
       joinedDate: '01 Jan 2025',
       lastActive: 'Now',
-      avatarInitials: getInitials(adminProfile?.fullName || adminProfile?.name || 'System Admin'),
-      department: adminProfile?.department || 'Platform Operations',
+      avatarInitials: 'SA',
+      department: 'Platform Operations & Infrastructure',
+      title: 'Senior Platform Administrator',
       isActive: true
-    };
+    }]).map((a) => ({
+      id: a.id,
+      name: a.name,
+      email: a.email,
+      role: 'Admin',
+      userType: 'admin',
+      status: a.isActive === false ? 'Inactive' : a.status || 'Active',
+      statusVariant: a.isActive === false ? 'danger' : 'success',
+      joinedDate: a.joinedDate || '01 Jan 2025',
+      lastActive: a.lastActive || 'Now',
+      avatarInitials: a.avatarInitials || getInitials(a.name),
+      department: a.department || 'Platform Operations & Infrastructure',
+      title: a.title || 'Senior Platform Administrator',
+      isActive: a.isActive !== false,
+      raw: a
+    }));
 
-    let allUsers = [admin, ...educators, ...students];
+    let allUsers = [...admins, ...educators, ...students];
 
     // Search filter
     if (search.trim()) {
@@ -3028,35 +3187,158 @@ export const sharedDatabase = {
   },
 
   toggleUserStatus: (userId, role) => {
-    if (role === 'Student' || role === 'student') {
+    const cleanRole = String(role || '').trim().toLowerCase();
+    let result = null;
+    if (cleanRole === 'student') {
       const students = loadStoredStudents();
-      const idx = students.findIndex((s) => s.id === userId);
+      const idx = students.findIndex((s) => s.id === userId || s.studentId === userId || s.email === userId);
       if (idx !== -1) {
         students[idx].isActive = students[idx].isActive === false ? true : false;
+        students[idx].status = students[idx].isActive ? 'Active' : 'Inactive';
+        students[idx].statusVariant = students[idx].isActive ? 'success' : 'danger';
         persistStudents(students);
-        return students[idx];
+        result = students[idx];
       }
-    } else if (role === 'Educator' || role === 'educator') {
+    } else if (cleanRole === 'educator') {
       const educators = loadStoredEducators();
-      const idx = educators.findIndex((e) => e.id === userId);
+      const idx = educators.findIndex((e) => e.id === userId || e.educatorId === userId || e.email === userId);
       if (idx !== -1) {
         educators[idx].isActive = educators[idx].isActive === false ? true : false;
         educators[idx].status = educators[idx].isActive ? 'Active' : 'Inactive';
+        educators[idx].statusVariant = educators[idx].isActive ? 'success' : 'danger';
         persistEducators(educators);
-        return educators[idx];
+        result = educators[idx];
+      }
+    } else if (cleanRole === 'admin') {
+      const admins = loadStoredAdmins();
+      const idx = admins.findIndex((a) => a.id === userId || a.email === userId);
+      if (idx !== -1) {
+        admins[idx].isActive = admins[idx].isActive === false ? true : false;
+        admins[idx].status = admins[idx].isActive ? 'Active' : 'Inactive';
+        admins[idx].statusVariant = admins[idx].isActive ? 'success' : 'danger';
+        persistAdmins(admins);
+        result = admins[idx];
       }
     }
-    return null;
+
+    // Persist directly to MySQL database
+    (async () => {
+      try {
+        await apiRequest(`/api/users/${encodeURIComponent(userId)}/status`, { method: 'PATCH' });
+        await syncAllFromBackend();
+      } catch (err) {
+        console.warn('Backend toggle status note:', err.message);
+      }
+    })();
+
+    return result;
+  },
+
+  toggleUserStatusAsync: async (userId, role) => {
+    const local = sharedDatabase.toggleUserStatus(userId, role);
+    try {
+      await apiRequest(`/api/users/${encodeURIComponent(userId)}/status`, { method: 'PATCH' });
+    } catch (err) {
+      console.warn('Backend toggle status note:', err.message);
+    }
+    await Promise.allSettled([
+      syncStudentsFromBackend(true),
+      syncEducatorsFromBackend(true),
+      syncAdminsFromBackend(true)
+    ]);
+    return local;
   },
 
   deleteUser: (userId, role) => {
     const cleanRole = String(role || '').trim().toLowerCase();
+    let res = null;
     if (cleanRole === 'student') {
-      return sharedDatabase.removeStudent(userId);
+      res = sharedDatabase.removeStudent(userId);
     } else if (cleanRole === 'educator') {
-      return sharedDatabase.removeEducator(userId);
+      res = sharedDatabase.removeEducator(userId);
+    } else if (cleanRole === 'admin') {
+      res = sharedDatabase.removeAdmin(userId);
+    }
+
+    (async () => {
+      try {
+        await apiDelete(`/api/users/${encodeURIComponent(userId)}`);
+        await syncAllFromBackend();
+      } catch (err) {
+        console.warn('Backend delete user note:', err.message);
+      }
+    })();
+    return res;
+  },
+
+  deleteUserAsync: async (userId, role) => {
+    const cleanRole = String(role || '').trim().toLowerCase();
+    if (cleanRole === 'student') {
+      sharedDatabase.removeStudent(userId);
+    } else if (cleanRole === 'educator') {
+      sharedDatabase.removeEducator(userId);
+    } else if (cleanRole === 'admin') {
+      sharedDatabase.removeAdmin(userId);
+    }
+    try {
+      await apiDelete(`/api/users/${encodeURIComponent(userId)}`);
+    } catch (err) {
+      console.warn('Backend delete user note:', err.message);
+    }
+    await Promise.allSettled([
+      syncStudentsFromBackend(true),
+      syncEducatorsFromBackend(true),
+      syncAdminsFromBackend(true),
+      syncSubmissionsFromBackend(true)
+    ]);
+    return true;
+  },
+
+  updateAdmin: (id, updates = {}) => {
+    const all = loadStoredAdmins();
+    const idx = all.findIndex((a) => a.id === id || (updates.email && a.email?.toLowerCase() === updates.email.toLowerCase()));
+    if (idx !== -1) {
+      all[idx] = { ...all[idx], ...updates };
+      persistAdmins(all);
+
+      (async () => {
+        try {
+          const target = all[idx];
+          const targetParam = target.id || id;
+          await apiPut(`/api/users/${encodeURIComponent(targetParam)}`, {
+            name: updates.name || target.name,
+            email: updates.email || target.email,
+            department: updates.department !== undefined ? updates.department : target.department,
+            title: updates.title !== undefined ? updates.title : target.title,
+            phone: updates.phone !== undefined ? updates.phone : target.phone,
+            avatarUrl: updates.avatarImage || target.avatarImage,
+            isActive: updates.isActive !== undefined ? updates.isActive : target.isActive
+          });
+          await syncAdminsFromBackend(true);
+        } catch (err) {
+          console.warn('Backend admin update note:', err.message);
+        }
+      })();
+
+      return all[idx];
     }
     return null;
+  },
+
+  removeAdmin: (id) => {
+    const all = loadStoredAdmins();
+    const cleanId = String(id || '').trim().toLowerCase();
+    const updated = all.filter((a) => String(a.id || '').toLowerCase() !== cleanId && String(a.email || '').toLowerCase() !== cleanId);
+    persistAdmins(updated);
+    (async () => {
+      try {
+        await apiDelete(`/api/users/${encodeURIComponent(cleanId)}`);
+        await syncAdminsFromBackend(true);
+      } catch (err) {
+        console.warn('Backend admin deletion sync note:', err.message);
+      }
+    })();
+    return updated;
   },
 
   // ==========================================
@@ -3090,7 +3372,43 @@ export const sharedDatabase = {
       };
     }
 
-    // Fallback for the moment before the first sync finished.
+    // Fallback computed authentically from local submissions and active quizzes
+    let avgScore = '0%';
+    let passRate = '0%';
+    let completionRate = '0%';
+    if (submissions.length > 0) {
+      const sum = submissions.reduce((acc, s) => {
+        const val = typeof s.scoreValue === 'number'
+          ? s.scoreValue
+          : typeof s.score === 'number'
+          ? s.score
+          : parseFloat(String(s.score || '0').replace('%', '')) || 0;
+        return acc + val;
+      }, 0);
+      avgScore = `${Math.round((sum / submissions.length) * 10) / 10}%`;
+
+      const passed = submissions.filter((s) => {
+        const val = typeof s.scoreValue === 'number'
+          ? s.scoreValue
+          : typeof s.score === 'number'
+          ? s.score
+          : parseFloat(String(s.score || '0').replace('%', '')) || 0;
+        return val >= 70;
+      }).length;
+      passRate = `${Math.round((passed / submissions.length) * 100)}%`;
+
+      const activeQuizzesCount = Math.max(1, quizzes.filter((q) => (q.status || '').toLowerCase() !== 'draft').length);
+      const targetStudents = Math.max(1, students.length);
+      const completedPairs = new Set();
+      submissions.forEach((s) => {
+        const st = s.studentEmail || s.studentId || s.student;
+        const q = s.quizId || s.quizTitle || s.id;
+        if (st && q) completedPairs.add(`${st}_${q}`);
+      });
+      const completedCount = completedPairs.size > 0 ? completedPairs.size : submissions.length;
+      completionRate = `${Math.min(100, Math.round((completedCount / (targetStudents * activeQuizzesCount)) * 100))}%`;
+    }
+
     return {
       totalUsers: students.length + educators.length,
       totalQuizzes: quizzes.length,
@@ -3101,9 +3419,9 @@ export const sharedDatabase = {
       totalEducators: educators.length,
       completedQuizzes: submissions.length,
       totalSubmissions: submissions.length,
-      avgScore: '0%',
-      passRate: '0%',
-      completionRate: '0%',
+      avgScore,
+      passRate,
+      completionRate,
       serverUptime: '99.98%',
       apiLatency: '42ms'
     };
