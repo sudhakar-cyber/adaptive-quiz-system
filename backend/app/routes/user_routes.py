@@ -52,6 +52,22 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: Optional[str] = None
 
 
+class UserUpdateRequest(BaseModel):
+    """Comprehensive profile update request for student, educator, or admin."""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    department: Optional[str] = None
+    phone: Optional[str] = None
+    title: Optional[str] = None
+    studentId: Optional[str] = None
+    educatorId: Optional[str] = None
+    topSubject: Optional[str] = None
+    country: Optional[str] = None
+    avatarUrl: Optional[str] = None
+    isActive: Optional[bool] = None
+    bio: Optional[str] = None
+
+
 class StudentProfileRequest(BaseModel):
     """Profile fields an educator or admin may maintain for a student."""
 
@@ -358,8 +374,8 @@ def delete_educator(identifier: str, current_user: Dict[str, Any] = Depends(requ
     clean_id = identifier.strip().lower()
     with get_connection() as conn:
         cur = conn.execute(
-            "SELECT id, name, email FROM users WHERE (LOWER(id) = ? OR LOWER(email) = ?) AND role = 'educator'",
-            (clean_id, clean_id)
+            "SELECT id, name, email FROM users WHERE (LOWER(id) = ? OR LOWER(email) = ? OR LOWER(COALESCE(educator_id, '')) = ?) AND role = 'educator'",
+            (clean_id, clean_id, clean_id)
         )
         educator = cur.fetchone()
         if not educator:
@@ -379,6 +395,28 @@ def delete_educator(identifier: str, current_user: Dict[str, Any] = Depends(requ
         conn.commit()
 
     return {"success": True, "message": f"Educator {identifier} removed successfully."}
+
+
+@router.get("/admins")
+def get_admins(current_user: Dict[str, Any] = Depends(require_admin)):
+    """Returns all platform administrator accounts directly from MySQL."""
+    with get_connection() as conn:
+        cur = conn.execute("""
+            SELECT id, name, email, role, department, phone, title, is_active, avatar_url, created_at, updated_at
+            FROM users
+            WHERE role = 'admin'
+            ORDER BY created_at ASC
+        """)
+        admins = []
+        for r in cur.fetchall():
+            d = dict(r)
+            d["uid"] = d["id"]
+            d["isActive"] = bool(d.get("is_active", True))
+            d["status"] = "Active" if d["isActive"] else "Inactive"
+            d["statusVariant"] = "success" if d["isActive"] else "danger"
+            d["avatarImage"] = d.get("avatar_url") or None
+            admins.append(d)
+        return admins
 
 
 @router.get("/students")
@@ -423,7 +461,7 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
             cohort_placeholders = None
             cohort_params = []
 
-        where_clause = "u.role = 'student' AND u.is_active = 1 AND LOWER(u.email) NOT LIKE '%@learnsmart.edu' AND LOWER(u.email) != 'student@learnsmart.com'"
+        where_clause = "u.role = 'student' AND LOWER(u.email) NOT LIKE '%@learnsmart.edu' AND LOWER(u.email) != 'student@learnsmart.com'"
         if cohort_placeholders:
             where_clause += f" AND u.id IN ({cohort_placeholders})"
 
@@ -479,6 +517,10 @@ def get_students(current_user: Dict[str, Any] = Depends(require_educator_or_admi
             d["studentId"] = d.get("student_id") or d["id"]
             d["topSubject"] = d.get("top_subject") or d.get("department") or "General"
             d["avatarImage"] = d.get("avatar_url") or None
+            d["isActive"] = bool(d.get("is_active", True))
+            if not d["isActive"]:
+                d["status"] = "Inactive"
+                d["statusVariant"] = "danger"
             d["streak"] = int(d.get("streak") or 0)
             mastery = d.get("subject_mastery")
             if isinstance(mastery, str):
@@ -716,8 +758,8 @@ def remove_student_from_cohort(
 
     with get_connection() as conn:
         cur = conn.execute(
-            "SELECT id, name, email FROM users WHERE (LOWER(id) = ? OR LOWER(email) = ?) AND role = 'student'",
-            (clean_id, clean_id),
+            "SELECT id, name, email FROM users WHERE (LOWER(id) = ? OR LOWER(email) = ? OR LOWER(COALESCE(student_id, '')) = ?) AND role = 'student'",
+            (clean_id, clean_id, clean_id),
         )
         student = cur.fetchone()
         if not student:
@@ -785,8 +827,8 @@ def delete_student(identifier: str, current_user: Dict[str, Any] = Depends(requi
     with get_connection() as conn:
         # Find student record
         cur = conn.execute(
-            "SELECT id, name, email FROM users WHERE (LOWER(id) = ? OR LOWER(email) = ?) AND role = 'student'",
-            (clean_id, clean_id)
+            "SELECT id, name, email FROM users WHERE (LOWER(id) = ? OR LOWER(email) = ? OR LOWER(COALESCE(student_id, '')) = ?) AND role = 'student'",
+            (clean_id, clean_id, clean_id)
         )
         student = cur.fetchone()
         if not student:
@@ -1124,4 +1166,222 @@ def cleanup_default_students(current_user: Dict[str, Any] = Depends(require_admi
             "deletedDefaultStudents": deleted_users,
             "deletedDefaultAttempts": deleted_attempts,
             "message": "Default students and demo attempts purged successfully."
+        }
+
+
+@router.put("/{identifier}")
+def update_user_by_identifier(
+    identifier: str,
+    req: UserUpdateRequest,
+    current_user: Dict[str, Any] = Depends(require_authenticated),
+):
+    """
+    Updates any user (student, educator, or admin) in MySQL database.
+    Admins can update any account; users can update their own profile.
+    """
+    role = (current_user.get("role") or "student").lower()
+    caller_id = current_user.get("id") or current_user.get("uid") or ""
+    clean_id = identifier.strip().lower()
+
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            SELECT id, name, email, role, department, phone, title, student_id, educator_id, is_active
+            FROM users
+            WHERE LOWER(id) = ? OR LOWER(email) = ? OR LOWER(COALESCE(student_id, '')) = ? OR LOWER(COALESCE(educator_id, '')) = ?
+            """,
+            (clean_id, clean_id, clean_id, clean_id),
+        )
+        target = cur.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found in MySQL database.")
+
+        # Non-admins may only update themselves (or educators updating their cohort students)
+        if role != "admin" and target["id"] != caller_id and target["email"].lower() != (current_user.get("email") or "").lower():
+            if role == "educator" and target["role"] == "student":
+                cohort = tracking_controller.educator_cohort_ids(conn, current_user)
+                if target["id"] not in cohort:
+                    raise HTTPException(status_code=403, detail="Forbidden: You can only update students in your cohort.")
+            else:
+                raise HTTPException(status_code=403, detail="Forbidden: You cannot modify this user.")
+
+        assignments = []
+        params = []
+
+        def _set(col, val):
+            if val is not None:
+                assignments.append(f"{col} = ?")
+                params.append(val)
+
+        if req.name is not None and req.name.strip():
+            _set("name", req.name.strip())
+        if req.email is not None and req.email.strip() and role == "admin":
+            _set("email", req.email.strip().lower())
+        if req.department is not None:
+            _set("department", req.department.strip())
+        if req.phone is not None:
+            _set("phone", req.phone.strip())
+        if req.title is not None:
+            _set("title", req.title.strip())
+        if req.studentId is not None and req.studentId.strip():
+            _set("student_id", req.studentId.strip())
+        if req.educatorId is not None and req.educatorId.strip():
+            _set("educator_id", req.educatorId.strip())
+        if req.topSubject is not None:
+            _set("top_subject", req.topSubject.strip())
+        if req.country is not None:
+            _set("country", req.country.strip())
+        if req.avatarUrl is not None:
+            _set("avatar_url", req.avatarUrl)
+        if req.isActive is not None and role == "admin":
+            _set("is_active", 1 if req.isActive else 0)
+
+        if assignments:
+            assignments.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(target["id"])
+            conn.execute(f"UPDATE users SET {', '.join(assignments)} WHERE id = ?", tuple(params))
+
+            # Propagate name update to attempts and authored quizzes
+            if req.name and req.name.strip():
+                new_n = req.name.strip()
+                conn.execute(
+                    "UPDATE quiz_attempts SET student_name = ? WHERE student_id = ? OR LOWER(student_email) = ?",
+                    (new_n, target["id"], target["email"].lower())
+                )
+                conn.execute(
+                    "UPDATE quizzes SET author_name = ? WHERE author_id = ? OR LOWER(author_name) = LOWER(?)",
+                    (new_n, target["id"], target["name"])
+                )
+
+            notification_service.log_activity(
+                conn,
+                current_user,
+                action="user.updated",
+                entity_type="user",
+                entity_id=target["id"],
+                summary=f"User {target['name']} was updated",
+            )
+            conn.commit()
+
+        cur2 = conn.execute("SELECT id, name, email, role, department, phone, title, student_id, educator_id, is_active FROM users WHERE id = ?", (target["id"],))
+        updated_row = dict(cur2.fetchone())
+        updated_row["uid"] = updated_row["id"]
+        updated_row["isActive"] = bool(updated_row.get("is_active", True))
+        updated_row["status"] = "Active" if updated_row["isActive"] else "Inactive"
+        return updated_row
+
+
+@router.patch("/{identifier}/status")
+def toggle_user_status(
+    identifier: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Toggles or inverts a user's is_active status in MySQL."""
+    clean_id = identifier.strip().lower()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            SELECT id, name, email, role, is_active
+            FROM users
+            WHERE LOWER(id) = ? OR LOWER(email) = ? OR LOWER(COALESCE(student_id, '')) = ? OR LOWER(COALESCE(educator_id, '')) = ?
+            """,
+            (clean_id, clean_id, clean_id, clean_id),
+        )
+        target = cur.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found in MySQL.")
+
+        current_status = bool(target.get("is_active", True))
+        new_status = not current_status
+        new_int = 1 if new_status else 0
+
+        conn.execute(
+            "UPDATE users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (new_int, target["id"]),
+        )
+        notification_service.log_activity(
+            conn,
+            current_user,
+            action="user.status_toggled",
+            entity_type="user",
+            entity_id=target["id"],
+            summary=f"User {target['name']} status changed to {'Active' if new_status else 'Inactive'}",
+        )
+        conn.commit()
+
+        return {
+            "success": True,
+            "id": target["id"],
+            "role": target["role"],
+            "isActive": new_status,
+            "status": "Active" if new_status else "Inactive",
+            "message": f"User '{target['name']}' is now {'Active' if new_status else 'Inactive'} in MySQL."
+        }
+
+
+@router.delete("/{identifier}")
+def delete_any_user(
+    identifier: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """
+    Completely deletes any user (student, educator, or admin) from MySQL
+    and cleans up associated records.
+    """
+    clean_id = identifier.strip().lower()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            SELECT id, name, email, role
+            FROM users
+            WHERE LOWER(id) = ? OR LOWER(email) = ? OR LOWER(COALESCE(student_id, '')) = ? OR LOWER(COALESCE(educator_id, '')) = ?
+            """,
+            (clean_id, clean_id, clean_id, clean_id),
+        )
+        target = cur.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found in MySQL.")
+
+        target_id = target["id"]
+        target_email = target["email"].lower()
+        target_role = target["role"]
+
+        # Prevent deleting the last remaining admin
+        if target_role == "admin":
+            admin_count = conn.execute("SELECT COUNT(*) as cnt FROM users WHERE role = 'admin'").fetchone()["cnt"]
+            if admin_count <= 1:
+                raise HTTPException(status_code=400, detail="Cannot delete the sole system administrator account.")
+
+        # Clean up related tables
+        conn.execute("DELETE FROM educator_students WHERE student_id = ? OR educator_id = ?", (target_id, target_id))
+        conn.execute("DELETE FROM quiz_attempts WHERE id = ? OR student_id = ? OR LOWER(student_email) = ?", (target_id, target_id, target_email))
+        conn.execute("DELETE FROM notifications WHERE recipient_id = ? OR actor_id = ?", (target_id, target_id))
+        conn.execute("DELETE FROM activity_log WHERE actor_id = ? OR entity_id = ?", (target_id, target_id))
+
+        # Reassign quizzes if educator was deleted so quizzes don't break
+        admin_row = conn.execute("SELECT id, name FROM users WHERE role = 'admin' LIMIT 1").fetchone()
+        if admin_row:
+            conn.execute(
+                "UPDATE quizzes SET author_id = ?, author_name = ? WHERE author_id = ?",
+                (admin_row["id"], admin_row["name"], target_id)
+            )
+
+        conn.execute("DELETE FROM users WHERE id = ?", (target_id,))
+        conn.commit()
+
+        notification_service.log_activity(
+            conn,
+            current_user,
+            action="user.deleted",
+            entity_type="user",
+            entity_id=target_id,
+            summary=f"User {target['name']} ({target_role}) was deleted from MySQL",
+        )
+        conn.commit()
+
+        return {
+            "success": True,
+            "id": target_id,
+            "role": target_role,
+            "message": f"{target_role.capitalize()} '{target['name']}' successfully deleted from MySQL database."
         }
