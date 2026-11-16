@@ -17,6 +17,7 @@ from app.routes.notification_routes import router as notification_router
 from app.routes.activity_routes import router as activity_router
 from app.routes.analytics_routes import router as analytics_router
 from app.routes.feedback_routes import router as feedback_router
+from app.routes.ml_routes import router as ml_router
 
 # Initialize SQL database
 init_db()
@@ -52,6 +53,7 @@ app.include_router(notification_router)
 app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(feedback_router)
+app.include_router(ml_router)
 
 @app.get("/api/health")
 def health():

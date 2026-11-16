@@ -1,0 +1,141 @@
+{
+  "model_name": "Gradient Boosting",
+  "model_file": "model.pkl",
+  "model_path": "D:\\adaptive-quiz-system\\backend\\ml_engine\\model.pkl",
+  "features": [
+    "Age",
+    "Gender",
+    "Ethnicity",
+    "ParentalEducation",
+    "StudyTimeWeekly",
+    "Absences",
+    "Tutoring",
+    "ParentalSupport",
+    "Extracurricular",
+    "Sports",
+    "Music",
+    "Volunteering",
+    "GPA"
+  ],
+  "classes": [
+    "Easy",
+    "Medium",
+    "Hard"
+  ],
+  "trained_at": "2026-11-16T18:23:49.073834+00:00",
+  "dataset_info": {
+    "source": "database/learnsmart.db (student_performance) / dataset/processed/student_performance_final.csv",
+    "total_samples": 2392,
+    "train_samples": 1913,
+    "test_samples": 479,
+    "class_distribution": {
+      "Easy": 1211,
+      "Medium": 805,
+      "Hard": 376
+    },
+    "synthetic_data": false,
+    "dummy_data": false
+  },
+  "metrics": {
+    "accuracy": 0.9478,
+    "accuracy_percent": "94.78%",
+    "precision": 0.9486,
+    "precision_percent": "94.86%",
+    "recall": 0.9478,
+    "recall_percent": "94.78%",
+    "f1_score": 0.9473,
+    "f1_score_percent": "94.73%",
+    "macro_precision": 0.9523,
+    "macro_recall": 0.9242,
+    "macro_f1": 0.9369,
+    "confusion_matrix": [
+      [
+        240,
+        3,
+        0
+      ],
+      [
+        8,
+        150,
+        3
+      ],
+      [
+        9,
+        2,
+        64
+      ]
+    ],
+    "confusion_matrix_labels": [
+      "Easy",
+      "Medium",
+      "Hard"
+    ],
+    "per_class": {
+      "Easy": {
+        "precision": 0.9339,
+        "recall": 0.9877,
+        "f1_score": 0.96,
+        "support": 243
+      },
+      "Medium": {
+        "precision": 0.9677,
+        "recall": 0.9317,
+        "f1_score": 0.9494,
+        "support": 161
+      },
+      "Hard": {
+        "precision": 0.9552,
+        "recall": 0.8533,
+        "f1_score": 0.9014,
+        "support": 75
+      }
+    },
+    "total_test_samples": 479,
+    "cv_mean_accuracy": 0.9273,
+    "cv_std": 0.0066
+  },
+  "candidate_comparisons": {
+    "Random Forest": {
+      "test_accuracy": "94.57%",
+      "cv_accuracy": "93.52%",
+      "precision": "94.64%",
+      "recall": "94.57%",
+      "f1_score": "94.52%"
+    },
+    "Gradient Boosting": {
+      "test_accuracy": "94.78%",
+      "cv_accuracy": "92.73%",
+      "precision": "94.86%",
+      "recall": "94.78%",
+      "f1_score": "94.73%"
+    },
+    "Decision Tree": {
+      "test_accuracy": "93.95%",
+      "cv_accuracy": "92.42%",
+      "precision": "93.96%",
+      "recall": "93.95%",
+      "f1_score": "93.87%"
+    },
+    "Extra Trees": {
+      "test_accuracy": "90.81%",
+      "cv_accuracy": "90.02%",
+      "precision": "90.81%",
+      "recall": "90.81%",
+      "f1_score": "90.63%"
+    },
+    "Logistic Regression": {
+      "test_accuracy": "88.31%",
+      "cv_accuracy": "87.77%",
+      "precision": "88.3%",
+      "recall": "88.31%",
+      "f1_score": "87.98%"
+    },
+    "K-Nearest Neighbors": {
+      "test_accuracy": "72.44%",
+      "cv_accuracy": "72.66%",
+      "precision": "71.13%",
+      "recall": "72.44%",
+      "f1_score": "71.0%"
+    }
+  }
+}

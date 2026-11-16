@@ -164,3 +164,29 @@ def submit_quiz_attempt(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+
+class AdaptivePredictRequest(BaseModel):
+    currentIndex: Optional[int] = 0
+    selectedAnswers: Optional[Dict[str, Any]] = {}
+    correctCount: Optional[int] = 0
+    totalAnswered: Optional[int] = 0
+    totalQuestions: Optional[int] = 5
+    timeSpentSeconds: Optional[int] = 0
+    currentAccuracy: Optional[float] = None
+    studentStats: Optional[Dict[str, Any]] = {}
+    questions: Optional[List[Any]] = []
+
+    class Config:
+        extra = "allow"
+
+
+@router.post("/{quiz_id}/adaptive/predict")
+def predict_next_question_difficulty(
+    quiz_id: str,
+    req: AdaptivePredictRequest
+):
+    """Predicts optimal next question difficulty (Easy / Medium / Hard) via the ML Engine."""
+    from app.controllers import recommendation_controller
+    return recommendation_controller.get_adaptive_prediction(quiz_id, req.dict(), None)
+
+

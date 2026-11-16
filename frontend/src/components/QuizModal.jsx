@@ -120,6 +120,11 @@ export const QuizModal = ({
   const [showReview, setShowReview] = useState(() => isReviewMode);
   const [submittedFeedback, setSubmittedFeedback] = useState(null);
 
+  // ML Adaptive difficulty state
+  const [adaptiveDifficulty, setAdaptiveDifficulty] = useState(() => quiz.difficulty || 'Medium');
+  const [adaptiveConfidence, setAdaptiveConfidence] = useState(null);
+  const [adaptiveReasoning, setAdaptiveReasoning] = useState('');
+
   // Prevention of duplicate submissions
   const isSubmittingRef = useRef(false);
   const currentIndexRef = useRef(currentIndex);
@@ -168,6 +173,51 @@ export const QuizModal = ({
       saveActiveAttempt(currentIndex, selectedAnswers, timeLeftRef.current);
     }
   }, [currentIndex, selectedAnswers, isSubmitted, quizPhase]);
+
+  // Query ML model prediction for adaptive next question difficulty
+  useEffect(() => {
+    if (quizPhase !== 'test' || isReviewMode) return;
+
+    let isMounted = true;
+    const fetchAdaptivePrediction = async () => {
+      try {
+        const answers = selectedAnswersRef.current || selectedAnswers || {};
+        const questions = quiz.questions || [];
+        const answeredKeys = Object.keys(answers);
+        const correctSoFar = questions.reduce((acc, q, idx) => {
+          return answers[idx] === q.correctIndex ? acc + 1 : acc;
+        }, 0);
+
+        const payload = {
+          currentIndex,
+          selectedAnswers: answers,
+          correctCount: correctSoFar,
+          totalAnswered: answeredKeys.length,
+          totalQuestions: questions.length,
+          timeSpentSeconds: getInitialDuration() - timeLeft,
+          questions
+        };
+
+        const res = await sharedDatabase.getAdaptivePrediction(quiz.id, payload);
+        if (isMounted && res && res.recommendedDifficulty) {
+          setAdaptiveDifficulty(res.recommendedDifficulty);
+          if (typeof res.confidence === 'number') {
+            setAdaptiveConfidence(Math.round(res.confidence * 100));
+          }
+          if (res.reasoning) {
+            setAdaptiveReasoning(res.reasoning);
+          }
+        }
+      } catch (err) {
+        // Silent graceful fallback
+      }
+    };
+
+    fetchAdaptivePrediction();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentIndex, selectedAnswers, quizPhase, isReviewMode, quiz.id]);
 
   // LEAVE PROTECTION: Prompt student when attempting to refresh or close tab
   useEffect(() => {
@@ -406,6 +456,24 @@ export const QuizModal = ({
             >
               {quiz.category}
             </span>
+            {adaptiveDifficulty && (
+              <span
+                className="quiz-badge"
+                style={{
+                  backgroundColor: adaptiveDifficulty === 'Easy' ? '#D1FAE5' : (adaptiveDifficulty === 'Hard' ? '#FEE2E2' : '#FFEDD5'),
+                  color: adaptiveDifficulty === 'Easy' ? '#047857' : (adaptiveDifficulty === 'Hard' ? '#B91C1C' : '#C2410C'),
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+                title={adaptiveReasoning || `ML Predicted Next Difficulty: ${adaptiveDifficulty}`}
+              >
+                <span>⚡ Adaptive: {adaptiveDifficulty}</span>
+                {typeof adaptiveConfidence === 'number' && (
+                  <span style={{ opacity: 0.85, fontSize: '0.62rem' }}>({adaptiveConfidence}%)</span>
+                )}
+              </span>
+            )}
             <h2 className="quiz-modal-title">{quiz.title}</h2>
           </div>
 
@@ -444,6 +512,21 @@ export const QuizModal = ({
                 <span>
                   Question <strong>{currentIndex + 1}</strong> of {totalQuestions}
                 </span>
+                {adaptiveDifficulty && (
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      color: adaptiveDifficulty === 'Easy' ? '#047857' : (adaptiveDifficulty === 'Hard' ? '#B91C1C' : '#C2410C'),
+                      fontWeight: 700,
+                      backgroundColor: 'rgba(241, 245, 249, 0.8)',
+                      padding: '2px 8px',
+                      borderRadius: '12px'
+                    }}
+                    title={adaptiveReasoning || `ML Predicted difficulty: ${adaptiveDifficulty}`}
+                  >
+                    ML Next: <strong>{adaptiveDifficulty}</strong>
+                  </span>
+                )}
                 <span className="quiz-answered-count">
                   {answeredCount}/{totalQuestions} Answered
                 </span>
