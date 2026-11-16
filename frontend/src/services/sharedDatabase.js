@@ -3656,6 +3656,34 @@ export const sharedDatabase = {
     }
   },
 
+  getAdaptivePrediction: async (quizId, payload) => {
+    try {
+      const res = await fetch(`/api/quizzes/${quizId}/adaptive/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch adaptive prediction:', e);
+    }
+    return null;
+  },
+
+  getMLModelInfo: async () => {
+    try {
+      const res = await fetch('/api/ml/model-info');
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('Failed to fetch ML model info:', e);
+    }
+    return null;
+  },
+
   // Subscribe to real-time student updates
   subscribe: (callback) => {
     subscribers.add(callback);

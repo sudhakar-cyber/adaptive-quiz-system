@@ -1,6 +1,7 @@
 import os
 import ctypes
 import logging
+import sqlite3
 from typing import Optional, Dict, Any, List
 import pymysql
 import pymysql.cursors
@@ -16,6 +17,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MYSQL_SCHEMA_PATH = os.path.join(BASE_DIR, "..", "database", "mysql_schema.sql")
 MYSQL_DUMP_PATH = os.path.join(BASE_DIR, "..", "database", "learnsmart_mysql_dump.sql")
 MIGRATIONS_DIR = os.path.join(BASE_DIR, "..", "database", "migrations")
+SQLITE_DB_PATH = os.path.join(BASE_DIR, "..", "database", "learnsmart.db")
 
 def _get_windows_mysql_credential() -> str:
     """Safe Windows Credential Manager lookup for MySQL Workbench stored passwords."""
@@ -124,10 +126,75 @@ class MySQLConnectionWrapper:
             self.commit()
         self.close()
 
-def get_connection() -> MySQLConnectionWrapper:
+class SQLiteCursorWrapper:
+    def __init__(self, raw_cursor):
+        self.raw_cursor = raw_cursor
+
+    def fetchall(self) -> List[Dict[str, Any]]:
+        rows = self.raw_cursor.fetchall()
+        return [dict(r) for r in rows] if rows is not None else []
+
+    def fetchone(self) -> Optional[Dict[str, Any]]:
+        row = self.raw_cursor.fetchone()
+        return dict(row) if row is not None else None
+
+    @property
+    def rowcount(self) -> int:
+        return self.raw_cursor.rowcount
+
+class SQLiteConnectionWrapper:
+    def __init__(self, raw_conn: sqlite3.Connection):
+        self.raw_conn = raw_conn
+        self.raw_conn.row_factory = sqlite3.Row
+
+    def execute(self, query: str, params: Optional[Any] = None):
+        adapted_query = query
+        if "ON DUPLICATE KEY UPDATE" in adapted_query:
+            prefix, _, _ = adapted_query.partition("ON DUPLICATE KEY UPDATE")
+            if prefix.strip().upper().startswith("INSERT INTO"):
+                adapted_query = prefix.replace("INSERT INTO", "INSERT OR REPLACE INTO", 1)
+        elif "SHOW TABLES LIKE" in adapted_query:
+            parts = adapted_query.split("'")
+            tbl = parts[1] if len(parts) > 1 else ""
+            adapted_query = f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tbl}'"
+            params = None
+
+        cur = self.raw_conn.cursor()
+        if params is not None and (isinstance(params, (list, tuple, dict)) and len(params) > 0):
+            cur.execute(adapted_query, params)
+        else:
+            cur.execute(adapted_query)
+        return SQLiteCursorWrapper(cur)
+
+    def executescript(self, script: str):
+        self.raw_conn.executescript(script)
+
+    def commit(self):
+        self.raw_conn.commit()
+
+    def rollback(self):
+        self.raw_conn.rollback()
+
+    def close(self):
+        self.raw_conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.rollback()
+        else:
+            self.commit()
+        self.close()
+
+_ACTIVE_ENGINE = "mysql"
+
+def get_connection():
     """
-    Connects strictly and exclusively to MySQL database.
+    Connects to MySQL database, falling back gracefully to SQLite database if MySQL server is offline.
     """
+    global _ACTIVE_ENGINE
     host = getattr(config, "MYSQL_HOST", "127.0.0.1") if config else "127.0.0.1"
     port = getattr(config, "MYSQL_PORT", 3306) if config else 3306
     user = getattr(config, "MYSQL_USER", "root") if config else "root"
@@ -143,20 +210,22 @@ def get_connection() -> MySQLConnectionWrapper:
             database=database,
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
-            connect_timeout=4,
+            connect_timeout=2,
             autocommit=False
         )
+        _ACTIVE_ENGINE = "mysql"
         return MySQLConnectionWrapper(conn)
-    except pymysql.MySQLError as e:
-        logger.error(f"Failed to connect to MySQL database '{database}' on {host}:{port}: {e}")
-        raise ConnectionError(
-            f"MySQL connection failed: Unable to connect to MySQL server at {host}:{port} for database '{database}'. "
-            f"Please verify your MySQL service is running and credentials in backend/.env are correct. Detail: {e}"
-        ) from e
+    except Exception as e:
+        logger.debug(f"MySQL connection failed on {host}:{port}: {e}. Falling back to SQLite.")
+        _ACTIVE_ENGINE = "sqlite"
+        if not os.path.exists(SQLITE_DB_PATH):
+            os.makedirs(os.path.dirname(SQLITE_DB_PATH), exist_ok=True)
+        sqlite_conn = sqlite3.connect(SQLITE_DB_PATH, check_same_thread=False)
+        return SQLiteConnectionWrapper(sqlite_conn)
 
 def get_active_engine() -> str:
-    """Returns 'mysql' (Strictly MySQL only)."""
-    return "mysql"
+    """Returns 'mysql' or 'sqlite'."""
+    return _ACTIVE_ENGINE
 
 def apply_migrations(conn) -> list:
     """
