@@ -227,7 +227,6 @@ export const AdminUserManagementView = ({
                 <th>User Details</th>
                 <th>Role</th>
                 <th>Status</th>
-                <th>Quizzes Attended</th>
                 <th>Joined Date</th>
                 <th>Last Active</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -236,7 +235,7 @@ export const AdminUserManagementView = ({
             <tbody>
               {sortedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="table-empty-cell">
+                  <td colSpan="6" className="table-empty-cell">
                     No users match your current search and filter criteria.
                   </td>
                 </tr>
@@ -277,27 +276,6 @@ export const AdminUserManagementView = ({
                         <span className={`status-badge ${isActive ? 'active' : 'inactive'}`}>
                           {isActive ? 'Active' : 'Inactive'}
                         </span>
-                      </td>
-
-                      {/* Quizzes Attended */}
-                      <td>
-                        {u.role?.toLowerCase() === 'student' ? (
-                          (u.quizzesCompleted || 0) > 0 ? (
-                            <span className="status-badge active" style={{ fontSize: '0.78rem', background: '#DCFCE7', color: '#15803D' }}>
-                              ✓ Attended ({u.quizzesCompleted})
-                            </span>
-                          ) : (
-                            <span className="status-badge inactive" style={{ fontSize: '0.78rem', background: '#F1F5F9', color: '#64748B' }}>
-                              Not Attended
-                            </span>
-                          )
-                        ) : u.role?.toLowerCase() === 'educator' ? (
-                          <span style={{ fontSize: '0.82rem', color: '#475569', fontWeight: 600 }}>
-                            {u.quizzesCreated || 0} Quizzes Created
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.82rem', color: '#94A3B8' }}>System Admin</span>
-                        )}
                       </td>
 
                       {/* Joined Date */}
