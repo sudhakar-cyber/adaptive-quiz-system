@@ -269,8 +269,9 @@ def login_endpoint(req: LoginRequest):
             "SELECT id, name, email, role, department, phone, title, avatar_url, student_id, "
             "educator_id, is_active, password_hash FROM users "
             "WHERE LOWER(email) = ? OR LOWER(id) = ? OR (student_id IS NOT NULL AND LOWER(student_id) = ?) "
+            "OR (educator_id IS NOT NULL AND LOWER(educator_id) = ?) "
             "OR LOWER(SUBSTRING_INDEX(email, '@', 1)) = ? OR LOWER(name) = ?",
-            (identifier, identifier, identifier, identifier, identifier),
+            (identifier, identifier, identifier, identifier, identifier, identifier),
         )
         user = cur.fetchone()
 

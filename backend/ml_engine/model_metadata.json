@@ -1,5 +1,5 @@
 {
-  "model_name": "Gradient Boosting",
+  "model_name": "Random Forest",
   "model_file": "model.pkl",
   "model_path": "D:\\adaptive-quiz-system\\backend\\ml_engine\\model.pkl",
   "features": [
@@ -22,7 +22,7 @@
     "Medium",
     "Hard"
   ],
-  "trained_at": "2026-11-16T18:23:49.073834+00:00",
+  "trained_at": "2026-11-18T10:47:03.857918+00:00",
   "dataset_info": {
     "source": "database/learnsmart.db (student_performance) / dataset/processed/student_performance_final.csv",
     "total_samples": 2392,
@@ -37,21 +37,21 @@
     "dummy_data": false
   },
   "metrics": {
-    "accuracy": 0.9478,
-    "accuracy_percent": "94.78%",
-    "precision": 0.9486,
-    "precision_percent": "94.86%",
-    "recall": 0.9478,
-    "recall_percent": "94.78%",
-    "f1_score": 0.9473,
-    "f1_score_percent": "94.73%",
-    "macro_precision": 0.9523,
-    "macro_recall": 0.9242,
-    "macro_f1": 0.9369,
+    "accuracy": 0.9457,
+    "accuracy_percent": "94.57%",
+    "precision": 0.9464,
+    "precision_percent": "94.64%",
+    "recall": 0.9457,
+    "recall_percent": "94.57%",
+    "f1_score": 0.9452,
+    "f1_score_percent": "94.52%",
+    "macro_precision": 0.9501,
+    "macro_recall": 0.9228,
+    "macro_f1": 0.9352,
     "confusion_matrix": [
       [
-        240,
-        3,
+        239,
+        4,
         0
       ],
       [
@@ -72,15 +72,15 @@
     ],
     "per_class": {
       "Easy": {
-        "precision": 0.9339,
-        "recall": 0.9877,
-        "f1_score": 0.96,
+        "precision": 0.9336,
+        "recall": 0.9835,
+        "f1_score": 0.9579,
         "support": 243
       },
       "Medium": {
-        "precision": 0.9677,
+        "precision": 0.9615,
         "recall": 0.9317,
-        "f1_score": 0.9494,
+        "f1_score": 0.9464,
         "support": 161
       },
       "Hard": {
@@ -91,8 +91,8 @@
       }
     },
     "total_test_samples": 479,
-    "cv_mean_accuracy": 0.9273,
-    "cv_std": 0.0066
+    "cv_mean_accuracy": 0.9352,
+    "cv_std": 0.0072
   },
   "candidate_comparisons": {
     "Random Forest": {
@@ -103,11 +103,11 @@
       "f1_score": "94.52%"
     },
     "Gradient Boosting": {
-      "test_accuracy": "94.78%",
-      "cv_accuracy": "92.73%",
-      "precision": "94.86%",
-      "recall": "94.78%",
-      "f1_score": "94.73%"
+      "test_accuracy": "94.57%",
+      "cv_accuracy": "92.68%",
+      "precision": "94.64%",
+      "recall": "94.57%",
+      "f1_score": "94.52%"
     },
     "Decision Tree": {
       "test_accuracy": "93.95%",

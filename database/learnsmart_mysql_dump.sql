@@ -73,8 +73,7 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
     answers_json JSON,
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_attempts_quiz_id (quiz_id),
-    INDEX idx_attempts_student_email (student_email),
-    CONSTRAINT fk_attempts_quiz FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE
+    INDEX idx_attempts_student_email (student_email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

@@ -188,6 +188,24 @@ class SQLiteConnectionWrapper:
             self.commit()
         self.close()
 
+def _sqlite_substring_index(text, delim, count):
+    if not text or not delim:
+        return text or ""
+    parts = str(text).split(str(delim))
+    c = int(count)
+    if c > 0:
+        return delim.join(parts[:c])
+    elif c < 0:
+        return delim.join(parts[c:])
+    return ""
+
+def _sqlite_greatest(*args):
+    valid = [a for a in args if a is not None]
+    return max(valid) if valid else None
+
+def _sqlite_concat(*args):
+    return "".join(str(a) for a in args if a is not None)
+
 _ACTIVE_ENGINE = "mysql"
 
 def get_connection():
@@ -221,6 +239,9 @@ def get_connection():
         if not os.path.exists(SQLITE_DB_PATH):
             os.makedirs(os.path.dirname(SQLITE_DB_PATH), exist_ok=True)
         sqlite_conn = sqlite3.connect(SQLITE_DB_PATH, check_same_thread=False)
+        sqlite_conn.create_function("SUBSTRING_INDEX", 3, _sqlite_substring_index)
+        sqlite_conn.create_function("GREATEST", -1, _sqlite_greatest)
+        sqlite_conn.create_function("CONCAT", -1, _sqlite_concat)
         return SQLiteConnectionWrapper(sqlite_conn)
 
 def get_active_engine() -> str:
@@ -299,18 +320,17 @@ def _purge_default_students(conn):
 
 def _ensure_seed_credentials(conn):
     """
-    Gives the built-in admin / educator accounts a usable password hash.
-
-    Only accounts whose `password_hash` is still empty are touched, so an
-    administrator changing a password in the dashboard is never overwritten.
+    Ensures built-in admin and educator accounts exist with valid password hashes.
     """
     seed_accounts = [
         (os.getenv("ADMIN_SEED_EMAIL", "admin@learnsmart.edu"),
-         os.getenv("ADMIN_SEED_PASSWORD", "Admin@123")),
+         os.getenv("ADMIN_SEED_PASSWORD", "Admin@123"),
+         "admin-system", "System Administrator", "admin", "Administration", "System Administrator"),
         (os.getenv("EDUCATOR_SEED_EMAIL", "educator@learnsmart.com"),
-         os.getenv("EDUCATOR_SEED_PASSWORD", "Educator@123")),
+         os.getenv("EDUCATOR_SEED_PASSWORD", "Educator@123"),
+         "edu-201", "Dr. Sarah Jenkins", "educator", "Computer Science", "Faculty Member"),
     ]
-    for email, password in seed_accounts:
+    for email, password, uid, name, role, dept, title in seed_accounts:
         if not email or not password:
             continue
         try:
@@ -319,14 +339,26 @@ def _ensure_seed_credentials(conn):
                 (email.strip().lower(),),
             )
             row = cur.fetchone()
-            if not row or row.get("password_hash"):
-                continue
             from app.services.passwords import hash_password
-            conn.execute(
-                "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (hash_password(password), row["id"]),
-            )
-            logger.info(f"Seeded default password hash for {email}")
+            hashed = hash_password(password)
+
+            if not row:
+                conn.execute(
+                    """
+                    INSERT INTO users (id, name, email, role, department, title, is_active, password_hash, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (uid, name, email.strip().lower(), role, dept, title, hashed)
+                )
+                conn.commit()
+                logger.info(f"Seeded default account for {email}")
+            elif not row.get("password_hash"):
+                conn.execute(
+                    "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (hashed, row["id"]),
+                )
+                conn.commit()
+                logger.info(f"Seeded default password hash for {email}")
         except Exception as e:
             logger.warning(f"Could not seed credentials for {email}: {e}")
 

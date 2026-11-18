@@ -1355,6 +1355,168 @@ export const getOwnSubmissions = (customIdentity = null) => {
   return [];
 };
 
+/**
+ * Accurately counts the distinct unique quizzes attended/completed by the student.
+ * Resolves both active catalog quizzes AND deleted/historical quizzes by clustering
+ * matching quiz IDs, titles, submission attempts, and completion tokens.
+ * This guarantees that even when an educator or administrator deletes a quiz from
+ * the active curriculum catalog, the student's Total Quizzes Taken accurately
+ * counts every quiz they actually completed without drops or duplicate counts.
+ */
+export const countDistinctCompletedQuizzes = (submissions = [], completedKeys = [], quizzes = []) => {
+  const safeQuizzes = Array.isArray(quizzes) && quizzes.length > 0
+    ? quizzes
+    : (loadStoredQuizzes ? loadStoredQuizzes() : []);
+  const safeAttempts = Array.isArray(submissions) ? submissions : [];
+  const safeCompletedKeys = Array.isArray(completedKeys) ? completedKeys : [];
+
+  const norm = (v) => (v === null || v === undefined ? '' : String(v).trim().toLowerCase().replace(/\s+/g, ' '));
+
+  // Strips attempt prefix, timestamp markers, and 'quiz-' prefix for uniform comparison
+  const cleanId = (raw) => {
+    const s = norm(raw);
+    if (!s) return '';
+    if (s.startsWith('attempt_')) {
+      const parts = s.split('_');
+      if (parts.length >= 2 && parts[1] && !parts[1].startsWith('stud')) {
+        return cleanId(parts[1]);
+      }
+      return '';
+    }
+    if (/^\d{12,}$/.test(s)) return ''; // Timestamp, not a quiz ID
+    if (s.startsWith('quiz-')) return s.slice(5).trim();
+    return s;
+  };
+
+  // Build equivalence graph of known ID <-> Title mappings across catalog and all attempts
+  const idToTitle = new Map();
+  const titleToId = new Map();
+
+  const link = (rawId, rawTitle) => {
+    const cid = cleanId(rawId);
+    const t = norm(rawTitle);
+    if (cid && t && !/^\d{12,}$/.test(cid)) {
+      if (!idToTitle.has(cid)) idToTitle.set(cid, t);
+      if (!titleToId.has(t)) titleToId.set(t, cid);
+    }
+  };
+
+  // 1. Link from active catalog quizzes
+  safeQuizzes.forEach((q) => {
+    if (q) link(q.id, q.title);
+  });
+
+  // 2. Link from deleted quizzes registry
+  try {
+    const regRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_deleted_quizzes_registry') : null;
+    const reg = regRaw ? JSON.parse(regRaw) : [];
+    if (Array.isArray(reg)) {
+      reg.forEach((d) => {
+        if (d) link(d.id, d.title);
+      });
+    }
+  } catch {}
+
+  // 3. Link from all stored submissions (global MySQL/localStorage cache)
+  try {
+    const allSubRaw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY_SUBMISSIONS) : null;
+    const allSubs = allSubRaw ? JSON.parse(allSubRaw) : [];
+    if (Array.isArray(allSubs)) {
+      allSubs.forEach((s) => {
+        if (s) link(s.quizId || s.quiz_id, s.quizTitle || s.title || s.quiz_title);
+      });
+    }
+  } catch {}
+
+  // 4. Link from safeAttempts and student history caches
+  safeAttempts.forEach((s) => {
+    if (s) link(s.quizId || s.quiz_id, s.quizTitle || s.title || s.quiz_title);
+  });
+  try {
+    const histRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_student_quiz_history') : null;
+    const hist = histRaw ? JSON.parse(histRaw) : [];
+    if (Array.isArray(hist)) {
+      hist.forEach((h) => {
+        if (h) link(h.quizId || h.quiz_id, h.title || h.quizTitle || h.quiz_title);
+      });
+    }
+  } catch {}
+
+  // Canonical cluster resolver: returns a unique string token for any quiz (active or deleted)
+  const resolveCluster = (rawId, rawTitle) => {
+    const cid = cleanId(rawId);
+    const t = norm(rawTitle);
+
+    // 1. If matches an active catalog quiz by id or title -> use canonical catalog id
+    if (cid) {
+      const qMatch = safeQuizzes.find((q) => cleanId(q.id) === cid);
+      if (qMatch) return `cat:${cleanId(qMatch.id)}`;
+    }
+    if (t) {
+      const qMatch = safeQuizzes.find((q) => norm(q.title) === t);
+      if (qMatch) return `cat:${cleanId(qMatch.id)}`;
+    }
+
+    // 2. If it's a deleted quiz, resolve by linked title or linked id
+    if (cid && idToTitle.has(cid)) {
+      return `del:${idToTitle.get(cid)}`;
+    }
+    if (t && titleToId.has(t)) {
+      return `del:${t}`;
+    }
+
+    if (cid && t) {
+      return `del:${t}`;
+    }
+    if (cid) {
+      return `del:id_${cid}`;
+    }
+    if (t) {
+      return `del:t_${t}`;
+    }
+    return null;
+  };
+
+  const countedTokens = new Set();
+
+  // 5. Count from student's authentic attempts
+  safeAttempts.forEach((h) => {
+    if (!h) return;
+    const cid = h.quizId || h.quiz_id;
+    const title = h.quizTitle || h.title || h.quiz_title;
+    const token = resolveCluster(cid, title);
+    if (token) countedTokens.add(token);
+  });
+
+  // 6. Count from completed keys (quizId, quizTitle strings recorded upon completion)
+  safeCompletedKeys.forEach((k) => {
+    if (k === null || k === undefined) return;
+    const str = String(k).trim();
+    if (!str || str === 'default' || /^\d{12,}$/.test(str)) return;
+
+    // Check if k matches a known ID
+    const cid = cleanId(str);
+    if (cid && (safeQuizzes.some((q) => cleanId(q.id) === cid) || idToTitle.has(cid))) {
+      const token = resolveCluster(str, null);
+      if (token) countedTokens.add(token);
+      return;
+    }
+    // Check if k matches a known title
+    const t = norm(str);
+    if (t && (safeQuizzes.some((q) => norm(q.title) === t) || titleToId.has(t))) {
+      const token = resolveCluster(null, str);
+      if (token) countedTokens.add(token);
+      return;
+    }
+
+    // Fallback: resolve whatever string it is
+    const token = resolveCluster(str, str);
+    if (token) countedTokens.add(token);
+  });
+
+  return countedTokens.size;
+};
+
 /** Aggregated personal performance of the signed-in student (from MySQL & local cache). */
 export const getStudentPerformance = (customIdentity = null) => {
   let own = getOwnSubmissions(customIdentity);
@@ -1443,38 +1605,11 @@ export const getStudentPerformance = (customIdentity = null) => {
   ])).filter(Boolean);
 
   const allStoredQuizzes = loadStoredQuizzes();
-  const canonicalCompletedSet = new Set();
-  (own || []).forEach((s) => {
-    if (!s) return;
-    const sId = String(s.quizId || s.quiz_id || '').trim();
-    const sTitle = String(s.quizTitle || s.title || '').trim().toLowerCase();
-    const matched = allStoredQuizzes.find((q) =>
-      (sId && String(q.id).trim() === sId) ||
-      (sTitle && String(q.title || '').trim().toLowerCase() === sTitle)
-    );
-    if (matched) {
-      canonicalCompletedSet.add(String(matched.id));
-    } else if (sId || sTitle) {
-      canonicalCompletedSet.add(sId || sTitle);
-    }
-  });
-
-  (userSavedCompleted || []).forEach((k) => {
-    if (!k) return;
-    const kStr = String(k).trim();
-    const kLower = kStr.toLowerCase();
-    const matched = allStoredQuizzes.find((q) =>
-      String(q.id).trim() === kStr ||
-      String(q.title || '').trim().toLowerCase() === kLower
-    );
-    if (matched) {
-      canonicalCompletedSet.add(String(matched.id));
-    } else if (kStr.startsWith('quiz-') || !isNaN(Number(kStr))) {
-      canonicalCompletedSet.add(kStr);
-    }
-  });
-
-  const quizzesCompleted = canonicalCompletedSet.size;
+  const quizzesCompleted = countDistinctCompletedQuizzes(
+    own || [],
+    [...completedQuizIds, ...userSavedCompleted],
+    allStoredQuizzes
+  );
 
   return {
     quizzesCompleted,
@@ -1519,6 +1654,7 @@ export const sharedDatabase = {
   getAnalytics: () => getCachedAnalytics().analytics,
   getOwnSubmissions: (customIdentity = null) => getOwnSubmissions(customIdentity),
   getStudentPerformance: (customIdentity = null) => getStudentPerformance(customIdentity),
+  countDistinctCompletedQuizzes: (submissions = [], completedKeys = [], quizzes = []) => countDistinctCompletedQuizzes(submissions, completedKeys, quizzes),
   getStudentBenchmark: () => getStudentBenchmark(),
   markNotificationRead: (id) => markNotificationRead(id),
   markAllNotificationsRead: () => markAllNotificationsRead(),
@@ -2993,6 +3129,22 @@ export const sharedDatabase = {
 
   removeQuiz: (id) => {
     const all = loadStoredQuizzes();
+    const target = all.find((q) => String(q.id).trim() === String(id).trim());
+    if (target) {
+      try {
+        const regRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('learnsmart_deleted_quizzes_registry') : null;
+        const reg = regRaw ? JSON.parse(regRaw) : [];
+        if (Array.isArray(reg)) {
+          const exists = reg.some((r) => String(r.id).trim() === String(target.id).trim());
+          if (!exists) {
+            reg.push({ id: target.id, title: target.title, category: target.category });
+            localStorage.setItem('learnsmart_deleted_quizzes_registry', JSON.stringify(reg));
+          }
+        }
+      } catch (e) {
+        console.warn('Deleted quiz registry note:', e);
+      }
+    }
     const updated = all.filter((q) => String(q.id).trim() !== String(id).trim());
     persistQuizzes(updated);
 
